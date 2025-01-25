@@ -1,18 +1,22 @@
 import sys
 
-from flask import Flask
 
 sys.path.append("")
+
+from domino import Domino
 import domino.tags as t
 
 
-app = Flask(__name__)
+app = Domino(__name__)
 
 
 class HelloWorld(t.html):
 
+
 	def __init__(self):
 	
+		super().__init__()
+
 		title = "Hello World!"
 		subtitle = "This is an HTML document made with Domino!"
 		url = "www.example.com"
@@ -39,7 +43,7 @@ def index():
 if __name__ == "__main__":
 
 	home = HelloWorld()
-	
+
 	with open("test.html", "w") as file:
 		file.write(home.render())
 

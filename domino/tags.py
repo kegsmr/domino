@@ -1,543 +1,386 @@
-from domino.__init__ import Domino
+from domino.__init__ import Element
 
 
-dom = Domino()
+class html(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.document()
-class html:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class head(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("head")
-class head:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class body(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("body")
-class body:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class title(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("title")
-class title:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class meta(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("meta")
-class meta:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class link(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("link")
-class link:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class style(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("style")
-class style:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class base(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("base")
-class base:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class noscript(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("noscript")
-class noscript:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class script(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("script")
-class script:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class section(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("section")
-class section:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class article(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("article")
-class article:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class aside(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("aside")
-class aside:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class nav(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("nav")
-class nav:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class header(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("header")
-class header:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class footer(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("footer")
-class footer:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class main(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("main")
-class main:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class h1(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("h1")
-class h1:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class h2(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("h2")
-class h2:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class h3(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("h3")
-class h3:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class h4(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("h4")
-class h4:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class h5(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("h5")
-class h5:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class h6(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("h6")
-class h6:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class p(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("p")
-class p:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class hr(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("hr")
-class hr:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class pre(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("pre")
-class pre:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class blockquote(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("blockquote")
-class blockquote:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class ol(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("ol")
-class ol:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class ul(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("ul")
-class ul:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class li(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("li")
-class li:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class dl(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("dl")
-class dl:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class dt(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("dt")
-class dt:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class dd(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("dd")
-class dd:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class figure(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("figure")
-class figure:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class figcaption(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("figcaption")
-class figcaption:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class div(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("div")
-class div:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class a(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("a")
-class a:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class em(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("em")
-class em:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class strong(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("strong")
-class strong:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class small(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("small")
-class small:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class s(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("s")
-class s:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class cite(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("cite")
-class cite:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class q(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("q")
-class q:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class abbr(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("abbr")
-class abbr:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class code(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("code")
-class code:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class sub(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("sub")
-class sub:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class sup(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("sup")
-class sup:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class time(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("time")
-class time:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class mark(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("mark")
-class mark:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class b(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("b")
-class b:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class i(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("i")
-class i:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class u(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("u")
-class u:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class span(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("span")
-class span:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class br(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("br")
-class br:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class wbr(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("wbr")
-class wbr:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class img(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("img")
-class img:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class iframe(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("iframe")
-class iframe:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class embed(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("embed")
-class embed:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class object(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("object")
-class object:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class param(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("param")
-class param:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class video(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("video")
-class video:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class audio(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("audio")
-class audio:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class source(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("source")
-class source:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class track(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("track")
-class track:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class map(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("map")
-class map:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class area(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("area")
-class area:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class canvas(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("canvas")
-class canvas:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class svg(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("svg")
-class svg:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class table(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("table")
-class table:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class tr(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("tr")
-class tr:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class td(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("td")
-class td:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class th(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("th")
-class th:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class thead(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("thead")
-class thead:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class tbody(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("tbody")
-class tbody:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class tfoot(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("tfoot")
-class tfoot:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class col(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
 
 
-@dom.element("col")
-class col:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
-
-
-@dom.element("colgroup")
-class colgroup:
-    def __init__(self, inner="", **kwargs):
-        self.inner(inner)
-        self.configure(**kwargs)
+class colgroup(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
