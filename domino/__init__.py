@@ -146,9 +146,13 @@ class Element:
 
 		self.tag(tag)
 		self.parent(parent)
-		self.inner(inner)
 		self.void(void)
 		self.configure(**kwargs)
+
+		if inner:
+			self.inner(inner)
+		# else:
+		# 	self.inner()
 
 
 	def parent(self, parent=None):
@@ -191,6 +195,9 @@ class Element:
 		tag = self.tag()
 		inner = self.inner()
 		void = self.void()
+
+		if inner is None:
+			inner = ""
 
 		indent = "\t" * level
 

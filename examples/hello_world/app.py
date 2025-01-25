@@ -13,9 +13,7 @@ app = Domino(__name__)
 class HelloWorld(t.html):
 
 
-	def __init__(self):
-	
-		super().__init__()
+	def inner(self):
 
 		title = "Hello World!"
 		subtitle = "This is an HTML document made with Domino!"
