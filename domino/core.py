@@ -48,6 +48,9 @@ class Domino(Flask):
 class Element:
 
 
+	__show__ = False
+
+
 	def __init__(self, tag=None, parent=None, inner=None, void=None, **kwargs):
 
 		# print(f"Initializing {self} within {parent}")
@@ -58,6 +61,7 @@ class Element:
 		self.__inner__ = ""
 		self.__void__ = None
 		self.__attributes__ = {}
+		self.__states__ = {}
 
 		self.tag(tag)
 		self.parent(parent)
@@ -103,15 +107,49 @@ class Element:
 		for key, value in kwargs.items():
 			self.__attributes__[key] = value
 
-	
-	def bind(self, event, function):
-		print(f"Binding {function} to {self} event {event}")
+
+	def state(self, value):
+		
+		state_id = len(self.__states__)
+
+		self.__states__.setdefault(state_id, value)
+
+		def set_value(value):
+
+			self.__states__[state_id] = value
+
+			#TODO re-render component
+
+		return self.__states__[state_id], set_value
 
 
-	def render(self, level=0) -> str:
+	def bind(self, event, callback):
 
-		# print(f"{self} {self.__children__}")
+		print(f"Binding {callback} to {self} on event {event}")
 
+		event_id = f"event-{id(self)}-{event}"
+		self.configure(data_event_id=event_id)
+
+		# Generate JavaScript to handle the event
+		script = f"""
+		document.querySelector('[data-event-id="{event_id}"]').addEventListener('{event}', function() {{
+			fetch('/_handle_event', {{
+				method: 'POST',
+				headers: {{ 'Content-Type': 'application/json' }},
+				body: JSON.stringify({{ 'event_id': '{event_id}' }})
+			}});
+		}});
+		"""
+		# Inject the script into the parent component (or elsewhere as needed)
+		self.parent().configure(onload=script)
+
+
+	def render(self, level=0, indent=4) -> str:
+		# Handle the case where indent is an integer
+		if isinstance(indent, int):
+			indent = " " * indent  # Convert to spaces
+
+		# If the indent is a string (e.g., "\t"), it will be used directly
 		tag = self.__tag__
 		inner = self.__inner__
 		void = self.__void__
@@ -119,36 +157,46 @@ class Element:
 		if inner is None:
 			inner = ""
 
-		indent = "\t" * level
+		# Calculate the indentation for this level
+		indentation = indent * level
+		end = "" if indent == "" else "\n"
 
-		html = f"{indent}<{tag}"
+		html = f"{indentation}<{tag}"
 
+		# Handle class names if the tag is not "html"
 		if tag != "html":
 			class_names = []
 			for base in (self.__class__,) + self.__class__.__bases__:
-				if base.__name__ not in ["object", "Element"]:  # Exclude base "object" class
+				if base.__name__ not in ["object", "Element"] and tag != base.__name__:
 					class_names.append(base.__name__)
 			class_attr = " ".join(class_names)
 			if len(class_names) > 0:
 				html += f" class=\"{class_attr}\""
 
+		# Add attributes
 		for key, value in self.__attributes__.items():
 			html += f" {key}=\"{value}\""
 
-		html += ">"
+		html += f">{end}"
 
-		if void or void is None and tag in VOID_TAGS:
+		# If it's a void tag or it's None and the tag is in the VOID_TAGS, return the tag without children
+		if void or (void is None and tag in VOID_TAGS):
 			return html
+
+		# Process inner content and children
 		if inner:
-			inner = inner.replace("\n", f"\n{indent}\t")
-			inner = f"{indent}\t{inner}\n"
-		# if hasattr(self, "render"):
-		# 	inner += f"{indent}\t{self().render()}\n"
+			# Add indentation to the inner content
+			inner = inner.replace("\n", f"{end}{indentation}{indent}")  # Ensure proper indentation for inner content
+			inner = f"{indentation}{indent}{inner}{end}"
+
 		for child in self.__children__:
-			inner += child.render(level + 1)
+			inner += child.render(level + 1, indent)
+
 		if inner:
-			html += f"\n{inner}{indent}"
-		html += f"</{tag}>\n"
+			html += f"{inner}"
+
+		# Ensure proper indentation for closing tag
+		html += f"{indentation}</{tag}>{end}"
 
 		return html
 	
@@ -178,9 +226,14 @@ class Style:
 		else:
 			if isinstance(target, type):
 				cls = target
+				tag = ""
 			else:
 				cls = target.__class__
-			name = "." + cls.__name__
+				tag = target.__tag__
+			if tag == cls.__name__:
+				name = cls.__name__
+			else:
+				name = "." + cls.__name__
 
 		self.styles.setdefault(name, {})
 

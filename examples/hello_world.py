@@ -54,7 +54,7 @@ class HelloWorld(t.html):
 		# Header
 		t.h1(div, title)
 		stylesheet.style(
-			"h1",
+			t.h1(),
 			color="#333",
 			font_size="2.5rem",
 			text_align="center",
@@ -64,7 +64,7 @@ class HelloWorld(t.html):
 		# Subtitle paragraph
 		t.p(div, subtitle)
 		stylesheet.style(
-			"p",
+			t.p(),
 			color="#666",
 			font_size="1.2rem",
 			text_align="center",
@@ -74,7 +74,7 @@ class HelloWorld(t.html):
 		# Link
 		t.a(div, "Visit Example", href=f"https://{url}", target="_blank")
 		stylesheet.style(
-			"a",
+			t.a(),
 			color="#007BFF",
 			text_decoration="none",
 			font_weight="bold",
@@ -101,7 +101,7 @@ if __name__ == "__main__":
 
 	# Write the HTML to a file for testing
 	with open("output.html", "w") as file:
-		file.write(home.render())
+		file.write(home.render(indent=4))
 
 	# Start the Domino app
 	app.run(debug=True)
