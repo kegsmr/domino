@@ -149,7 +149,7 @@ class Element:
 		if inner:
 			self.inner(inner)
 		else:
-		 	self.inner()
+			self.inner()
 
 
 	def parent(self, parent=None):
@@ -202,8 +202,8 @@ class Element:
 		html = f"{indent}<{tag}"
 
 		if tag != "html":
-			class_names = [self.__class__.__name__]
-			for base in self.__class__.__bases__:
+			class_names = []
+			for base in (self.__class__,) + self.__class__.__bases__:
 				if base.__name__ not in ["object", "Element"]:  # Exclude base "object" class
 					class_names.append(base.__name__)
 			class_attr = " ".join(class_names)
@@ -218,6 +218,7 @@ class Element:
 		if void or void is None and tag in VOID_TAGS:
 			return html
 		if inner:
+			inner = inner.replace("\n", f"\n{indent}\t")
 			inner = f"{indent}\t{inner}\n"
 		# if hasattr(self, "render"):
 		# 	inner += f"{indent}\t{self().render()}\n"
@@ -228,3 +229,43 @@ class Element:
 		html += f"</{tag}>\n"
 
 		return html
+	
+
+class Style:
+
+
+	def __init__(self):
+
+		self.styles = {}
+
+
+	def style(self, target, **kwargs):
+		
+		name = target.__class__.__name__
+
+		self.styles.setdefault(name, {})
+
+		for key, value in kwargs.items():
+			self.styles[name][key] = value
+
+
+	def compute(self, head):
+
+		css = []
+
+		for cls, properties in self.styles.items():
+
+			# Start the class block
+			css.append(f".{cls} " + "{")
+
+			# Add each property-value pair
+			for key, value in properties.items():
+				css.append(f"\t{key.replace('_', '-')}: {value};")
+
+			# End the class block
+			css.append("}")
+
+		# Join all parts with newlines for readability
+		css = "\n".join(css)
+
+		return Element("style", head, css)

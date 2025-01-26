@@ -3,11 +3,20 @@ import sys
 
 sys.path.append("")
 
-from domino import Domino
+from domino import Domino, Element, Style
 import domino.tags as t
 
 
 app = Domino(__name__)
+
+stylesheet = Style()
+
+
+class container(t.div):
+
+	def inner(self):
+
+		stylesheet.style(self, font_family="arial")
 
 
 class HelloWorld(t.html):
@@ -22,14 +31,17 @@ class HelloWorld(t.html):
 		head = t.head(self)
 		
 		t.title(head, title)
-		t.style(head)
 
 		body = t.body(self)
 
-		t.h1(body, title)
-		t.p(body, subtitle)
+		div = container(body)
 
-		t.a(body, url, href=f"https://{url}")
+		t.h1(div, title)
+		t.p(div, subtitle)
+
+		t.a(div, url, href=f"https://{url}")
+
+		stylesheet.compute(head)
 
 
 @app.route("/")
