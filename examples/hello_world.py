@@ -95,7 +95,7 @@ if __name__ == "__main__":
     home = HelloWorld()
 
     # Write the HTML to a file for testing
-    with open("test.html", "w") as file:
+    with open("output.html", "w") as file:
         file.write(home.render())
 
     # Start the Domino app

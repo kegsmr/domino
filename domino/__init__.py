@@ -261,18 +261,31 @@ class Style:
 		css = []
 
 		for name, properties in self.styles.items():
+		
+			base_styles = []
+			hover_styles = {}
 
-			# Start the class block
-			css.append(f"{name} " + "{")
-
-			# Add each property-value pair
+			# Separate normal and hover styles
 			for key, value in properties.items():
-				css.append(f"\t{key.replace('_', '-')}: {value};")
+				if isinstance(value, dict) and key == "hover":
+					hover_styles = value  # Store hover styles
+				else:
+					base_styles.append(f"\t{key.replace('_', '-')}: {value};")
 
-			# End the class block
+			# Add base styles to the CSS block
+			css.append(f"{name} " + "{")
+			css.extend(base_styles)
 			css.append("}")
+
+			# Add hover styles to the CSS block
+			if hover_styles:
+				css.append(f"{name}:hover " + "{")
+				for hover_key, hover_value in hover_styles.items():
+					css.append(f"\t{hover_key.replace('_', '-')}: {hover_value};")
+				css.append("}")
 
 		# Join all parts with newlines for readability
 		css = "\n".join(css)
 
+		# Return the CSS as a <style> element
 		return Element("style", head, css)

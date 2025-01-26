@@ -384,3 +384,23 @@ class col(Element):
 class colgroup(Element):
 	def __init__(self, parent=None, inner=None, *args, **kwargs):
 		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
+
+
+class form(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
+
+
+class input(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
+
+
+class textarea(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
+
+
+class button(Element):
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+		super().__init__(__class__.__name__, parent, inner, *args, **kwargs)
