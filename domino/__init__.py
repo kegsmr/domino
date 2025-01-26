@@ -130,9 +130,6 @@ class Domino(Flask):
 class Element:
 
 
-	__dom_class__ = None
-
-
 	def __init__(self, tag=None, parent=None, inner=None, void=None, **kwargs):
 
 		# print(f"Initializing {self} within {parent}")
@@ -151,8 +148,8 @@ class Element:
 
 		if inner:
 			self.inner(inner)
-		# else:
-		# 	self.inner()
+		else:
+		 	self.inner()
 
 
 	def parent(self, parent=None):
@@ -160,7 +157,8 @@ class Element:
 			if self.__parent__:
 				self.__parent__.__children__.remove(self)
 			self.__parent__ = parent
-			self.__parent__.__children__.append(self)
+			if self not in self.__parent__.__children__:
+				self.__parent__.__children__.append(self)
 			# print(f"{self} {self.__parent__.__children__}")
 		return self.__parent__
 
@@ -192,9 +190,9 @@ class Element:
 
 		# print(f"{self} {self.__children__}")
 
-		tag = self.tag()
-		inner = self.inner()
-		void = self.void()
+		tag = self.__tag__
+		inner = self.__inner__
+		void = self.__void__
 
 		if inner is None:
 			inner = ""
