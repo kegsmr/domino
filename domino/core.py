@@ -11,7 +11,7 @@ class Domino(Flask):
 
 
 	def route(self, rule, **options):
-		
+
 		# Get the original route decorator
 		flask_decorator = super().route(rule, **options)
 
@@ -19,20 +19,30 @@ class Domino(Flask):
 
 			# Define a new wrapper function
 			def wrapper(*args, **kwargs):
-
+				
 				# Call the original handler function
 				result = function(*args, **kwargs)
 				
-				# Check if the result has a `render` method
+				# Check if the result has a `render` or `compute` method
 				if hasattr(result, "render"):
 					return result.render()
+				elif hasattr(result, "compute"):
+					return result.compute().inner()
 				else:
 					return result
 			
+			# Set a unique name for the wrapper function
+			wrapper.__name__ = function.__name__
+
 			# Apply the Flask route decorator to the wrapper
 			return flask_decorator(wrapper)
 
 		return decorator
+
+
+	def style(self, href="", external=False, **kwargs):
+
+		return Style(self, href, external, **kwargs)
 
 
 class Element:
@@ -146,9 +156,19 @@ class Element:
 class Style:
 
 
-	def __init__(self):
+	def __init__(self, parent:Domino=None, href="", external=False):
 
 		self.styles = {}
+		self.href = href
+
+		if parent and href and not external:
+
+			def style():
+			
+				return Response(self.compute().inner(), mimetype="text/css")
+
+			parent.add_url_rule(href, "stylesheet", style)
+			
 
 
 	def style(self, target, **kwargs):
@@ -168,7 +188,7 @@ class Style:
 			self.styles[name][key] = value
 
 
-	def compute(self, head):
+	def compute(self, head=None):
 
 		css = []
 
@@ -201,3 +221,11 @@ class Style:
 
 		# Return the CSS as a <style> element
 		return Element("style", head, css)
+			
+	
+	def link(self, head=None, href=""):
+
+		if not href:
+			href = self.href
+
+		return Element("link", head, rel="stylesheet", href=href)
