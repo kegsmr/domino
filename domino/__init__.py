@@ -241,7 +241,14 @@ class Style:
 
 	def style(self, target, **kwargs):
 		
-		name = target.__class__.__name__
+		if type(target) is str:
+			name = target
+		else:
+			if isinstance(target, type):
+				cls = target
+			else:
+				cls = target.__class__
+			name = "." + cls.__name__
 
 		self.styles.setdefault(name, {})
 
@@ -253,10 +260,10 @@ class Style:
 
 		css = []
 
-		for cls, properties in self.styles.items():
+		for name, properties in self.styles.items():
 
 			# Start the class block
-			css.append(f".{cls} " + "{")
+			css.append(f"{name} " + "{")
 
 			# Add each property-value pair
 			for key, value in properties.items():
