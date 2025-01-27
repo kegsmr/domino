@@ -1,7 +1,7 @@
 import sys
 
 sys.path.append("")
-from domino import Domino
+from domino import Domino, request, jsonify
 import domino.tags as t
 
 
@@ -20,25 +20,25 @@ class CounterComponent(t.div):
 
 		# Increment button
 		increment_button = t.button(self, "Increment")
-		increment_button.bind("onClick", lambda: set_count(count + 1))
+		increment_button.bind("click", lambda: set_count(count + 1))
 
 		# Decrement button
 		decrement_button = t.button(self, "Decrement")
-		decrement_button.bind("OnClick", lambda: set_count(count - 1))
+		decrement_button.bind("click", lambda: set_count(count - 1))
 
 
 @app.route("/")
 def index():
+
+	return home
+
+
+if __name__ == "__main__":
 
 	home = t.html()
 	head = t.head(home)
 	body = t.body(home)
 
 	CounterComponent(body)
-
-	return home
-
-
-if __name__ == "__main__":
 
 	app.run(debug=True)

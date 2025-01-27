@@ -10,6 +10,30 @@ VOID_TAGS = [
 class Domino(Flask):
 
 
+	def __init__(self, *args, **kwargs):
+
+		super().__init__(*args, **kwargs)
+
+		EVENTS = "/_events"
+
+		self.__events__ = {}
+
+		def event_handler():
+
+			# Retrieve the event data from the incoming JSON payload
+			data = request.get_json()
+
+			# Access the event_id sent by the client-side JavaScript
+			event_id = data.get("event_id")
+
+			self.__events__[event_id]()
+    
+			# You can return a JSON response to acknowledge the event
+			return jsonify({"status": "success", "event_id": event_id})
+
+		self.add_url_rule(EVENTS, EVENTS, event_handler, methods=["POST"])
+
+
 	def route(self, rule, **options):
 
 		# Get the original route decorator
@@ -23,11 +47,11 @@ class Domino(Flask):
 				# Call the original handler function
 				result = function(*args, **kwargs)
 				
-				# Check if the result has a `render` or `compute` method
+				# Check if the result has a `render` method
 				if hasattr(result, "render"):
+					for event_id, callback in result.__events__.items():
+						self.__events__[event_id] = callback
 					return result.render()
-				elif hasattr(result, "compute"):
-					return result.compute().inner()
 				else:
 					return result
 			
@@ -62,6 +86,7 @@ class Element:
 		self.__void__ = None
 		self.__attributes__ = {}
 		self.__states__ = {}
+		self.__events__ = {}
 
 		self.tag(tag)
 		self.parent(parent)
@@ -83,6 +108,13 @@ class Element:
 				self.__parent__.__children__.append(self)
 			# print(f"{self} {self.__parent__.__children__}")
 		return self.__parent__
+	
+
+	def root(self):
+		root = self
+		while root.parent():
+			root = root.parent()
+		return root
 
 
 	def tag(self, tag=None):
@@ -105,7 +137,7 @@ class Element:
 
 	def configure(self, **kwargs):
 		for key, value in kwargs.items():
-			self.__attributes__[key] = value
+			self.__attributes__[key.replace("_", "-")] = value
 
 
 	def state(self, value):
@@ -125,23 +157,33 @@ class Element:
 
 	def bind(self, event, callback):
 
-		print(f"Binding {callback} to {self} on event {event}")
+		#print(f"Binding {callback} to {self} on event {event}")
 
-		event_id = f"event-{id(self)}-{event}"
+		event = event.lower()
+
+		element_id = id(self)
+		event_id = f"event-{element_id}-{event}"
+
+		root = self.root()
+		root.__events__[event_id] = callback
+		
 		self.configure(data_event_id=event_id)
 
 		# Generate JavaScript to handle the event
 		script = f"""
-		document.querySelector('[data-event-id="{event_id}"]').addEventListener('{event}', function() {{
-			fetch('/_handle_event', {{
-				method: 'POST',
-				headers: {{ 'Content-Type': 'application/json' }},
-				body: JSON.stringify({{ 'event_id': '{event_id}' }})
+		document.addEventListener('DOMContentLoaded', function() {{
+			document.querySelector('[data-event-id=\"{event_id}\"]').addEventListener('{event}', function() {{
+				fetch('/_events', {{
+					method: 'POST',
+					headers: {{ 'Content-Type': 'application/json' }},
+					body: JSON.stringify({{ 'event_id': '{event_id}' }})
+				}});
 			}});
 		}});
 		"""
+			
 		# Inject the script into the parent component (or elsewhere as needed)
-		self.parent().configure(onload=script)
+		Element("script", self.parent(), script)
 
 
 	def render(self, level=0, indent=4) -> str:
@@ -215,7 +257,7 @@ class Style:
 			
 				return Response(self.compute().inner(), mimetype="text/css")
 
-			parent.add_url_rule(href, "stylesheet", style)
+			parent.add_url_rule(href, href, style)
 			
 
 
