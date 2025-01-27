@@ -26,10 +26,15 @@ class Domino(Flask):
 			# Access the event_id sent by the client-side JavaScript
 			event_id = data.get("event_id")
 
-			self.__events__[event_id]()
+			callback, owner = self.__events__[event_id]
+
+			callback()
     
-			# You can return a JSON response to acknowledge the event
-			return jsonify({"status": "success", "event_id": event_id})
+			response = Response(owner.render(), mimetype="text/html")
+
+			#print(owner.render())
+
+			return response
 
 		self.add_url_rule(EVENTS, EVENTS, event_handler, methods=["POST"])
 
@@ -50,7 +55,7 @@ class Domino(Flask):
 				# Check if the result has a `render` method
 				if hasattr(result, "render"):
 					for event_id, callback in result.__events__.items():
-						self.__events__[event_id] = callback
+						self.__events__[event_id] = (callback, result)
 					return result.render()
 				else:
 					return result
@@ -148,6 +153,8 @@ class Element:
 
 		def set_value(value):
 
+			print(f"Updating state from {self.__states__[state_id]} to {value}")
+
 			self.__states__[state_id] = value
 
 			#TODO re-render component
@@ -170,17 +177,26 @@ class Element:
 		self.configure(data_event_id=event_id)
 
 		# Generate JavaScript to handle the event
-		script = f"""
-		document.addEventListener('DOMContentLoaded', function() {{
-			document.querySelector('[data-event-id=\"{event_id}\"]').addEventListener('{event}', function() {{
-				fetch('/_events', {{
-					method: 'POST',
-					headers: {{ 'Content-Type': 'application/json' }},
-					body: JSON.stringify({{ 'event_id': '{event_id}' }})
-				}});
-			}});
-		}});
-		"""
+		script = "" \
+			f"document.addEventListener('DOMContentLoaded', function() {{" \
+				f"document.querySelector('[data-event-id=\"{event_id}\"]').addEventListener('{event}', function() {{" \
+					f"fetch('/_events', {{" \
+						f"method: 'POST'," \
+						f"headers: {{ 'Content-Type': 'application/json' }}," \
+						f"body: JSON.stringify({{ 'event_id': '{event_id}' }})" \
+					"})" \
+					".then(response => response.text())" \
+					".then(data => {" \
+						"document.open();" \
+						"document.write(data);" \
+						"document.close();" \
+					"})" \
+					".then(data => {console.log('Success:', data);})" \
+					".catch(error => {console.error('Error', error);});" \
+				f"}});" \
+			f"}});"
+		
+		#".then(response => response.json())" \
 			
 		# Inject the script into the parent component (or elsewhere as needed)
 		Element("script", self.parent(), script)
