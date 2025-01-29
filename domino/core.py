@@ -222,14 +222,14 @@ class Element:
 		html = f"{indentation}<{tag}"
 
 		# Handle class names if the tag is not "html"
-		if tag != "html":
-			class_names = []
-			for base in (self.__class__,) + self.__class__.__bases__:
-				if base.__name__ not in ["object", "Element"] and tag != base.__name__:
-					class_names.append(base.__name__)
-			class_attr = " ".join(class_names)
-			if len(class_names) > 0:
-				html += f" class=\"{class_attr}\""
+		# if tag != "html":
+		class_names = []
+		for base in (self.__class__,) + self.__class__.__bases__:
+			if base.__name__ not in ["object", "Element"] and tag != base.__name__:
+				class_names.append(base.__name__)
+		class_attr = " ".join(class_names)
+		if len(class_names) > 0:
+			html += f" class=\"{class_attr}\""
 
 		# Add attributes
 		for key, value in self.__attributes__.items():
