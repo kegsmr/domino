@@ -102,6 +102,9 @@ class Element:
 		self.void(void)
 		self.configure(**kwargs)
 
+		if hasattr(self, "init") and callable(self.init):
+			self.init()
+
 		if inner:
 			self.inner(inner)
 		else:
@@ -277,6 +280,12 @@ class Element:
 	# 			raise Exception("App has no stylesheet.")
 	# 	else:
 	# 		raise Exception("Element has no app.")
+
+	def after(delay, func):
+
+		#TODO
+
+		return
 
 class Style:
 

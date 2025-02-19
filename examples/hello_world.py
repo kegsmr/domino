@@ -16,7 +16,7 @@ stylesheet = app.style("/style.css")
 # Define a container class for styling
 class container(t.div):
 
-	def inner(self):
+	def init(self):
 		
 		# Apply styles to the container
 		stylesheet.style(
@@ -36,7 +36,7 @@ class HelloWorld(t.html):
 
 	lang="en"
 
-	def inner(self):
+	def init(self):
 		
 		# Page content
 		title = "Hello World!"
