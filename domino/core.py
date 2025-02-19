@@ -115,7 +115,6 @@ class Element:
 			self.__parent__ = parent
 			if self not in self.__parent__.__children__:
 				self.__parent__.__children__.append(self)
-			# print(f"{self} {self.__parent__.__children__}")
 		return self.__parent__
 	
 
@@ -207,6 +206,7 @@ class Element:
 
 
 	def render(self, level=0, indent=4) -> str:
+
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):
 			indent = " " * indent  # Convert to spaces
@@ -269,14 +269,14 @@ class Element:
 
 	# def style(self, **kwargs):
 
-	# 	root = self.root()
-
-	# 	print(root)
-
-	# 	if hasattr(root, "stylesheet"):
-	# 		return self.root().stylesheet.style(self, **kwargs)
+	# 	if hasattr(self, "__app__"):
+	# 		app = self.__app__
+	# 		if hasattr(app, "stylesheet"):
+	# 			return app.stylesheet.style(self, **kwargs)
+	# 		else:
+	# 			raise Exception("App has no stylesheet.")
 	# 	else:
-	# 		raise Exception("App has no stylesheet.")
+	# 		raise Exception("Element has no app.")
 
 class Style:
 
@@ -294,7 +294,6 @@ class Style:
 
 			parent.add_url_rule(href, href, style)
 			
-
 
 	def style(self, target, **kwargs):
 		

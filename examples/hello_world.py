@@ -19,7 +19,8 @@ class container(t.div):
 	def inner(self):
 		
 		# Apply styles to the container
-		self.style(
+		stylesheet.style(
+			self,
 			font_family="Arial, sans-serif",
 			max_width="800px",
 			margin="0 auto",
