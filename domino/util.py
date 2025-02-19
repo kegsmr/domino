@@ -35,3 +35,16 @@ def get_calling_object():
 
 	# Look for 'self' in the caller's local variables
 	return caller_locals.get("self", None)
+
+
+def create_class_stub(name):
+    """Dynamically creates a class with the given name and returns it."""
+    
+    namespace = {}
+    
+    exec(f"""
+class {name}:
+    pass
+""", namespace)
+    
+    return namespace[name]
