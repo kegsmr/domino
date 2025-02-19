@@ -9,8 +9,35 @@ import domino.tags as t
 # Initialize the Domino app
 app = Domino(__name__)
 
+
 # Create a shared stylesheet
 stylesheet = app.style("/style.css")
+
+stylesheet.style(
+	"h1",
+	color="#333",
+	font_size="2.5rem",
+	text_align="center",
+	margin_bottom="10px",
+)
+
+stylesheet.style(
+	"p",
+	color="#666",
+	font_size="1.2rem",
+	text_align="center",
+	line_height="1.5",
+)
+
+stylesheet.style(
+	"a",
+	color="#007BFF",
+	text_decoration="none",
+	font_weight="bold",
+	display="block",
+	text_align="center",
+	margin_top="20px",
+)
 
 
 # Define a container class for styling
@@ -55,35 +82,12 @@ class HelloWorld(t.html):
 
 		# Header
 		t.h1(div, title)
-		stylesheet.style(
-			t.h1(),
-			color="#333",
-			font_size="2.5rem",
-			text_align="center",
-			margin_bottom="10px",
-		)
-
+		
 		# Subtitle paragraph
 		t.p(div, subtitle)
-		stylesheet.style(
-			t.p(),
-			color="#666",
-			font_size="1.2rem",
-			text_align="center",
-			line_height="1.5",
-		)
 
 		# Link
 		t.a(div, "Visit Example", href=f"https://{url}", target="_blank")
-		stylesheet.style(
-			t.a(),
-			color="#007BFF",
-			text_decoration="none",
-			font_weight="bold",
-			display="block",
-			text_align="center",
-			margin_top="20px",
-		)
 
 		# Inject computed stylesheet into head
 		stylesheet.link(head)

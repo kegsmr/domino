@@ -244,6 +244,8 @@ class Element:
 		attributes.update(self.__attributes__)
 		for key, value in attributes.items():
 			if value:
+				if callable(value):
+					value = url_for(value.__name__)
 				html += f" {key}=\"{value}\""
 
 		html += f">{end}"
