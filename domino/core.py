@@ -1,5 +1,7 @@
 from flask import *
 
+from domino.util import *
+
 
 VOID_TAGS = [
 	"area", "base", "br", "col", "embed", "hr", "img",
@@ -71,7 +73,9 @@ class Domino(Flask):
 
 	def style(self, href="", external=False, **kwargs):
 
-		return Style(self, href, external, **kwargs)
+		self.stylesheet = Style(self, href, external, **kwargs)
+
+		return self.stylesheet
 
 
 class Element:
@@ -145,21 +149,21 @@ class Element:
 			self.__attributes__[key.replace("_", "-")] = value
 
 
-	def state(self, value):
+	# def state(self, value):
 		
-		state_id = len(self.__states__)
+	# 	state_id = len(self.__states__)
 
-		self.__states__.setdefault(state_id, value)
+	# 	self.__states__.setdefault(state_id, value)
 
-		def set_value(value):
+	# 	def set_value(value):
 
-			print(f"Updating state from {self.__states__[state_id]} to {value}")
+	# 		print(f"Updating state from {self.__states__[state_id]} to {value}")
 
-			self.__states__[state_id] = value
+	# 		self.__states__[state_id] = value
 
-			#TODO re-render component
+	# 		#TODO re-render component
 
-		return self.__states__[state_id], set_value
+	# 	return self.__states__[state_id], set_value
 
 
 	def bind(self, event, callback):
@@ -221,8 +225,7 @@ class Element:
 
 		html = f"{indentation}<{tag}"
 
-		# Handle class names if the tag is not "html"
-		# if tag != "html":
+		# Handle class names
 		class_names = []
 		for base in (self.__class__,) + self.__class__.__bases__:
 			if base.__name__ not in ["object", "Element"] and tag != base.__name__:
@@ -232,8 +235,13 @@ class Element:
 			html += f" class=\"{class_attr}\""
 
 		# Add attributes
-		for key, value in self.__attributes__.items():
-			html += f" {key}=\"{value}\""
+		attributes = get_class_attributes(self)
+		if "class" in attributes:
+			attributes.pop("class")
+		attributes.update(self.__attributes__)
+		for key, value in attributes.items():
+			if value:
+				html += f" {key}=\"{value}\""
 
 		html += f">{end}"
 
@@ -258,6 +266,17 @@ class Element:
 
 		return html
 	
+
+	# def style(self, **kwargs):
+
+	# 	root = self.root()
+
+	# 	print(root)
+
+	# 	if hasattr(root, "stylesheet"):
+	# 		return self.root().stylesheet.style(self, **kwargs)
+	# 	else:
+	# 		raise Exception("App has no stylesheet.")
 
 class Style:
 

@@ -19,8 +19,7 @@ class container(t.div):
 	def inner(self):
 		
 		# Apply styles to the container
-		stylesheet.style(
-			self,
+		self.style(
 			font_family="Arial, sans-serif",
 			max_width="800px",
 			margin="0 auto",
@@ -33,6 +32,8 @@ class container(t.div):
 
 # Define the HTML page
 class HelloWorld(t.html):
+
+	lang="en"
 
 	def inner(self):
 		
@@ -90,18 +91,9 @@ class HelloWorld(t.html):
 # Route for the main page
 @app.route("/")
 def index():
-	
-	return home
+	return HelloWorld()
 
 
 # Run the app and generate the HTML
 if __name__ == "__main__":
-	
-	home = HelloWorld()
-
-	# Write the HTML to a file for testing
-	with open("output.html", "w") as file:
-		file.write(home.render(indent=4))
-
-	# Start the Domino app
 	app.run(debug=True)
