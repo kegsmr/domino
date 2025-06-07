@@ -1,6 +1,4 @@
-import sys
 
-sys.path.append("")
 
 from domino import Domino, Style
 import domino.tags as t
