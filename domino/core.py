@@ -1,6 +1,6 @@
 from flask import *
 
-from domino.util import *
+from .util import *
 
 
 VOID_TAGS = [

@@ -1,1 +1,1 @@
-from domino.core import *
+from .core import *
