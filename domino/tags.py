@@ -1,4 +1,4 @@
-from domino.__init__ import Element
+from .core import Element
 
 
 class html(Element):

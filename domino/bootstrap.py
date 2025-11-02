@@ -1,4 +1,4 @@
-from domino.tags import link, script
+from .tags import link, script
 
 
 class BootstrapCSS(link):
