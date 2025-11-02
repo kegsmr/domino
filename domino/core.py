@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from flask import *
 
 from domino.util import *
@@ -109,6 +111,53 @@ class Element:
 			self.inner(inner)
 		else:
 			self.inner()
+
+
+	def copy(self) -> Element:
+
+		new = type(self)(
+			tag=self.__tag__,
+			parent=self.__parent__,
+			inner=self.__inner__,
+			void=self.__void__,
+			**self.__attributes__
+		)
+
+		new.__tag__ = self.__tag__
+		new.__children__ = self.__children__
+		new.__states__ = self.__states__
+		new.__events__ = self.__events__
+
+		return new
+
+
+	def add_children(self, children: list[Element | str]):
+		
+		self.__children__.extend(children)
+
+
+	def set_children(self, children: list[Element | str]):
+
+		self.__children__ = children
+
+
+	def __getitem__(self, children):
+
+		if isinstance(children, tuple):
+			children = list(children)
+		else:
+			children = [children]
+
+		self.set_children(children)
+
+		return self
+	
+
+	def __call__(self, children: list[Element | str]):
+
+		self.set_children(children)
+
+		return self
 
 
 	def parent(self, parent=None):
@@ -261,7 +310,10 @@ class Element:
 			inner = f"{indentation}{indent}{inner}{end}"
 
 		for child in self.__children__:
-			inner += child.render(level + 1, indent)
+			if isinstance(child, str):
+				inner += f"{indentation}{indent}{child}{end}"
+			else:
+				inner += child.render(level + 1, indent)
 
 		if inner:
 			html += f"{inner}"

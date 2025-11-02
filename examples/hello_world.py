@@ -2,7 +2,7 @@ import sys
 
 sys.path.append("")
 
-from domino import Domino, Style
+from domino import Domino
 import domino.tags as t
 
 
@@ -70,24 +70,26 @@ class HelloWorld(t.html):
 		subtitle = "Welcome to the world of Domino-based web development."
 		url = "www.example.com"
 
-		# Add head content
-		head = t.head(self)
-		t.title(head, title)
-
-		# Add body content
-		body = t.body(self)
-
-		# Create a container for content
-		div = container(body)
-
-		# Header
-		t.h1(div, title)
-		
-		# Subtitle paragraph
-		t.p(div, subtitle)
-
-		# Link
-		t.a(div, "Visit Example", href=f"https://{url}", target="_blank")
+		self([
+			head := t.head() [
+				t.title() [
+					title
+				]
+			],
+			t.body() [
+				container() [
+					t.h1() [
+						title
+					],
+					t.p() [
+						subtitle
+					],
+					t.a(href=f"https://{url}", target="_blank") [
+						"Visit Example"
+					]
+				]
+			]
+		])
 
 		# Inject computed stylesheet into head
 		stylesheet.link(head)
