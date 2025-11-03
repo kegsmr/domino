@@ -14,13 +14,14 @@ VOID_TAGS = [
 class Domino(Flask):
 
 
+	__events__ = {}
+
+
 	def __init__(self, *args, **kwargs):
 
 		super().__init__(*args, **kwargs)
 
 		EVENTS = "/_events"
-
-		self.__events__ = {}
 
 		def event_handler():
 
@@ -30,15 +31,15 @@ class Domino(Flask):
 			# Access the event_id sent by the client-side JavaScript
 			event_id = data.get("event_id")
 
-			callback, owner = self.__events__[event_id]
+			element, callback = Domino.__events__[event_id]
 
-			callback()
-    
-			response = Response(owner.render(), mimetype="text/html")
+			result = callback()
+			result.init()
 
-			#print(owner.render())
-
-			return response
+			return jsonify({
+				"id": str(id(result)),
+				"html": result.render()
+			})
 
 		self.add_url_rule(EVENTS, EVENTS, event_handler, methods=["POST"])
 
@@ -83,9 +84,6 @@ class Domino(Flask):
 class Element:
 
 
-	__show__ = False
-
-
 	def __init__(self, tag=None, parent=None, inner=None, void=None, **kwargs):
 
 		# print(f"Initializing {self} within {parent}")
@@ -111,24 +109,6 @@ class Element:
 			self.inner(inner)
 		else:
 			self.inner()
-
-
-	def copy(self) -> Element:
-
-		new = type(self)(
-			tag=self.__tag__,
-			parent=self.__parent__,
-			inner=self.__inner__,
-			void=self.__void__,
-			**self.__attributes__
-		)
-
-		new.__tag__ = self.__tag__
-		new.__children__ = self.__children__
-		new.__states__ = self.__states__
-		new.__events__ = self.__events__
-
-		return new
 
 
 	def add_children(self, children: list[Element | str]):
@@ -170,11 +150,11 @@ class Element:
 		return self.__parent__
 	
 
-	def root(self):
-		root = self
-		while root.parent():
-			root = root.parent()
-		return root
+	# def root(self):
+	# 	root = self
+	# 	while root.parent():
+	# 		root = root.parent()
+	# 	return root
 
 
 	def tag(self, tag=None):
@@ -196,8 +176,7 @@ class Element:
 
 
 	def configure(self, **kwargs):
-		for key, value in kwargs.items():
-			self.__attributes__[key.replace("_", "-")] = value
+		self.__attributes__.update(kwargs)
 
 
 	# def state(self, value):
@@ -219,42 +198,48 @@ class Element:
 
 	def bind(self, event, callback):
 
-		#print(f"Binding {callback} to {self} on event {event}")
-
 		event = event.lower()
 
-		element_id = id(self)
-		event_id = f"event-{element_id}-{event}"
-
-		root = self.root()
-		root.__events__[event_id] = callback
-		
+		event_id = f"event-{id(self)}-{event}"
 		self.configure(data_event_id=event_id)
 
-		# Generate JavaScript to handle the event
-		script = "" \
-			f"document.addEventListener('DOMContentLoaded', function() {{" \
-				f"document.querySelector('[data-event-id=\"{event_id}\"]').addEventListener('{event}', function() {{" \
-					f"fetch('/_events', {{" \
-						f"method: 'POST'," \
-						f"headers: {{ 'Content-Type': 'application/json' }}," \
-						f"body: JSON.stringify({{ 'event_id': '{event_id}' }})" \
-					"})" \
-					".then(response => response.text())" \
-					".then(data => {" \
-						"document.open();" \
-						"document.write(data);" \
-						"document.close();" \
-					"})" \
-					".then(data => {console.log('Success:', data);})" \
-					".catch(error => {console.error('Error', error);});" \
-				f"}});" \
-			f"}});"
-		
-		#".then(response => response.json())" \
-			
-		# Inject the script into the parent component (or elsewhere as needed)
-		Element("script", self.parent(), script)
+		Domino.__events__[event_id] = (self, callback)
+
+		script = """
+			function bindDominoEvents() {
+				document.querySelectorAll('[data-event-id]').forEach(el => {
+					const eventId = el.dataset.eventId;
+					const eventType = eventId.split('-').pop();
+					if (el.dataset.bound) return; // prevent rebinding
+					el.dataset.bound = true;
+
+					el.addEventListener(eventType, function() {
+						fetch('/_events', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ event_id: eventId })
+						})
+						.then(response => response.json())
+						.then(data => {
+							const target = document.getElementById(data.id);
+							if (target) {
+								target.outerHTML = data.html;
+								bindDominoEvents(); // rebind events in the new HTML
+							}
+						})
+						.catch(err => console.error('Domino event error:', err));
+					});
+				});
+			}
+
+			document.addEventListener('DOMContentLoaded', bindDominoEvents);
+		"""
+
+		self.add_children([
+			Element('script') [
+				script
+			]
+		])
 
 
 	def render(self, level=0, indent=4) -> str:
@@ -291,7 +276,11 @@ class Element:
 		if "class" in attributes:
 			attributes.pop("class")
 		attributes.update(self.__attributes__)
+		attributes['id'] = id(self)
 		for key, value in attributes.items():
+			if key.startswith('_'):
+				continue
+			key = key.replace("_", "-")
 			if value:
 				if callable(value):
 					value = url_for(value.__name__)

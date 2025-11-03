@@ -1,42 +1,78 @@
+import sys
 
-from domino import Domino, request, jsonify
+sys.path.append("")
+
+from domino import Domino
 import domino.tags as t
 
 
 app = Domino(__name__)
 
 
+class Document(t.html):
+
+	def init(self):
+
+		self([
+			t.head() [
+				t.title() [
+					"Counter"
+				]
+			],
+			body := t.body()
+		])
+
+		self.add_children = body.add_children
+
+
 class CounterComponent(t.div):
+
+
+	_count = 0
+
+
+	def init(self):
+
+		self([
+			t.p() [
+				f"Current Count: {self._count}"
+			],
+			increment_button := t.button() [
+				"Increment"
+			],
+			decrement_button := t.button() [
+				"Decrement"
+			]
+		])
+
+		increment_button.bind("click", self.increment)
+		decrement_button.bind("click", self.decrement)
+
+
+	def increment(self):
+
+		CounterComponent._count += 1
+
+		return self
+
 	
-	def inner(self):
-	
-		# Declare state variables
-		count, set_count = self.state(0)
+	def decrement(self):
 
-		# Display the current count
-		t.h1(self, f"Current Count: {count}")
+		CounterComponent._count -= 1
 
-		# Increment button
-		increment_button = t.button(self, "Increment")
-		increment_button.bind("click", lambda: set_count(count + 1))
-
-		# Decrement button
-		decrement_button = t.button(self, "Decrement")
-		decrement_button.bind("click", lambda: set_count(count - 1))
+		return self
 
 
 @app.route("/")
 def index():
 
-	return home
+	return Document() [
+		t.h1() [
+			"Counter"
+		],
+		CounterComponent()
+	]
 
 
 if __name__ == "__main__":
-
-	home = t.html()
-	head = t.head(home)
-	body = t.body(home)
-
-	CounterComponent(body)
-
 	app.run(debug=True)
