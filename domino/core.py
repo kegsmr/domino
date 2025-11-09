@@ -97,6 +97,8 @@ class Element:
 		self.__states__ = {}
 		self.__events__ = {}
 
+		self.content_root = self
+
 		self.tag(tag)
 		self.parent(parent)
 		self.void(void)
@@ -113,12 +115,12 @@ class Element:
 
 	def add_children(self, children: list[Element | str]):
 		
-		self.__children__.extend(children)
+		self.content_root.__children__.extend(children)
 
 
 	def set_children(self, children: list[Element | str]):
 
-		self.__children__ = children
+		self.content_root.__children__ = children
 
 
 	def __getitem__(self, children):
