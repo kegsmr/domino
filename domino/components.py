@@ -1,57 +1,53 @@
-from .core import Element
+from . import tags as t
+from .core import Element, Style
+
 
 class Document(Element):
-    """
-    Base HTML document for Domino apps.
-    Provides:
-      - <html>, <head>, <body> structure
-      - Default meta tags
-      - Optional CSS and favicon
-      - content_root for adding children
-      - Convenience methods for scripts and components
-    """
 
-    def __init__(self, title=None, css=None, favicon=None):
 
-        super().__init__(tag="html")
+	def __init__(self, title=None, favicon=None):
 
-        # --- HEAD ---
-        self.head = Element(tag="head", parent=self)
-        self.head.add_children([
-            Element(tag="meta", parent=self.head, charset="utf-8"),
-            Element(tag="meta", parent=self.head, name="viewport", content="width=device-width, initial-scale=1"),
-            Element(tag="title", parent=self.head, inner=title)
-        ])
+		super().__init__(tag="html")
 
-        if css:
-            self.head.add_children([
-                Element(tag="link", parent=self.head, rel="stylesheet", href=css)
-            ])
+		self.stylesheet = Style()
 
-        if favicon:
-            self.head.add_children([
-                Element(tag="link", parent=self.head, rel="icon", type="image/png", href=favicon)
-            ])
+		self.head = t.head() [
+			t.meta(charset='utf-8'),
+			t.meta(
+				name='viewport',
+				content='width=device-width, initial-scale=1'
+			),
+			self.stylesheet.compute
+		]
+		if title:
+			self.head.add_children([
+				t.title() [title]
+			])
+		if favicon:
+			self.head.add_children([
+				t.link(rel="icon", type="image/png", href=favicon)
+			])
 
-        # --- BODY ---
-        self.body = Element(tag="body", parent=self)
-        self.content_root = self.body  # Default insertion point for children
+		self.body = t.body()
 
-        # Optional: list of scripts to append
-        self._scripts = []
+		self.set_children([
+			self.head,
+			self.body
+		])
 
-    # --- Convenience methods ---
-    def add_script(self, src, **attrs):
-        """Append a <script> tag to the head."""
-        self.head.add_children([Element(tag="script", parent=self.head, src=src, **attrs)])
-        return self
+		self.content_root = self.body
 
-    def add_component(self, component):
-        """Append a component to the content_root (<body>)."""
-        self.content_root.add_children([component])
-        return self
 
-    # Optional: render full HTML including DOCTYPE
-    def render(self, level=0, indent=4):
-        doctype = "<!DOCTYPE html>\n"
-        return doctype + super().render(level, indent)
+	def _render(self, level=0, indent=4):
+
+		return "<!DOCTYPE html>\n" + super()._render(level, indent)
+
+
+	def style(self, target=None, **kwargs):
+
+		if target is None:
+			target = self.__class__
+
+		self.stylesheet.style(target, **kwargs)
+
+		return self

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from flask import *
 
 from .util import *
@@ -37,7 +39,7 @@ class Domino(Flask):
 			result.init()
 
 			return jsonify({
-				"id": str(id(result)),
+				"id": result.id(),
 				"html": result.render()
 			})
 
@@ -58,10 +60,10 @@ class Domino(Flask):
 				result = function(*args, **kwargs)
 				
 				# Check if the result has a `render` method
-				if hasattr(result, "render"):
+				if hasattr(result, "_render"):
 					for event_id, callback in result.__events__.items():
 						self.__events__[event_id] = (callback, result)
-					return result.render()
+					return result._render()
 				else:
 					return result
 			
@@ -96,113 +98,96 @@ class Element:
 		self.__attributes__ = {}
 		self.__states__ = {}
 		self.__events__ = {}
-
-		self.content_root = self
+		self.__id__ = uuid.uuid4()
 
 		self.tag(tag)
 		self.parent(parent)
+		self.inner(inner)
 		self.void(void)
 		self.configure(**kwargs)
 
-		if hasattr(self, "init") and callable(self.init):
-			self.init()
-
-		if inner:
-			self.inner(inner)
-		else:
-			self.inner()
+		self.content_root: Element = self
 
 
 	def add_children(self, children: list[Element | str]):
-		
 		self.content_root.__children__.extend(children)
+		return self
 
 
 	def set_children(self, children: list[Element | str]):
-
 		self.content_root.__children__ = children
+		return self
 
 
 	def __getitem__(self, children):
-
 		if isinstance(children, tuple):
 			children = list(children)
 		else:
 			children = [children]
-
-		self.set_children(children)
-
-		return self
+		return self.set_children(children)
 	
 
 	def __call__(self, children: list[Element | str]):
+		return self.set_children(children)
 
-		self.set_children(children)
 
-		return self
+	def __str__(self):
+		return self._render()
+	
+
+	def __len__(self):
+		return len(self.content_root.__children__)
 
 
 	def parent(self, parent=None):
-		if parent:
-			if self.__parent__:
-				self.__parent__.__children__.remove(self)
-			self.__parent__ = parent
-			if self not in self.__parent__.__children__:
-				self.__parent__.__children__.append(self)
-		return self.__parent__
-	
-
-	# def root(self):
-	# 	root = self
-	# 	while root.parent():
-	# 		root = root.parent()
-	# 	return root
+		if parent is None:
+			return self.__parent__
+		if self.__parent__:
+			self.__parent__.__children__.remove(self)
+		self.__parent__ = parent
+		if self not in self.__parent__.__children__:
+			self.__parent__.__children__.append(self)
+		return self
 
 
 	def tag(self, tag=None):
-		if tag:
-			self.__tag__ = tag
-		return self.__tag__
-	
+		if tag is None:
+			return self.__tag__
+		self.__tag__ = tag
+		return self
+
 
 	def inner(self, inner=None):
-		if inner:
-			self.__inner__ = inner
-		return self.__inner__
+		if inner is None:
+			return self.__inner__
+		self.__inner__ = inner
+		return self
 	
 
 	def void(self, void=None):
-		if void:
-			self.__void__ = void
-		return self.__void__
+		if void is None:
+			return self.__void__
+		self.__void__ = void
+		return self
+
+
+	def id(self, id_=None):
+		if id_ is None:
+			return str(self.__attributes__.get('id') or self.__id__)
+		self.__attributes__['id'] = id_
+		return self
 
 
 	def configure(self, **kwargs):
 		self.__attributes__.update(kwargs)
-
-
-	# def state(self, value):
-		
-	# 	state_id = len(self.__states__)
-
-	# 	self.__states__.setdefault(state_id, value)
-
-	# 	def set_value(value):
-
-	# 		print(f"Updating state from {self.__states__[state_id]} to {value}")
-
-	# 		self.__states__[state_id] = value
-
-	# 		#TODO re-render component
-
-	# 	return self.__states__[state_id], set_value
+		return self
 
 
 	def bind(self, event, callback):
 
 		event = event.lower()
 
-		event_id = f"event-{id(self)}-{event}"
+		event_id = f"event-{self.id()}-{event}"
 		self.configure(data_event_id=event_id)
 
 		Domino.__events__[event_id] = (self, callback)
@@ -243,8 +228,10 @@ class Element:
 			]
 		])
 
+		return self
 
-	def render(self, level=0, indent=4) -> str:
+
+	def _render(self, level=0, indent=4) -> str:
 
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):
@@ -278,7 +265,7 @@ class Element:
 		if "class" in attributes:
 			attributes.pop("class")
 		attributes.update(self.__attributes__)
-		attributes['id'] = id(self)
+		attributes['id'] = self.id()
 		for key, value in attributes.items():
 			if key.startswith('_'):
 				continue
@@ -296,15 +283,25 @@ class Element:
 
 		# Process inner content and children
 		if inner:
+	
 			# Add indentation to the inner content
 			inner = inner.replace("\n", f"{end}{indentation}{indent}")  # Ensure proper indentation for inner content
 			inner = f"{indentation}{indent}{inner}{end}"
 
 		for child in self.__children__:
-			if isinstance(child, str):
+
+			if not isinstance(child, Element) and callable(child):
+				child = child()
+
+			if isinstance(child, type):
+				child = child()
+	
+			if isinstance(child, Element):
+				inner += child._render(level + 1, indent)
+			elif isinstance(child, str):
 				inner += f"{indentation}{indent}{child}{end}"
 			else:
-				inner += child.render(level + 1, indent)
+				raise ValueError(f"Invalid child: {child!r}")
 
 		if inner:
 			html += f"{inner}"
@@ -313,24 +310,13 @@ class Element:
 		html += f"{indentation}</{tag}>{end}"
 
 		return html
-	
 
-	# def style(self, **kwargs):
 
-	# 	if hasattr(self, "__app__"):
-	# 		app = self.__app__
-	# 		if hasattr(app, "stylesheet"):
-	# 			return app.stylesheet.style(self, **kwargs)
-	# 		else:
-	# 			raise Exception("App has no stylesheet.")
-	# 	else:
-	# 		raise Exception("Element has no app.")
-
-	def after(delay, func):
+	def after(self, delay, func):
 
 		#TODO
 
-		return
+		return self
 
 class Style:
 
@@ -351,24 +337,19 @@ class Style:
 
 	def style(self, target, **kwargs):
 		
-		if type(target) is str:
-			name = target
+		if isinstance(target, str):
+			selector = target
+		elif isinstance(target, type):
+			selector = f'.{target.__name__}'
+		elif isinstance(target, Element):
+			selector = f'#{target.id()}'
 		else:
-			if isinstance(target, type):
-				cls = target
-				tag = ""
-			else:
-				cls = target.__class__
-				tag = target.__tag__
-			if tag == cls.__name__:
-				name = cls.__name__
-			else:
-				name = "." + cls.__name__
+			raise ValueError(f"Invalid target: {target!r}")
 
-		self.styles.setdefault(name, {})
+		self.styles.setdefault(selector, {})
 
 		for key, value in kwargs.items():
-			self.styles[name][key] = value
+			self.styles[selector][key] = value
 
 
 	def compute(self, head=None):

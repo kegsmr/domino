@@ -153,10 +153,10 @@ class ShowcasePage(t.html):
 
 @app.route("/")
 def index():
-    return page.render()
+    return page._render()
 
 if __name__ == "__main__":
     page = ShowcasePage()
     with open("output.html", "w") as file:
-        file.write(page.render())
+        file.write(page._render())
     app.run(debug=True)
