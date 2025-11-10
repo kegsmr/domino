@@ -33,14 +33,13 @@ class Domino(Flask):
 			# Access the event_id sent by the client-side JavaScript
 			event_id = data.get("event_id")
 
-			element, callback = Domino.__events__[event_id]
+			_, callback = Domino.__events__[event_id]
 
 			result = callback()
-			result.init()
 
 			return jsonify({
 				"id": result.id(),
-				"html": result.render()
+				"html": result._render()
 			})
 
 		self.add_url_rule(EVENTS, EVENTS, event_handler, methods=["POST"])
@@ -107,6 +106,9 @@ class Element:
 		self.configure(**kwargs)
 
 		self.content_root: Element = self
+
+		if hasattr(self, 'init'):
+			self.init()
 
 
 	def add_children(self, children: list[Element | str]):
@@ -214,7 +216,11 @@ class Element:
 								bindDominoEvents(); // rebind events in the new HTML
 							}
 						})
-						.catch(err => console.error('Domino event error:', err));
+						.catch(err => {
+							console.error('Domino event error:', err);
+							// brief delay before reloading
+							setTimeout(() => location.reload(), 500);
+						});
 					});
 				});
 			}
@@ -231,7 +237,49 @@ class Element:
 		return self
 
 
+	def after(self, delay: int, func):
+
+		event = f"after-{self.id()}-{delay}"
+		self.configure(data_after_id=event)
+
+		# Register the server-side callback
+		Domino.__events__[event] = (self, func)
+
+		script = f"""
+			document.addEventListener('DOMContentLoaded', function() {{
+				setTimeout(function() {{
+					fetch('/_events', {{
+						method: 'POST',
+						headers: {{ 'Content-Type': 'application/json' }},
+						body: JSON.stringify({{ event_id: '{event}' }})
+					}})
+					.then(response => response.json())
+					.then(data => {{
+						const target = document.getElementById(data.id);
+						if (target) {{
+							target.outerHTML = data.html;
+							bindDominoEvents(); // rebind events in new HTML
+						}}
+					}})
+					.catch(err => {{
+						console.error('Domino after() error:', err);
+						setTimeout(() => location.reload(), 500);
+					}});
+				}}, {delay});
+			}});
+		"""
+
+		self.add_children([
+			Element('script')[script]
+		])
+
+		return self
+
+
 	def _render(self, level=0, indent=4) -> str:
+
+		if hasattr(self, 'render'):
+			self.render()
 
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):
@@ -311,12 +359,6 @@ class Element:
 
 		return html
 
-
-	def after(self, delay, func):
-
-		#TODO
-
-		return self
 
 class Style:
 

@@ -1,4 +1,5 @@
 import sys
+import random
 
 sys.path.append("")
 
@@ -25,31 +26,18 @@ class CounterComponent(t.div):
 		self([
 			t.p() [
 				f"Current Count: {self.count}"
-			],
-			increment_button := t.button() [
-				"Increment"
-			],
-			decrement_button := t.button() [
-				"Decrement"
 			]
 		])
 
-		increment_button.bind("click", self.increment)
-		decrement_button.bind("click", self.decrement)
+		self.after(100, self.update_count)
 
 
-	def increment(self):
+	def update_count(self):
 
-		self.count += 1
-
-		return self
-
-	
-	def decrement(self):
-
-		self.count -= 1
+		self.count = random.randint(0, 1000)
 
 		return self
+
 
 
 @app.route("/")
