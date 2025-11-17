@@ -1,13 +1,21 @@
 from . import tags as t
-from .core import Element, Style
+from .core import Style
 
 
-class Document(Element):
+class Core(t.script):
+
+	
+	def __init__(self):
+
+		super().__init__(src='/_domino/core')
+
+
+class Document(t.html):
 
 
 	def __init__(self, title=None, favicon=None):
 
-		super().__init__(tag="html")
+		super().__init__()
 
 		self.stylesheet = Style()
 
@@ -17,7 +25,8 @@ class Document(Element):
 				name='viewport',
 				content='width=device-width, initial-scale=1'
 			),
-			self.stylesheet.compute
+			self.stylesheet.compute,
+			Core()
 		]
 		if title:
 			self.head.add_children([

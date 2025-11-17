@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 from flask import *
 
@@ -23,7 +24,14 @@ class Domino(Flask):
 
 		super().__init__(*args, **kwargs)
 
-		EVENTS = "/_events"
+		with open(Path(__file__).parent / 'core.js', encoding='utf-8') as js_file:
+			CORE_JS = js_file.read()
+
+		self._add_static_route('/_domino/core', CORE_JS)
+		self._add_event_handler('/_domino/events')
+
+
+	def _add_event_handler(self, route):
 
 		def event_handler():
 
@@ -42,7 +50,12 @@ class Domino(Flask):
 				"html": result._render()
 			})
 
-		self.add_url_rule(EVENTS, EVENTS, event_handler, methods=["POST"])
+		self.add_url_rule(route, route, event_handler, methods=["POST"])
+
+
+	def _add_static_route(self, route, data):
+
+		self.add_url_rule(route, route, lambda: data, methods=["GET"])
 
 
 	def route(self, rule, **options):
@@ -187,91 +200,20 @@ class Element:
 
 	def bind(self, event, callback):
 
-		event = event.lower()
+		event_id = f"event-{self.id()}-{event.lower()}"
 
-		event_id = f"event-{self.id()}-{event}"
 		self.configure(data_event_id=event_id)
-
 		Domino.__events__[event_id] = (self, callback)
-
-		script = """
-			function bindDominoEvents() {
-				document.querySelectorAll('[data-event-id]').forEach(el => {
-					const eventId = el.dataset.eventId;
-					const eventType = eventId.split('-').pop();
-					if (el.dataset.bound) return; // prevent rebinding
-					el.dataset.bound = true;
-
-					el.addEventListener(eventType, function() {
-						fetch('/_events', {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ event_id: eventId })
-						})
-						.then(response => response.json())
-						.then(data => {
-							const target = document.getElementById(data.id);
-							if (target) {
-								target.outerHTML = data.html;
-								bindDominoEvents(); // rebind events in the new HTML
-							}
-						})
-						.catch(err => {
-							console.error('Domino event error:', err);
-							// brief delay before reloading
-							setTimeout(() => location.reload(), 500);
-						});
-					});
-				});
-			}
-
-			document.addEventListener('DOMContentLoaded', bindDominoEvents);
-		"""
-
-		self.add_children([
-			Element('script') [
-				script
-			]
-		])
 
 		return self
 
 
 	def after(self, delay: int, func):
 
-		event = f"after-{self.id()}-{delay}"
-		self.configure(data_after_id=event)
+		event_id = f"after-{self.id()}-{delay}"
 
-		# Register the server-side callback
-		Domino.__events__[event] = (self, func)
-
-		script = f"""
-			document.addEventListener('DOMContentLoaded', function() {{
-				setTimeout(function() {{
-					fetch('/_events', {{
-						method: 'POST',
-						headers: {{ 'Content-Type': 'application/json' }},
-						body: JSON.stringify({{ event_id: '{event}' }})
-					}})
-					.then(response => response.json())
-					.then(data => {{
-						const target = document.getElementById(data.id);
-						if (target) {{
-							target.outerHTML = data.html;
-							bindDominoEvents(); // rebind events in new HTML
-						}}
-					}})
-					.catch(err => {{
-						console.error('Domino after() error:', err);
-						setTimeout(() => location.reload(), 500);
-					}});
-				}}, {delay});
-			}});
-		"""
-
-		self.add_children([
-			Element('script')[script]
-		])
+		self.configure(data_after_id=event_id)
+		Domino.__events__[event_id] = (self, func)
 
 		return self
 
