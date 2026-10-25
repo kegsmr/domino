@@ -270,6 +270,7 @@ class Element:
 		self.__states__ = {}
 		self.__styles__ = {}
 		self.__id__ = uuid.uuid4()
+		self.__id_used__ = False
 
 		self.tag(tag)
 		self.parent(parent)
@@ -347,6 +348,8 @@ class Element:
 
 	def id(self, id_=None):
 		if id_ is None:
+			# Anything that asks for the id may rely on it being in the page
+			self.__id_used__ = True
 			return str(self.__attributes__.get('id') or self.__id__)
 		self.__attributes__['id'] = id_
 		return self
@@ -421,7 +424,12 @@ class Element:
 		if "class" in attributes:
 			attributes.pop("class")
 		attributes.update(self.__attributes__)
-		attributes['id'] = self.id()
+
+		# Only emit an id when something needs it: an explicit id, an id that was
+		# used (events, after(), element styles, user code), or a component
+		# (a subclass like Counter(t.div)), since callbacks re-render those by id
+		if self.__id_used__ or self.__styles__ or class_names:
+			attributes['id'] = self.id()
 		for key, value in attributes.items():
 			if key.startswith('_'):
 				continue
