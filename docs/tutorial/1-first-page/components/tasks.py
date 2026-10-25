@@ -1,9 +1,9 @@
+from domino import Component, State
 import domino.tags as t
-from domino import State
 
 
-# A component is a class: it subclasses the tag it renders as (here a <div>)
-class Tasks(t.div):
+# A component is a class; Component renders as a <div> (tag = "section" would pick another)
+class Tasks(Component):
 
 	# Each Tasks on a page has its own list; changing it re-renders the component
 	items = State(["Read the tutorial", "Build something"])
@@ -12,16 +12,16 @@ class Tasks(t.div):
 	def render(self):
 
 		return [
-			t.ul()([
-				t.li() [
+			t.ul [[
+				t.li [
 					item
 				]
 				for item in self.items
-			]),
+			]],
 			t.button(on_click=self.add) [
 				"Add a task"
 			],
-			t.p() [
+			t.p [
 				f"{len(self.items)} tasks"
 			]
 		]

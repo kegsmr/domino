@@ -1,10 +1,10 @@
 import domino.tags as t
-from domino import State
+from domino import Component, State
 
 
 # The todo list: markup in todos.html, Python for logic. Todos has a render() because it only
 # composes: it decides which components to show and hands them data and its own handlers
-class Todos(t.div):
+class Todos(Component):
 
 	items = State([
 		{"text": "Write the markup in HTML", "done": True},
@@ -53,7 +53,7 @@ class TodoForm(t.form):
 			self.on_add(text[:200])
 
 
-class TodoList(t.div):
+class TodoList(Component):
 
 	# Props, set by the parent: TodoList(items=..., on_toggle=..., on_remove=...)
 	items = None
@@ -71,6 +71,6 @@ class TodoList(t.div):
 		return {"done": item["done"]}
 
 
-class EmptyState(t.div):
+class EmptyState(Component):
 
 	pass

@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 # The app's folder is importable, so pages can use its components
 from components.counter import CounterComponent

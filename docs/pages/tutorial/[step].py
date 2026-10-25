@@ -42,7 +42,7 @@ def page(step):
 	headings = [(heading, markup.slug(heading)) for heading in content.step_headings(step)]
 
 	return t.div(class_="doc") [
-		t.article()([
+		t.article [[
 			t.p(class_="eyebrow") [
 				f"Tutorial · step {step.number} of {len(content.STEPS)}"
 			],
@@ -52,7 +52,7 @@ def page(step):
 			t.p(class_="lead") [
 				step.lead
 			]
-		] + blocks(content.step_parts(step), part)),
+		] + blocks(content.step_parts(step), part)],
 		Toc(headings)
 	]
 

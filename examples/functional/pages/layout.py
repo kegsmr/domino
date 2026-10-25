@@ -1,7 +1,7 @@
 from flask import request
 
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 
 LINKS = [
@@ -35,10 +35,10 @@ def layout(content):
 			title = f"{text} · My Website"
 
 	page = Document(title=title) [
-		t.nav()([
+		t.nav() [[
 			link(text, href)
 			for text, href in LINKS
-		]),
+		]],
 		t.main() [
 			content
 		],

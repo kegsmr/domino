@@ -16,13 +16,13 @@ class TodoList(t.div):
 					"Add"
 				]
 			],
-			t.ul()([
+			t.ul() [[
 				t.li() [
-					t.input(type="checkbox", on_change=lambda event, index=index: self.remove(index)),
+					t.input(type="checkbox", on_change=(self.remove, index)),
 					f" {text}"
 				]
 				for index, text in enumerate(self.items)
-			]),
+			]],
 			t.p() [
 				f"{len(self.items)} item(s)"
 			]

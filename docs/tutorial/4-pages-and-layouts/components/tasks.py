@@ -1,8 +1,8 @@
+from domino import Component, State
 import domino.tags as t
-from domino import State
 
 
-class Tasks(t.div):
+class Tasks(Component):
 
 	items = State([
 		{"text": "Read the tutorial", "done": True},
@@ -37,16 +37,16 @@ class Tasks(t.div):
 					"Add"
 				]
 			],
-			t.ul()([
+			t.ul [[
 				# class_ adds classes after the component's own
 				t.li(class_="done" if item["done"] else None) [
-					t.label() [
-						t.input(type="checkbox", checked=item["done"], on_change=lambda event, index=index: self.toggle(index)),
+					t.label [
+						t.input(type="checkbox", checked=item["done"], on_change=(self.toggle, index)),
 						f" {item['text']}"
 					]
 				]
 				for index, item in enumerate(self.items)
-			]),
+			]],
 			t.div(class_="footer") [
 				f"{left} left",
 				t.button(type="button", on_click=self.clear) [

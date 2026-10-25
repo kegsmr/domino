@@ -30,9 +30,9 @@ class Notes(t.div):
 				t.input(name="text", placeholder="A note", required=True, autocomplete="off"),
 				t.button(type="submit") ["Add"]
 			],
-			t.ul()([
+			t.ul() [[
 				t.li() [note["text"]] for note in mine
-			])
+			]]
 		]
 
 

@@ -51,16 +51,16 @@ class TodoList(t.section):
 					"Add"
 				]
 			],
-			t.p()([
-				t.button(on_click=lambda event, name=name: self.filter(name), aria_pressed=str(self.show == name).lower()) [
+			t.p() [[
+				t.button(on_click=(self.filter, name), aria_pressed=str(self.show == name).lower()) [
 					name
 				]
 				for name in ("all", "active", "done")
-			]),
-			t.ul()([
+			]],
+			t.ul() [[
 				TodoItem(todo, lambda index=index: self.toggle(index), lambda index=index: self.remove(index))
 				for index, todo in shown
-			])
+			]]
 		]
 
 

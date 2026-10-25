@@ -37,7 +37,7 @@ def page():
 		t.p(class_="lead") [
 			summary
 		],
-		Results()([
+		Results() [[
 			t.li() [
 				t.a(href=entry.url) [
 					highlighted(entry.title, query),
@@ -45,5 +45,5 @@ def page():
 				]
 			]
 			for entry in found
-		])
+		]]
 	]

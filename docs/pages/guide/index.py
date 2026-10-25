@@ -25,7 +25,7 @@ def page():
 	groups = []
 	for group in ("Start", "Guide", "Reference"):
 		groups.append(t.h2() [group])
-		groups.append(t.ul()([
+		groups.append(t.ul() [[
 			t.li() [
 				t.a(href=f"/guide/{topic.slug}") [
 					t.strong() [topic.title],
@@ -33,7 +33,7 @@ def page():
 				]
 			]
 			for topic in content.GUIDE if topic.group == group
-		]))
+		]])
 
 	return t.article() [
 		t.h1() [
@@ -42,5 +42,5 @@ def page():
 		t.p(class_="lead") [
 			"Everything Domino does, a topic per page. The tutorial is the gentler way in."
 		],
-		Topics()(groups)
+		Topics() [groups]
 	]

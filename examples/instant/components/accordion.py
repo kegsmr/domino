@@ -28,7 +28,7 @@ class Accordion(t.div):
 		for index, (question, answer) in enumerate(SECTIONS):
 			opened = index == self.open
 			sections.append(t.section() [
-				t.button(aria_expanded="true" if opened else "false", on_click=lambda event, index=index: self.toggle(index)) [
+				t.button(aria_expanded="true" if opened else "false", on_click=(self.toggle, index)) [
 					question
 				],
 				t.p() [answer] if opened else ""

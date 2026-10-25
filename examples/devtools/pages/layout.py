@@ -1,4 +1,4 @@
-from domino.components import Document
+from domino import Document
 
 from components.layout import Layout
 

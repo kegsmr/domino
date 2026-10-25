@@ -205,14 +205,14 @@ class Sidebar(t.nav):
 		groups = []
 		for group, links in content.NAV:
 			groups.append(t.h2() [group])
-			groups.append(t.ul()([
+			groups.append(t.ul() [[
 				t.li() [
 					t.a(href=url, aria_current="page" if url == self.current_path else None) [
 						label
 					]
 				]
 				for label, url in links
-			]))
+			]])
 
 		return groups
 
@@ -249,14 +249,14 @@ class Toc(t.aside):
 			t.p() [
 				"On this page"
 			],
-			t.ul()([
+			t.ul() [[
 				t.li() [
 					t.a(href=f"#{anchor}") [
 						title
 					]
 				]
 				for title, anchor in self.toc_headings
-			])
+			]]
 		]
 
 

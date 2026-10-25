@@ -56,10 +56,10 @@ class Life(t.div):
 		alive = sum(self.cells)
 
 		return [
-			t.div(class_="board", role="grid", aria_label="Game of Life board")([
-				t.span(class_="on" if cell else None, on_click=lambda event, index=index: self.toggle(index))
+			t.div(class_="board", role="grid", aria_label="Game of Life board") [[
+				t.span(class_="on" if cell else None, on_click=(self.toggle, index))
 				for index, cell in enumerate(self.cells)
-			]),
+			]],
 			t.p(class_="controls") [
 				t.button(type="button", on_click=self.toggle_running) ["Pause" if self.running else "Start"],
 				t.button(type="button", on_click=self.tick, disabled=self.running) ["Step"],

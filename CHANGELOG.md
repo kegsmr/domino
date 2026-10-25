@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+### Components
+- `Component`: `class TaskList(Component)` renders as a `<div>`, `tag = "section"` picks another element (a template's `as=` must agree). `class X(t.div)` keeps working.
+- **Class attributes are Python, never HTML attributes.** A component's class attributes are settings and props; HTML attributes come from keyword arguments, `configure()` and `attrs = {"role": "list"}` on the class (merged down subclasses). Before, `title = "Tasks"` also rendered `title="Tasks"` on the element; move class attributes meant as HTML attributes into `attrs`. `forms.Option` isn't needed any more (`submit_text = "Join"`).
+- Children: `t.div [child]` without a call when there are no attributes; lists, tuples, generators and cursors are flattened, `None`/`True`/`False` skipped and numbers made text (`t.ul [[t.li [x] for x in items]]`, `t.p ["Hi", user and t.b [user]]`).
+- Handlers with arguments: `on_click=(self.remove, index)` calls `self.remove(index)`, and passes the event after them if the handler takes one; no late-binding trap in loops. They're predicted for instant updates like the methods they call (`functools.partial` works too). In client components as well.
+- `refresh()` needs no `live = True`: a component whose module refreshes it (`clock.refresh()`, `self.refresh()`) keeps its pages' channel open from the first page on, and any component class becomes live on its first `refresh()`. `live = True` and `live = False` still decide when set.
+- Events bound in `init()` (and `on_click=` given by the component's parent) keep working after the component re-renders.
+- `self.configure(...)` in `render()` no longer leaves a predicted state's attributes on the real element.
+- Inline elements add no stray spaces: `t.p ["Built with ", t.a(href="/") ["Domino"], "."]` renders `<p>Built with <a href="/">Domino</a>.</p>` (the content of inline elements, and of elements mixing text with inline ones, is written on one line). Rendering is about 5% slower on a large page and the HTML about 30% smaller.
+
+### Debugging
+- A handler that changes a plain attribute of its component (not a `State`) when nothing re-renders the component logs `Counter.count changed in increment() but isn't a State, so the page didn't update — use count = State(0)`.
+- A keyword argument that isn't a prop and holds a list, dict or object logs a warning with the prop it probably meant: `TaskList got taks=[...], which isn't an attribute of TaskList, so it was written as an HTML attribute. Did you mean tasks?`
+
+### A clean public API
+- `from domino import ...` lists what apps use (`__all__`): `Domino`, `Component`, `Document`, `State`, `Collection`, `Event`, `redirect`, `batch`, `wait`, `html`, `template`, `TemplateError`, and Flask's `request`, `session`, `g`, `abort`, `url_for`. Flask and Domino's internals no longer leak into it (`from .core import *` is gone).
+- The public modules are `domino.tags`, `domino.accounts`, `domino.forms`, `domino.testing`, `domino.mail`, `domino.mongo` and `domino.bootstrap`. The others are internal and renamed with an underscore (`domino._core`, ...). `domino.components`, `domino.core` and the other old paths, and names like `from domino import Element`, keep working for this release with a `DeprecationWarning`. The command is `domino._cli:main` and the pytest plugin `domino._pytest_plugin` (reinstall to update the entry points).
+
+### Deprecated (still working, with a `DeprecationWarning`)
+- `self([children])` in `render()` (return the children), `element([children])` (`element [children]`), `t.h1(parent, "text")` (put it in the parent's children), `element.bind("click", f)` (`on_click=f`).
+
 ## 0.3.0
 
 ### Development
