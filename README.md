@@ -22,6 +22,14 @@ python examples/counter.py
 
 Then open http://127.0.0.1:5000.
 
+## Attributes
+
+Keyword arguments become HTML attributes; underscores turn into hyphens (`aria_label` → `aria-label`, `data_user_id` → `data-user-id`). A trailing underscore avoids Python keywords (`for_` → `for`). `class_` (a string or list) adds CSS classes after the component's own, and `style` accepts a dict:
+
+```python
+t.button(class_="btn btn-primary", aria_pressed="false", style={"font_weight": "bold"})
+```
+
 ## Events
 
 `element.bind("click", callback)` runs `callback` on the server and re-renders the component it returns. A callback that takes an argument receives an `Event`:

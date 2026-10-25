@@ -509,9 +509,7 @@ class Element:
 			name = css_class_name(base)
 			if name not in class_names:
 				class_names.append(name)
-		class_attr = " ".join(class_names)
-		if len(class_names) > 0:
-			html += f" class=\"{class_attr}\""
+		is_component = len(class_names) > 0
 
 		# Add attributes
 		attributes = get_class_attributes(self)
@@ -519,17 +517,33 @@ class Element:
 			attributes.pop("class")
 		attributes.update(self.__attributes__)
 
+		# Extra classes from class_="a b" (or a list) come after the component's own
+		for key in ("class", "class_"):
+			extra = attributes.pop(key, None)
+			if isinstance(extra, str):
+				extra = extra.split()
+			for name in extra or []:
+				if name not in class_names:
+					class_names.append(name)
+		if class_names:
+			html += f" class=\"{escape(' '.join(class_names))}\""
+
 		# Only emit an id when something needs it: an explicit id, an id that was
 		# used (events, after(), element styles, user code), or a component
 		# (a subclass like Counter(t.div)), since callbacks re-render those by id
-		if self.__id_used__ or self.__styles__ or class_names:
+		if self.__id_used__ or self.__styles__ or is_component:
 			attributes['id'] = self.id()
 		for key, value in attributes.items():
 			if key.startswith('_'):
 				continue
+			# A trailing underscore avoids Python keywords (for_ -> for)
+			if key.endswith("_"):
+				key = key[:-1]
 			key = key.replace("_", "-")
 			if value is None or value is False:
 				continue
+			if key == "style" and isinstance(value, dict):
+				value = "; ".join(f"{name.replace('_', '-')}: {css}" for name, css in value.items())
 			if value is True:
 				html += f" {key}"
 				continue

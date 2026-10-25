@@ -14,5 +14,6 @@ python examples/counter.py
 | `random_number.py` | `after(ms, ...)` updating a component on a timer |
 | `todo.py` | Form submits handled in Python with `event.form`, without reloading the page |
 | `forms.py` | Form controls (`select`, range, checkbox), `event.value`, and re-rendering only part of a component |
+| `attributes.py` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
 | `bootstrap.py` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
 | `showcase.py` | A full landing page using the imperative style (`t.h1(parent, "text")`) and a contact form event |
