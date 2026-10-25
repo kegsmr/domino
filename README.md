@@ -4,6 +4,8 @@ An experimental Python web framework built on Flask. It currently resembles a gl
 
 **This project is a work-in-progress! Not all features are functional yet.**
 
+**Documentation:** the [docs site](docs/README.md) has a step-by-step tutorial with live demos and a guide made from this README. It's a Domino app itself: run `python docs/app.py` and open http://127.0.0.1:5000.
+
 ## Install
 
 The distribution is named `domino-web`; the import name is `domino`.
@@ -249,9 +251,18 @@ class Counter(t.div):
 
 - `on_<event>=handler` (`on_click`, `on_submit`, `on_input`, `on_change`, ...) runs `handler` on the server. Add `debounce=ms` to wait until the user pauses.
 - A handler that returns nothing re-renders whatever its changes affected (or the component it belongs to); returning a component re-renders that one.
-- `State` as a class attribute is per component instance; a `State` at module level is shared by everyone. Lists and dicts: assign a new value (`self.items = self.items + [x]`) or set them again after changing them in place.
 - `init(self)` runs once when the component is created, for setup that isn't state.
 - The older style, `self([...])` with `element.bind("click", callback)` and `return self`, still works.
+
+### State
+
+`State(value)` holds a value the page shows. Reading it in `render()` subscribes the component, and changing it re-renders every component that read it:
+
+- As a class attribute (`count = State(0)`), each component instance has its own value, like React's `useState`; read and assign it as `self.count`.
+- At module level (`online = State(0)`), one value is shared by everyone: `online.value` reads it and `online.value = 3` changes it, re-rendering the components that show it on every open page (see [Reactive data](#reactive-data)).
+- Lists and dicts: assign a new value (`self.items = self.items + [x]`) or set them again after changing them in place, since changes inside them can't be seen.
+- Each page load, including a page swapped in by a link, makes its components afresh, so their state starts again. Keep what should last, or be shared, in a `Collection`.
+- Handlers that only change their own component's `State` show at once in the browser, before the server answers (see [Instant updates](#instant-updates)).
 
 ## Templates
 

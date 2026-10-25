@@ -22,7 +22,7 @@ jobs:
         with:
           mongodb-version: "7.0"
           mongodb-replica-set: rs0
-      - run: pip install -e .[test] playwright
+      - run: pip install -e .[test] playwright -r docs/requirements.txt
       - run: python -m playwright install --with-deps chromium
       - run: python -m pytest -v
         env:

@@ -60,3 +60,14 @@ def test_nested_elements_are_not_double_escaped():
 
 	assert "<p" in html
 	assert "a &amp; b" in html
+
+
+def test_whitespace_inside_pre_and_textarea_is_kept_as_written():
+
+	# Indented as usual around them, but what they hold is their content (a textarea's value)
+	html = t.div() [t.pre() ["a\n  b", t.span() ["c"]], t.textarea(name="note") ["x"], t.pre(inner="l1\nl2"), t.p() ["y"]]._render()
+
+	assert "    <pre>a\n  b<span>c</span></pre>\n" in html
+	assert "    <textarea name=\"note\">x</textarea>\n" in html
+	assert "<pre>l1\nl2</pre>" in html
+	assert "    <p>\n        y\n    </p>\n" in html

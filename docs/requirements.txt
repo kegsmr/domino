@@ -1,0 +1,3 @@
+# What the docs site needs besides Domino: Markdown for README.md's sections, Pygments for code
+Markdown>=3.4
+Pygments>=2.12

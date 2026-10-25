@@ -35,6 +35,9 @@ VOID_TAGS = [
 # Elements whose text content is not HTML and must not be escaped
 RAW_TEXT_TAGS = ["script", "style"]
 
+# Elements whose whitespace is content, so rendering adds no indentation inside them
+PREFORMATTED_TAGS = ["pre", "textarea"]
+
 
 _render_state = threading.local()
 
@@ -1609,6 +1612,15 @@ class Element:
 			# A void element can't contain its <style>, so put it right before
 			return element_style(level) + html
 
+		# Whitespace inside <pre> and <textarea> is part of what they show (a textarea's value),
+		# so their content is written as it is, without the indentation added elsewhere
+		closing = f"{indentation}</{tag}>{end}"
+		if tag in PREFORMATTED_TAGS:
+			if end:
+				html = html[:-len(end)]
+			closing = f"</{tag}>{end}"
+			level, indent, indentation, end = 0, "", "", ""
+
 		# Escape text unless it's marked safe with Markup or inside <script>/<style>
 		raw = tag in RAW_TEXT_TAGS
 		text = (lambda value: str(value)) if raw else (lambda value: str(escape(value)))
@@ -1619,7 +1631,8 @@ class Element:
 			inner = text(inner)
 	
 			# Add indentation to the inner content
-			inner = inner.replace("\n", f"{end}{indentation}{indent}")  # Ensure proper indentation for inner content
+			if tag not in PREFORMATTED_TAGS:
+				inner = inner.replace("\n", f"{end}{indentation}{indent}")  # Ensure proper indentation for inner content
 			inner = f"{indentation}{indent}{inner}{end}"
 
 		inner = element_style(level + 1) + (inner or "")
@@ -1661,7 +1674,7 @@ class Element:
 			html += f"{inner}"
 
 		# Ensure proper indentation for closing tag
-		html += f"{indentation}</{tag}>{end}"
+		html += closing
 
 		return html
 
