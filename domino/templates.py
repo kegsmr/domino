@@ -615,8 +615,13 @@ class TemplateFinder(BaseLoader):
 
 		path = os.path.join(folder, name)
 
-		# A virtualenv in the app's folder has nothing of the app's own
-		return path == self.template_folder or os.path.exists(os.path.join(path, "pyvenv.cfg"))
+		# A virtualenv in the app's folder has nothing of the app's own, and a folder with an
+		# app.py of its own is another app (examples/ in a repository, say)
+		return (
+			path == self.template_folder
+			or os.path.exists(os.path.join(path, "pyvenv.cfg"))
+			or os.path.isfile(os.path.join(path, "app.py"))
+		)
 
 
 	def scan(self):

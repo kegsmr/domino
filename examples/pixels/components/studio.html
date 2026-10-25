@@ -1,0 +1,17 @@
+<component name="Palette">
+	{{ for color in colors }}
+	<button on-click="pick(color)" class="{{ if is_picked(color) }}picked{{ /if }}"
+		style="background: {{ color }}" aria-pressed="{{ is_picked(color) }}" aria-label="{{ color }}"></button>
+	{{ /for }}
+	<button class="clear" on-click="clear">Clear</button>
+</component>
+
+<!-- Press to paint a pixel; hold the button down and drag to keep painting -->
+<component name="Canvas">
+	{{ for key, color in cells }}
+	<button on-pointerdown="paint(key)" on-pointerenter="paint(key)" while-pressed
+		style="background: {{ color }}" data-pixel="{{ key }}" aria-label="pixel {{ key }}"></button>
+	{{ /for }}
+</component>
+
+<component name="Stats" class="stats">{{ painted }} of {{ total }} pixels painted</component>

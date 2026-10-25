@@ -344,6 +344,14 @@ class TestPage:
 		return self
 
 
+	def trigger(self, selector, event_type, text=None):
+		"""Fire any event on an element, as the browser would: page.trigger("li", "pointerdown")."""
+
+		self.dispatch(self.find(selector, text), event_type)
+
+		return self
+
+
 	def dispatch(self, node, event_type):
 		"""Fire `event_type` on `node` and every ancestor bound to it (events bubble)."""
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+- `examples/pixels`: a canvas everyone paints together, live in every window, with drag painting.
+- `while-pressed`: hover events (`on-pointerenter`, `on-mouseover`, ...) count only while a mouse button is down, for painting or selecting by dragging.
+- Page tests: `page.trigger(selector, event)` fires any event, like `page.click` does clicks.
+- Templates are no longer looked for in subfolders that are apps of their own (with an `app.py`), so an app in a folder of examples doesn't pick up theirs.
+
 ## 0.3.0
 
 ### Development
