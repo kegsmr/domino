@@ -77,7 +77,8 @@ def add_pages(app, folder):
 
 
 def find_pages(folder):
-	"""Page files under `folder`, in a stable order. Names starting with _ or . are private."""
+	"""Page files under `folder`, in a stable order. Names starting with _ or . are private,
+	and files ending in _test.py are tests."""
 
 	for path in sorted(folder.rglob("*.py")):
 
@@ -85,7 +86,8 @@ def find_pages(folder):
 		if any(part.startswith(("_", ".")) for part in parts):
 			continue
 
-		if path.name == "layout.py":
+		# pages/about_test.py holds the tests for pages/about.py (see domino.pytest_plugin)
+		if path.name == "layout.py" or path.name.endswith("_test.py"):
 			continue
 
 		if path.name == "404.py":

@@ -518,8 +518,8 @@ class Domino(Flask):
 
 		self.logger.exception("Domino event %s failed", event_id)
 
-		# Tracebacks can reveal code and data, so only send them while debugging
-		if not self.debug:
+		# Tracebacks can reveal code and data, so only send them while debugging or testing
+		if not (self.debug or self.testing):
 			return jsonify({"error": "Internal Server Error"}), 500
 
 		return jsonify({

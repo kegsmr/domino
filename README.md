@@ -335,25 +335,26 @@ Locally every click feels instant. To feel the app the way users on a slow conne
 
 ## Testing your app
 
-`app.test_page(path)` loads a page in a simulated browser, so you can test your app in plain pytest, with no real browser and no server running. Clicks, typing and form submits go through the same code as in a real browser: handlers, `State`, collections and pushed updates all run for real.
+Tests live next to the page they test: `pages/about_test.py` tests `pages/about.py`. Its `page` fixture is that page, open in a simulated browser, so a test file needs no imports and no setup. Run them with plain `pytest` (Domino installs the pytest plugin):
 
 ```python
-from counter import app
-
-def test_counter():
-	page = app.test_page("/")
+# pages/index_test.py
+def test_increment(page):
 	page.click("button", text="Increment")
 	assert page.text("p") == "Current Count: 1"
 
-def test_todo():
-	page = app.test_page("/todo")
+def test_add_a_task(page):
 	page.fill("input[name=text]", "Buy milk")
 	page.click("button", text="Add")      # a submit button submits its form
 	assert page.text("ul") == "Buy milk"
 	assert page.value("input[name=text]") == ""
 ```
 
-Each test page is its own browser tab. Find elements with simple CSS selectors (`tag`, `.class`, `#id`, `[attr=value]`, and descendants like `form input`), optionally narrowed with `text=`. Pages can be driven with `click`, `fill` (set a value without firing events), `type` (fires `input`), `select`, `check`, and `submit`. Inspect them with `text`, `value`, `find`/`find_all` and `html`. `sync()` applies changes other pages pushed to this one, and `run_timers()` fires pending `after()` timers right away. A failing handler, or a selector that matches nothing, fails the test with the traceback and the page's text. See [tests/test_testing.py](tests/test_testing.py).
+There's no real browser and no server running, but clicks, typing and form submits go through the same code as in a browser: handlers, `State`, collections and pushed updates all run for real, in about a millisecond each. For a page with URL parameters, use `open_page`: in `pages/users/[id]_test.py`, `open_page(id=3)` opens `/users/3`. `open_page("/about")` opens any path of the app, and each call is a new browser tab. Files ending in `_test.py` are never served as pages. (pytest won't take a path with `[...]` on the command line; run the folder, or pick tests with `-k`.)
+
+Find elements with simple CSS selectors (`tag`, `.class`, `#id`, `[attr=value]`, and descendants like `form input`), optionally narrowed with `text=`. Pages can be driven with `click`, `fill` (set a value without firing events), `type` (fires `input`), `select`, `check`, and `submit`. Inspect them with `text`, `value`, `find`/`find_all`, `html`, `status` and `path`. `sync()` applies changes other pages pushed to this one, `run_timers()` fires pending `after()` timers right away, and `load(path)` navigates (redirects are followed and cookies kept, like a browser, so a login carries over). A failing handler, or a selector that matches nothing, fails the test with the traceback and the page's text.
+
+Outside `pages/`, `app.test_page(path)` gives the same simulated browser for any app. See the examples' `pages/*_test.py`, e.g. [examples/counter/pages/index_test.py](examples/counter/pages/index_test.py).
 
 ## Deployment
 

@@ -10,6 +10,8 @@ or, with Domino installed (`pip install -e .`), `domino run examples/counter`. `
 
 The examples run in debug mode. Only `chat` stores data in MongoDB, so the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it; running `chat` starts one, as `domino run` does.
 
+Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search` and `functional`. Run them all with `python -m pytest examples`.
+
 | Example | Shows |
 |---|---|
 | `hello_world/` | A page built from tag classes, with an app-wide stylesheet served at `/style.css` |

@@ -15,5 +15,9 @@ setup(
 	python_requires=">=3.9",
 	install_requires=["Flask>=2.2", "pymongo>=4"],
 	extras_require={"test": ["pytest"]},
-	entry_points={"console_scripts": ["domino=domino.cli:main"]},
+	entry_points={
+		"console_scripts": ["domino=domino.cli:main"],
+		# pytest finds tests next to their page (pages/about_test.py) with a `page` fixture
+		"pytest11": ["domino=domino.pytest_plugin"],
+	},
 )
