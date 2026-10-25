@@ -2053,6 +2053,11 @@ def test_tailwind_rebuilds_are_swapped_in_without_reloading(transport, page, tmp
 		assert page.evaluate(color, "#b") != "rgb(255, 0, 0)"
 		before = page.get_attribute("link[data-domino-tailwind]", "href")
 
+		# The page listens for rebuilds once its channel is open; a rebuild before that isn't swapped in
+		for _ in range(100):
+			if opened:
+				break
+			page.wait_for_timeout(50)
 		# Writing the class out somewhere (here a template) rebuilds the CSS, and the page swaps it in
 		(folder / "later.html").write_text('<p class="tw-later"></p>')
 		page.wait_for_function("getComputedStyle(document.querySelector('#b')).color === 'rgb(255, 0, 0)'", timeout=10000)
