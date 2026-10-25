@@ -767,8 +767,8 @@ def test_create_with_tailwind(tmp_path, capsys):
 
 	settings = json.loads((tmp_path / "site" / "settings.json").read_text())
 	assert settings["tailwind"] is True
-	assert 'class_="' in (tmp_path / "site" / "pages" / "layout.py").read_text()
-	assert "dark:bg-slate-900" in (tmp_path / "site" / "components" / "tasks.py").read_text()
+	assert 'class="min-h-screen' in (tmp_path / "site" / "pages" / "layout.html").read_text()
+	assert "dark:bg-slate-900" in (tmp_path / "site" / "components" / "tasks.html").read_text()
 
 
 # The real CLI (opt-in: only if it's downloaded already, e.g. by running examples/tailwind)

@@ -1,0 +1,8 @@
+<Faq class="faq">
+	<dl>
+		<template each="index, question in enumerate(questions)">
+			<dt><button on-click="toggle(index)" :aria-expanded="expanded(index)">{{ question[0] }}</button></dt>
+			<dd if="is_open(index)">{{ question[1] }}</dd>
+		</template>
+	</dl>
+</Faq>

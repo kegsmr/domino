@@ -88,6 +88,89 @@ def note_render_error(error, element):
 		components.append(element)
 
 
+# Component class -> {name: kind} of the props it declares (see component_props)
+_component_props = {}
+
+# Settings a component class can have that are never props
+NOT_PROPS = ("css", "live", "optimistic", "optimistic_states", "client")
+
+
+def component_props(cls):
+	"""The names a component class declares that keyword arguments set on the component rather
+	than as HTML attributes, {name: kind}: "state" (a State attribute: its starting value), "property"
+	(one with a setter), "callback" (`on_add = None`: a handler the parent passes, which the component
+	calls as self.on_add(...); not a DOM event) and "attribute" (a plain class attribute)."""
+
+	props = _component_props.get(cls)
+	if props is not None:
+		return props
+
+	props = {}
+	for base in reversed(cls.__mro__):
+		# Only the app's own components: Domino's classes and tags keep their keyword arguments
+		if base.__module__.split(".")[0] == "domino":
+			continue
+		for name, value in vars(base).items():
+			if name.startswith("_") or name in NOT_PROPS:
+				continue
+			if isinstance(value, reactive.State):
+				props[name] = "state"
+			elif isinstance(value, property):
+				if value.fset is not None:
+					props[name] = "property"
+			elif name.startswith("on_") and value is None:
+				props[name] = "callback"
+			elif not callable(value) and not hasattr(type(value), "__get__"):
+				props[name] = "attribute"
+			else:
+				props.pop(name, None)
+	_component_props[cls] = props
+
+	return props
+
+
+def set_prop(element, name, kind, value):
+
+	if kind == "state":
+		# Its starting value, without counting as a change
+		getattr(type(element), name)._of(element)._value = value
+	elif kind == "callback" and callable(value):
+		setattr(element, name, Callback(value))
+	else:
+		setattr(element, name, value)
+
+
+class Callback:
+	"""A handler a parent passed down (TaskForm(on_add=self.add)). The component calls it from its
+	own handlers; then the parent is what the event re-renders, unless the event's changes say."""
+
+	__slots__ = ("function",)
+
+
+	def __init__(self, function):
+
+		self.function = function
+
+
+	def __call__(self, *args, **kwargs):
+
+		owner = getattr(self.function, "__self__", None)
+		if isinstance(owner, Element) and has_request_context() and g.get("domino_page") is not None:
+			g.domino_called = owner
+
+		return self.function(*args, **kwargs)
+
+
+	def __getattr__(self, name):
+
+		return getattr(self.function, name)
+
+
+	def __repr__(self):
+
+		return f"Callback({self.function!r})"
+
+
 # CSS of each component class (its own `css`, scoped to its class name), made once
 _component_css = {}
 
@@ -600,7 +683,10 @@ class Domino(Flask):
 
 		# .html templates anywhere in the app's folder, found by file name (see domino.templates)
 		from .templates import TemplateFinder
-		self.template_finder = TemplateFinder(self.root_path, self.template_folder)
+		self.template_finder = TemplateFinder(
+			self.root_path, self.template_folder,
+			pages=None if pages is False else (pages or "pages"), setting=self.settings.get("templates")
+		)
 
 		with open(Path(__file__).parent / 'core.js', encoding='utf-8') as js_file:
 			CORE_JS = js_file.read()
@@ -875,6 +961,7 @@ class Domino(Flask):
 
 			g.domino_page = page
 			g.domino_redirect = None  # set by redirect()
+			g.domino_called = None  # a parent whose handler the callback called (see Callback)
 
 			_, callback = event
 
@@ -889,9 +976,10 @@ class Domino(Flask):
 					result = callback()
 
 				# A handler that returns nothing re-renders the component its changes
-				# affected on this page, or else the component it's a method of
+				# affected on this page, or else the parent whose handler it called, or else the
+				# component it's a method of
 				if result is None:
-					result = changes.affected_on(page) or getattr(callback, "__self__", None)
+					result = changes.affected_on(page) or g.domino_called or getattr(callback, "__self__", None)
 
 				if not isinstance(result, Element):
 					return self._event_response({"id": None, "html": None}), 200
@@ -1339,6 +1427,13 @@ class Element:
 
 	def configure(self, **kwargs):
 
+		# Names the component declares (State, a property, `on_add = None`, a class attribute) are
+		# its props: a parent passes data and its own handlers down with them (see component_props)
+		props = component_props(type(self))
+		if props:
+			for key in [key for key in kwargs if key in props]:
+				set_prop(self, key, props[key], kwargs.pop(key))
+
 		# on_click=handler binds the event like bind("click", handler); debounce= applies to them
 		handlers = [key for key in kwargs if key.startswith("on_") and callable(kwargs[key])]
 		debounce = None
@@ -1412,6 +1507,10 @@ class Element:
 		content = self.content_root.__children__
 		embedded = self.__embedded__
 		events = dict(page.events)
+		# A Domino template sets attributes of the component's element as it renders (see
+		# dtemplates._root); the real render's stay
+		attributes = dict(self.__attributes__)
+		root = self.__dict__.get("_domino_root")
 
 		def render(overlay):
 			with reactive.predicting(overlay):
@@ -1426,6 +1525,9 @@ class Element:
 			self.__children__ = children
 			self.content_root.__children__ = content
 			self.__embedded__ = embedded
+			self.__attributes__ = attributes
+			if root is not None:
+				self.__dict__["_domino_root"] = root
 			page.events.clear()
 			page.events.update(events)
 
@@ -1601,6 +1703,14 @@ class Element:
 		if "class" in attributes:
 			attributes.pop("class")
 		attributes.pop("css", None)
+		# A prop the parent passed (see component_props) shows its value, not the class's; a list,
+		# dict or object isn't an HTML attribute
+		for key, value in list(attributes.items()):
+			value = self.__dict__.get(key, value)
+			if value is None or isinstance(value, (str, int, float)) or key in ("style", "class_"):
+				attributes[key] = value
+			else:
+				del attributes[key]
 		attributes.update(self.__attributes__)
 
 		# `live = True` is a framework setting, not an HTML attribute; mark live
@@ -1655,7 +1765,10 @@ class Element:
 		# Whitespace inside <pre> and <textarea> is part of what they show (a textarea's value),
 		# so their content is written as it is, without the indentation added elsewhere
 		closing = f"{indentation}</{tag}>{end}"
-		if tag in PREFORMATTED_TAGS:
+		# A Domino template's markup (see domino.dtemplates) is written as its author laid it out,
+		# so nothing is added around it either
+		verbatim = len(self.__children__) == 1 and getattr(self.__children__[0], "verbatim", False) is True
+		if tag in PREFORMATTED_TAGS or verbatim:
 			if end:
 				html = html[:-len(end)]
 			closing = f"</{tag}>{end}"

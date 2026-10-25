@@ -38,7 +38,7 @@ GUIDE = [
 	Topic("devtools", "Developer tools", "Guide", "Error pages, the component inspector and the event log, while debugging.", ["Developer tools"]),
 	Topic("styles", "Styles", "Guide", "CSS on the component class, scoped to it and written once per page.", ["Styles"]),
 	Topic("tailwind", "Tailwind CSS", "Guide", "Tailwind classes anywhere, with nothing to install or build.", ["Tailwind CSS", "Your own theme", "Tailwind in production", "Caveats"]),
-	Topic("templates", "Templates", "Guide", "Components written as HTML: template strings and Jinja.", ["Templates", "Template strings (Python 3.14)", "Jinja templates"]),
+	Topic("templates", "Templates", "Guide", "Markup in HTML, logic in Python: Domino templates, Jinja and template strings.", ["Templates", "Jinja or Domino?", "Template strings (Python 3.14)", "Jinja templates"]),
 	Topic("forms", "Forms", "Guide", "Fields declared once, checked in the browser and on the server.", ["Forms"]),
 	Topic("pages", "Pages & navigation", "Guide", "File-based routing, layouts, and page switches without reloading.", ["Pages", "Moving between pages"]),
 	Topic("reactive-data", "Reactive data & MongoDB", "Guide", "Collections that re-render every open page when they change.", ["Reactive data", "MongoDB"]),

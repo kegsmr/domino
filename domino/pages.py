@@ -91,15 +91,20 @@ def add_pages(app, folder, reload=False):
 		if rule in existing and rule not in app._page_routes:
 			raise PagesError(f'Two handlers for "{rule}": {relative} and the route "{existing[rule]}"')
 
-		layouts = [load(layout) for layout in find_layouts(folder, path)]
+		layouts = [(load(code) if code else None, markup) for code, markup in find_layouts(folder, path)]
+		names = tuple(module.__name__ for module, _ in layouts if module is not None)
+		if path.suffix == ".html":
+			view = template_page_view(path, relative, layouts)
+			found[rule] = (relative, view, names)
+			continue
 		view = page_view(load(path), relative, rule, layouts)
-		found[rule] = (relative, view, (load(path).__name__,) + tuple(layout.__name__ for layout in layouts))
+		found[rule] = (relative, view, (load(path).__name__,) + names)
 
 	not_found = folder / "404.py"
 	if not_found.is_file():
-		layouts = [load(layout) for layout in find_layouts(folder, not_found)]
+		layouts = [(load(code) if code else None, markup) for code, markup in find_layouts(folder, not_found)]
 		view = page_view(load(not_found), "404.py", "", layouts)
-		found[None] = ("404.py", view, (load(not_found).__name__,) + tuple(layout.__name__ for layout in layouts))
+		found[None] = ("404.py", view, (load(not_found).__name__,) + tuple(module.__name__ for module, _ in layouts if module is not None))
 
 	for rule, (relative, view, names) in found.items():
 
@@ -109,7 +114,7 @@ def add_pages(app, folder, reload=False):
 			if rule is None:
 				app.register_error_handler(404, functools.partial(page_not_found, app, route))
 			else:
-				app.add_url_rule(rule, f"pages/{relative[:-3]}", functools.partial(app._render_view, route))
+				app.add_url_rule(rule, f"pages/{relative.rsplit('.', 1)[0]}", functools.partial(app._render_view, route))
 		route.view = view
 		route.modules = names
 		if rule is not None:
@@ -152,15 +157,36 @@ def find_pages(folder):
 
 		yield path
 
+	yield from find_template_pages(folder)
+
+
+def find_template_pages(folder):
+	"""Templates in `folder` that are pages: about.html is /about, like about.py, unless there's an
+	about.py (then about.html is its components' template) or it defines components."""
+
+	from .templates import template_format
+
+	for path in sorted(folder.rglob("*.html")):
+
+		parts = path.relative_to(folder).parts
+		if any(part.startswith(("_", ".")) for part in parts) or path.name in ("404.html", "layout.html"):
+			continue
+		if path.with_suffix(".py").exists() or template_format(str(path)) == "components":
+			continue
+
+		yield path
+
 
 def find_layouts(folder, path):
-	"""The layout.py files that wrap `path`, outermost (the pages folder's own) first."""
+	"""The layouts that wrap `path`, outermost (the pages folder's own) first: per folder,
+	(its layout.py or None, its layout.html or None)."""
 
 	layouts = []
 	directory = path.parent
 	while True:
-		if (directory / "layout.py").is_file():
-			layouts.insert(0, directory / "layout.py")
+		code, markup = directory / "layout.py", directory / "layout.html"
+		if code.is_file() or markup.is_file():
+			layouts.insert(0, (code if code.is_file() else None, str(markup) if markup.is_file() else None))
 		if directory == folder:
 			return layouts
 		directory = directory.parent
@@ -234,30 +260,49 @@ def page_view(module, relative, rule, layouts):
 	else:
 		raise PagesError(f"{relative} has no page() function or Page class")
 
+	return layout_view(make, layouts)
+
+
+def template_page_view(path, relative, layouts):
+	"""The view of a template in pages/: the template, with the URL's parameters as its context."""
+
+	from .templates import page_template
+
+	return layout_view(functools.partial(page_template, str(path)), layouts)
+
+
+def layout_view(make, layouts):
+
 	wrappers = []
-	for layout in layouts:
-		if not callable(getattr(layout, "layout", None)):
-			raise PagesError(f"{layout.__file__} has no layout(content) function")
-		wrappers.append((layout.layout, accepted_params(layout.layout)))
+	for module, markup in layouts:
+		function = getattr(module, "layout", None) if module is not None else None
+		if module is not None and not callable(function):
+			if markup is None:
+				raise PagesError(f"{module.__file__} has no layout(content) function")
+			raise PagesError(f"{module.__file__} has no layout() function giving layout.html its values")
+		wrappers.append((function, accepted_params(function) if function else None, markup))
 
 	def view(**params):
 
 		result = make(**params)
 
-		# A whole document (Document or any <html>), a Jinja template(...) and Flask
-		# responses are already complete
-		if isinstance(result, (t.html, JinjaTemplate)) or not isinstance(result, (Element, str)):
+		# A whole document (Document or any <html>), a Jinja template(...), a Domino template with
+		# <html>, <head> or <body>, and Flask responses are already complete
+		if is_complete(result):
 			return result
 
 		# The innermost layout wraps the page first, the pages folder's own layout last
-		for layout, names in reversed(wrappers):
+		for index, (layout, names, markup) in reversed(list(enumerate(wrappers))):
 			kwargs = params
 			if names is not None:
 				kwargs = {name: value for name, value in params.items() if name in names}
-			result = layout(result, **kwargs)
+			if markup is None:
+				result = layout(result, **kwargs)
+			else:
+				result = template_layout(markup, layout, names, result, params, kwargs, wrappers[:index])
 
 		# Without a layout that makes one, a component still needs a document for its events
-		if isinstance(result, Element) and not isinstance(result, t.html):
+		if isinstance(result, Element) and not isinstance(result, t.html) and not getattr(result, "is_document", False):
 			result = Document() [
 				result
 			]
@@ -265,6 +310,52 @@ def page_view(module, relative, rule, layouts):
 		return result
 
 	return view
+
+
+def is_complete(result):
+	"""Whether a page's result is already the whole response, which layouts leave alone."""
+
+	return (
+		isinstance(result, (t.html, JinjaTemplate))
+		or getattr(result, "is_document", False)
+		or not isinstance(result, (Element, str))
+	)
+
+
+def template_layout(markup, layout, names, content, params, kwargs, outer):
+	"""layout.html around `content`, which goes where it has <slot />. Its values are the URL's
+	parameters, and what layout() returns when there's a layout.py next to it."""
+
+	from .dtemplates import DominoTemplate
+
+	values = dict(params)
+	if layout is not None:
+		if names is None or "content" in names:
+			kwargs = dict(kwargs, content=content)
+		returned = layout(**kwargs)
+		if returned is not None and not isinstance(returned, dict):
+			raise PagesError(
+				f"layout() next to {os.path.basename(markup)} returns the template's values as a dict "
+				f"(or nothing), not {type(returned).__name__}; the page goes where the template has <slot />"
+			)
+		values.update(returned or {})
+
+	element = DominoTemplate(markup, values, slot=[content])
+
+	# Only the outermost layout can be the document; the others go in its <slot />
+	if outer and element.is_document:
+		first = next((markup or module_file(function)) for function, _, markup in outer)
+		raise PagesError(
+			f"{markup} is a whole document (<html>), but it's inside {first}; only the outermost layout "
+			"can be, so leave out <html>, <head> and <body> here"
+		)
+
+	return element
+
+
+def module_file(function):
+
+	return getattr(sys.modules.get(getattr(function, "__module__", "")), "__file__", None) or "a layout"
 
 
 def accepted_params(function):

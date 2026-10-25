@@ -1,0 +1,18 @@
+<!-- The page at /, inside layout.html. Each component's markup is in components/*.html, its
+     logic in components/*.py; here they're used as tags -->
+<main>
+	<h1>Templates</h1>
+	<p>Markup in HTML, logic in Python. This page is <code>pages/index.html</code>.</p>
+
+	<Card heading="Counter" note="components/counter.py + components/counter.html">
+		<Counter />
+	</Card>
+
+	<Card heading="Todo list" note="Todos composes in Python: TodoForm and TodoList, or EmptyState">
+		<Todos />
+	</Card>
+
+	<Card heading="Questions" note="Instant: each answer opens before the server replies">
+		<Faq />
+	</Card>
+</main>

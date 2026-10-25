@@ -1,0 +1,21 @@
+<!-- One file can define several components: each top-level tag is the markup of the class of that name -->
+
+<TodoForm class="todo-form" on-submit="submit">
+	<input name="text" placeholder="What needs doing?" autocomplete="off" required>
+	<button type="submit">Add</button>
+</TodoForm>
+
+<TodoList>
+	<ul>
+		<li each="index, item in enumerate(items)" :class="item_class(item)">
+			<input type="checkbox" :checked="item.done" on-change="on_toggle(index)" aria-label="Done">
+			<span>{{ item.text }}</span>
+			<button class="remove" on-click="on_remove(index)" aria-label="Remove">×</button>
+		</li>
+	</ul>
+	<p class="hint">{{ remaining }} left.</p>
+</TodoList>
+
+<EmptyState class="hint">
+	<p>Nothing to do. Add something above!</p>
+</EmptyState>
