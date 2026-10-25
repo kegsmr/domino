@@ -3,3 +3,9 @@
 *__pycache__
 
 output.html
+.claude/
+settings.local.json
+.domino/
+*.egg-info/
+build/
+dist/

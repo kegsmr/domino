@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>{{ title }}</title>
+	<style>
+		body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+		section { border: 1px solid #ddd; border-radius: 8px; padding: 0 1rem 1rem; margin-bottom: 1rem; }
+		button[data-loading] { opacity: 0.6; }
+	</style>
+</head>
+<body>
+	<h1>{{ title }}</h1>
+	<p>This page is a Jinja template (home.html). The sections below are live Domino components.</p>
+
+	<section>
+		<h2>Counter</h2>
+		<p><small>components/counter.py + components/counter.html</small></p>
+		{{ component(Counter) }}
+	</section>
+
+	<section>
+		<h2>Todo</h2>
+		{% if Todo %}
+			<p><small>components/todo.py, written with a template string (t"...")</small></p>
+			{{ component(Todo) }}
+		{% else %}
+			<p>The template string example needs Python 3.14.</p>
+		{% endif %}
+	</section>
+</body>
+</html>

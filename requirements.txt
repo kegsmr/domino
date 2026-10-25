@@ -1,1 +1,4 @@
 Flask>=2.2
+pymongo>=4
+uvicorn[standard]>=0.24
+a2wsgi>=1.7

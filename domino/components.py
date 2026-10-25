@@ -1,13 +1,40 @@
+from flask import current_app, has_app_context
+
 from . import tags as t
 from .core import Style
+from .settings import script_json
 
 
 class Core(t.script):
 
-	
+
 	def __init__(self):
 
 		super().__init__(src='/_domino/core')
+
+
+class PublicSettings(t.script):
+	"""The app's "public" settings, read by core.js into Domino.settings. Renders nothing when empty."""
+
+
+	def __init__(self):
+
+		super().__init__(type='application/json', id='domino-settings')
+
+
+	def _render(self, level=0, indent=4):
+
+		public = {}
+		if has_app_context():
+			public = getattr(current_app, "settings", {}).get("public") or {}
+
+		# Most apps have no public settings; don't add an empty tag to every page
+		if not public:
+			return ""
+
+		self.inner(script_json(public))
+
+		return super()._render(level, indent)
 
 
 class Document(t.html):
@@ -26,6 +53,7 @@ class Document(t.html):
 				content='width=device-width, initial-scale=1'
 			),
 			self.stylesheet.compute,
+			PublicSettings(),
 			Core()
 		]
 		if title:
@@ -52,11 +80,18 @@ class Document(t.html):
 		return "<!DOCTYPE html>\n" + super()._render(level, indent)
 
 
-	def style(self, target=None, **kwargs):
+	def style(self, target=None, rules=None, /, **kwargs):
 
 		if target is None:
 			target = self.__class__
 
-		self.stylesheet.style(target, **kwargs)
+		self.stylesheet.style(target, rules, **kwargs)
+
+		return self
+
+
+	def theme(self, dark=None, **variables):
+
+		self.stylesheet.theme(dark, **variables)
 
 		return self

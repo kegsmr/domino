@@ -1,53 +1,10 @@
-def get_enclosing_class(cls):
-    
-    if '.' in cls.__qualname__:
-        
-        outer_class_name = cls.__qualname__.split('.')[0]
-        module = __import__(cls.__module__)
-        
-        return getattr(module, outer_class_name)
-    
-    return None
+import inspect
+from urllib.parse import urlsplit
 
 
-def get_custom_attributes(cls):
-	
-	import inspect
-
-	# Filter out methods and classes, return the rest as a dictionary of key-value pairs
-	return {attr: getattr(cls, attr) for attr in dir(cls) 
-			if not attr.startswith("__") and not inspect.isfunction(getattr(cls, attr)) and not inspect.isclass(getattr(cls, attr))}
-
-
-def get_inner_classes(cls):
-    
-    return {name: obj for name, obj in cls.__dict__.items() if isinstance(obj, type)}
-
-
-def get_calling_object():
-     
-	import inspect
-
-	# Inspect the call stack
-	stack = inspect.stack()
-	caller_frame = stack[1]  # The frame of the caller
-	caller_locals = caller_frame.frame.f_locals
-
-	# Look for 'self' in the caller's local variables
-	return caller_locals.get("self", None)
-
-
-def create_class_stub(name):
-    """Dynamically creates a class with the given name and returns it."""
-    
-    namespace = {}
-    
-    exec(f"""
-class {name}:
-    pass
-""", namespace)
-    
-    return namespace[name]
+# Class attributes per class, computed once: walking the hierarchy for every element on
+# every render was the biggest cost of rendering
+_class_attributes = {}
 
 
 def get_class_attributes(obj):
@@ -55,12 +12,53 @@ def get_class_attributes(obj):
     excluding methods, instance attributes, and dunder attributes."""
     
     cls = obj if isinstance(obj, type) else obj.__class__
-    
-    # Retrieve all attributes in the class hierarchy (including inherited ones)
-    attributes = {}
-    for base in reversed(cls.__mro__):  # Iterate over base classes (from top to bottom)
-        for k, v in base.__dict__.items():
-            if not k.startswith("__") and not callable(v):  # Exclude dunder & methods
-                attributes[k] = v  # Overwrite if a subclass redefines the attribute
 
-    return attributes
+    cached = _class_attributes.get(cls)
+    if cached is None:
+        # Retrieve all attributes in the class hierarchy (including inherited ones)
+        cached = {}
+        for base in reversed(cls.__mro__):  # Iterate over base classes (from top to bottom)
+            for k, v in base.__dict__.items():
+                # Exclude dunders, methods and descriptors (properties, State attributes)
+                if not k.startswith("__") and not callable(v) and not hasattr(type(v), "__get__"):
+                    cached[k] = v  # Overwrite if a subclass redefines the attribute
+        _class_attributes[cls] = cached
+
+    # Callers change the result, so hand out a copy
+    return dict(cached)
+
+
+def accepts_argument(func):
+	"""Returns True if `func` can be called with one positional argument."""
+
+	try:
+		parameters = inspect.signature(func).parameters.values()
+	except (TypeError, ValueError):
+		return False
+
+	return any(
+		parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD, parameter.VAR_POSITIONAL)
+		for parameter in parameters
+	)
+
+
+def css_class_name(cls):
+	"""The CSS class a Python class renders as: underscores become hyphens (col_6 -> col-6)."""
+
+	return cls.__name__.replace("_", "-")
+
+
+def is_local_url(url):
+	"""Whether `url` is a path on this site ("/notes?page=2"), not a link to another site
+	("//evil.com", "https://evil.com", "/\\evil.com", which browsers treat as "//evil.com")."""
+
+	if not isinstance(url, str) or not url.startswith("/") or url.startswith("//"):
+		return False
+
+	# Browsers read backslashes as slashes and drop tabs and newlines, so "/\t/evil.com" is "//evil.com"
+	if "\\" in url or any(ord(character) < 32 or ord(character) == 127 for character in url):
+		return False
+
+	parts = urlsplit(url)
+
+	return not parts.scheme and not parts.netloc

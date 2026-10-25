@@ -1,0 +1,8 @@
+{
+    "mongo": {
+        "auto": false
+    },
+    "domino": {
+        "max_upload_mb": 5
+    }
+}
