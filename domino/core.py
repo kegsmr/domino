@@ -268,6 +268,7 @@ class Element:
 		self.__void__ = None
 		self.__attributes__ = {}
 		self.__states__ = {}
+		self.__styles__ = {}
 		self.__id__ = uuid.uuid4()
 
 		self.tag(tag)
@@ -397,6 +398,13 @@ class Element:
 		indentation = indent * level
 		end = "" if indent == "" else "\n"
 
+		# Styles set on this element with Style.style(element, ...)
+		def element_style(style_level):
+			if not self.__styles__:
+				return ""
+			css = Style.css({Style.id_selector(self.id()): self.__styles__})
+			return Element("style", inner=css)._render(style_level, indent)
+
 		html = f"{indentation}<{tag}"
 
 		# Handle class names
@@ -431,7 +439,8 @@ class Element:
 
 		# If it's a void tag or it's None and the tag is in the VOID_TAGS, return the tag without children
 		if void or (void is None and tag in VOID_TAGS):
-			return html
+			# A void element can't contain its <style>, so put it right before
+			return element_style(level) + html
 
 		# Escape text unless it's marked safe with Markup or inside <script>/<style>
 		raw = tag in RAW_TEXT_TAGS
@@ -445,6 +454,8 @@ class Element:
 			# Add indentation to the inner content
 			inner = inner.replace("\n", f"{end}{indentation}{indent}")  # Ensure proper indentation for inner content
 			inner = f"{indentation}{indent}{inner}{end}"
+
+		inner = element_style(level + 1) + (inner or "")
 
 		for child in self.__children__:
 
@@ -494,7 +505,10 @@ class Style:
 		elif isinstance(target, type):
 			selector = f'.{target.__name__}'
 		elif isinstance(target, Element):
-			selector = f'#{target.id()}'
+			# Rules for one element travel with that element instead of piling
+			# up in this (possibly app-wide) stylesheet
+			target.__styles__.update(kwargs)
+			return
 		else:
 			raise ValueError(f"Invalid target: {target!r}")
 
@@ -506,9 +520,27 @@ class Style:
 
 	def compute(self, head=None):
 
+		# Return the CSS as a <style> element
+		return Element("style", head, Style.css(self.styles))
+
+
+	@staticmethod
+	def id_selector(id_):
+
+		# CSS identifiers can't start with a digit (and UUIDs often do), so
+		# escape it as a code point, e.g. "#81e4..." -> "#\38 1e4..."
+		if id_[:1].isdigit():
+			return f"#\\3{id_[0]} {id_[1:]}"
+
+		return f"#{id_}"
+
+
+	@staticmethod
+	def css(styles):
+
 		css = []
 
-		for name, properties in self.styles.items():
+		for name, properties in styles.items():
 		
 			base_styles = []
 			hover_styles = {}
@@ -533,10 +565,7 @@ class Style:
 				css.append("}")
 
 		# Join all parts with newlines for readability
-		css = "\n".join(css)
-
-		# Return the CSS as a <style> element
-		return Element("style", head, css)
+		return "\n".join(css)
 			
 	
 	def link(self, head=None, href=""):
