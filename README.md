@@ -881,3 +881,7 @@ Tests marked `mongo` are skipped unless `DOMINO_TEST_MONGO_URL` points at a Mong
 ## Releasing
 
 Bump `version` in `setup.py`, then publish a GitHub Release (e.g. tag `v0.1.0`). The `Publish to PyPI` workflow builds the package and uploads it to PyPI as `domino-web`.
+
+## License
+
+MIT, copyright (c) 2026 Kegan Messmer. See [LICENSE.txt](LICENSE.txt).

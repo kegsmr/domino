@@ -8,6 +8,7 @@
 - `python -m domino` runs the `domino` command (handy on Windows). CI also runs on Windows.
 - Windows fixes: `[id=int].py` page files (colons can't be in Windows file names), hot reload restarts after `app.py` changes, client components on another drive, and paths in error pages.
 - Text typed into a form while its submit is on its way is no longer cleared when the answer arrives (the next chat message, say).
+- The license is now MIT (it was MIT-0): copies must keep the copyright notice.
 
 ### Deploying
 - `domino build` writes a Dockerfile (non-root, health check, `domino serve`), `.dockerignore` and `requirements.txt`.

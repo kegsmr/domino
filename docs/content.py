@@ -54,7 +54,7 @@ GUIDE = [
 	Topic("deployment", "Deployment", "Reference", "Deploy with one command, and serve on every CPU core.", ["Deploying", "Serving in production"]),
 	Topic("cli", "Command line", "Reference", "domino create, run, serve, build and deploy.", ["Command line", "Hot reloading", "Development MongoDB"]),
 	Topic("how-it-works", "How it works", "Reference", "One WebSocket per tab, and the HTTP fallback.", ["How the browser talks to the server"]),
-	Topic("contributing", "Contributing", "Reference", "Run Domino's own tests and publish a release.", ["Tests", "Releasing"]),
+	Topic("contributing", "Contributing", "Reference", "Run Domino's own tests, publish a release, and the license.", ["Tests", "Releasing", "License"]),
 ]
 
 
