@@ -1476,6 +1476,10 @@ def run(ops, context, out):
 					break
 		elif kind == ATTRIBUTE_OP:
 			value = op[2](context)
+			# aria-pressed="true"/"false": ARIA and data attributes take the words, not presence
+			if value is True or value is False:
+				if op[1].startswith(("aria-", "data-")):
+					value = "true" if value else "false"
 			if value is True:
 				out.append(f" {op[1]}")
 			elif value is not None and value is not False:

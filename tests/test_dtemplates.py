@@ -345,12 +345,13 @@ def test_values_in_attributes(tmp_path):
 			class_list = ["x", None, "y"]
 			styles = {"font_weight": "bold", "color": None}
 	""", """
-		<Widget><input disabled="{{ yes }}" hidden="{{ no }}" title="{{ none }}" value="{{ number }}" placeholder="{{ text }}"><p class="base {{ classes }}">1</p><p class="{{ class_list }}">2</p><p class="{{ text }}">3</p><p style="color: red; {{ styles }}">4</p><p class="{{ none }}">5</p><a href="/items/{{ number }}?q={{ text }}" class="item {{ if yes }}on{{ elif no }}never{{ else }}off{{ /if }}">6</a></Widget>
+		<Widget><input disabled="{{ yes }}" hidden="{{ no }}" title="{{ none }}" value="{{ number }}" placeholder="{{ text }}"><p class="base {{ classes }}">1</p><p class="{{ class_list }}">2</p><p class="{{ text }}">3</p><p style="color: red; {{ styles }}">4</p><p class="{{ none }}">5</p><a href="/items/{{ number }}?q={{ text }}" class="item {{ if yes }}on{{ elif no }}never{{ else }}off{{ /if }}">6</a><b aria-pressed="{{ yes }}" aria-hidden="{{ no }}" data-on="{{ yes }}">7</b></Widget>
 	""")
 	html = inner(html_of(serve(tmp_path, module.Widget)), "Widget")
 
 	assert '<input disabled value="0" placeholder="a&#34;b">' in html
 	assert '<a href="/items/0?q=a&#34;b" class="item on">6</a>' in html
+	assert '<b aria-pressed="true" aria-hidden="false" data-on="true">7</b>' in html
 	assert '<p class="base on">1</p>' in html
 	assert '<p class="x y">2</p>' in html
 	assert '<p class="a&#34;b">3</p>' in html
@@ -474,7 +475,7 @@ def test_predictions_for_handlers_with_values(tmp_path):
 
 	# Three states, each reachable from every other: the whole graph is shipped
 	assert len(graph["states"]) == 3 and len(graph["edges"]) == 3
-	assert "<button aria-pressed data-event-id" in html_of(app)
+	assert "<button aria-pressed=\"true\" data-event-id" in html_of(app)
 
 
 def test_a_handler_taking_the_event_is_not_predicted(tmp_path):

@@ -465,7 +465,7 @@ class TodoList(t.div):
 **Values.** `{{ name }}`, `{{ item.text }}` and `{{ item["text"] }}` read the component's `State`, properties, attributes and helper methods (called without arguments: helpers are how logic stays in Python), and loop variables. `.name` also reads a dict's key, and a missing key is nothing; an unknown name, or an object's unknown attribute, is an error naming the template's file, line and column, with the names that exist. `helper(item, "text")` calls a method with values; `not x` is the one operator. Nothing else: no comparisons, arithmetic or filters, so write a helper (`is_open(index)`, `remaining`).
 
 - Text is escaped; `Markup` values and Domino elements are inserted as they are; `None` and `False` show nothing. In `<script>` values are inserted as JSON.
-- In attributes too: `href="/polls/{{ poll.id }}"`, `class="task {{ if task.done }}done{{ /if }}"` (an `{{ if }}` block works inside an attribute).
+- In attributes too (`aria-*` and `data-*` attributes write `true` or `false`): `href="/polls/{{ poll.id }}"`, `class="task {{ if task.done }}done{{ /if }}"` (an `{{ if }}` block works inside an attribute).
 
 **Lists and conditions** are blocks, in Python's words and closed like HTML: `{{ for item in items }}` ... `{{ /for }}` repeats what's inside (`{{ for key, value in prices.items }}` unpacks, `enumerate(items)` numbers), and `{{ if done }}` ... `{{ elif loading }}` ... `{{ else }}` ... `{{ /if }}` shows one part (`{{ if not items }}` too). `{{ else }}` inside a `for` shows when the list is empty. A block wraps whole elements: one that starts inside an element ends inside it, so `{{ if x }}<div>{{ /if }}` is an error at startup, with the file and line. A block on a line of its own takes the line with it.
 
