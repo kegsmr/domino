@@ -520,6 +520,11 @@ class Event:
 		if not isinstance(form, dict):
 			form = {}
 
+		# A form's fields are strings (lists of them for repeated names), as core.js sends them.
+		# Anything else (a dict like {"$ne": null}) would turn a MongoDB query made from a field,
+		# users.find_one({"email": event.form["email"]}), into another query
+		form = {name: value for name, value in ((name, form_value(value)) for name, value in form.items()) if value is not None}
+
 		type_ = "after" if event_id.startswith("after-") else event_id.rsplit("-", 1)[-1]
 
 		return Event(type_, data.get("value"), form, files)
@@ -528,6 +533,18 @@ class Event:
 	def __repr__(self):
 
 		return f"Event(type={self.type!r}, value={self.value!r}, form={self.form!r})"
+
+
+def form_value(value):
+	"""A form field sent by the browser as a string or a list of strings, or None for other values."""
+
+	if isinstance(value, str):
+		return value
+
+	if isinstance(value, list):
+		return [item for item in value if isinstance(item, str)]
+
+	return None
 
 
 def redirect(location, code=302):
@@ -892,6 +909,13 @@ class Domino(Flask):
 		"""Run an event's callback and render what it changed. Returns (payload, status) for the
 		browser, the same over every transport (HTTP POST or WebSocket). Call it in a request
 		context. It can block, so the WebSocket runs it in a worker thread."""
+
+		# A page acts as the user signed in when it was made, so its id alone mustn't be enough to
+		# act as them: the browser must still be signed in as that user (one signed out since, in
+		# another tab, say, reloads the page)
+		owner = page.user_id._value
+		if owner is not None and has_request_context() and session.get(SESSION_USER_KEY) != owner:
+			return {"error": "Unknown or expired page"}, 404
 
 		# Reactive changes the callback makes re-render their subscribers once the page
 		# lock is released (updating other pages while holding it could deadlock)

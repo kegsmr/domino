@@ -411,7 +411,7 @@ Use template strings for interactive components written in Python, Jinja for pag
 
 - `event.type`: the DOM event name (`"click"`, `"submit"`, `"change"`, ...)
 - `event.value`: the element's value (`True`/`False` for checkboxes)
-- `event.form`: the surrounding `<form>`'s fields as a dict (repeated names become lists)
+- `event.form`: the surrounding `<form>`'s fields as a dict of strings (repeated names become lists of strings; anything else a client sends is dropped, so a field can't smuggle a MongoDB operator like `{"$ne": null}` into a query)
 - `event.files`: uploaded files (see [File uploads](#file-uploads))
 
 Submit events don't reload the page. See `examples/todo/`.

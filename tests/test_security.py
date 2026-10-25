@@ -2,6 +2,7 @@
 Each test is named after what it protects against."""
 
 import asyncio
+import re
 import socket
 import threading
 import types
@@ -206,6 +207,94 @@ def test_client_components_render_names_and_scripts_the_same_way():
 	assert html == "<script>a = '<\\/Script><img src=x onerror=alert(1)>'</script>"
 
 
+# Events --------------------------------------------------------------------------------------
+
+
+def test_form_fields_cant_carry_mongodb_operators():
+
+	import domino.tags as t
+	from domino import Collection
+	from domino.components import Document
+
+	users = Collection()
+	users.insert({"email": "ada@example.com", "secret": "ada's"})
+	found = []
+
+	class Lookup(t.form):
+
+		def init(self):
+			self.configure(on_submit=self.look)
+
+		def render(self):
+			return [t.input(name="email"), t.input(name="tags")]
+
+		def look(self, event):
+			found.append((dict(event.form), users.find_one({"email": event.form.get("email")})))
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Lookup()]
+
+	client = app.test_client()
+	page_id, event_id = page_and_event(client.get("/").get_data(as_text=True))
+
+	# Not what core.js sends, but anyone can send it: {"$ne": null} matches every document
+	form = {"email": {"$ne": None}, "tags": ["a", {"$gt": ""}], "count": 5}
+	response = client.post("/_domino/events", json={"page_id": page_id, "event_id": event_id, "data": {"form": form}})
+	assert response.status_code == 200
+
+	assert found == [({"tags": ["a"]}, None)]
+
+
+def test_a_page_id_alone_doesnt_act_as_its_user(monkeypatch):
+
+	import domino.tags as t
+	from domino import Collection, accounts
+	from domino.components import Document
+
+	monkeypatch.setattr(accounts, "users", Collection())
+	accounts._failures.clear()
+	accounts.create_user("ada@example.com", "correct horse")
+	seen = []
+
+	class Private(t.div):
+
+		def render(self):
+			return [t.button(on_click=self.whoami) ["?"]]
+
+		def whoami(self):
+			seen.append(accounts.current_user()["email"])
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+
+	@app.route("/")
+	def index():
+		return Document() [Private(), accounts.LoginForm()]
+
+	ada = app.test_client()
+	html = ada.get("/").get_data(as_text=True)
+	login_page, _ = page_and_event(html)
+	submit = re.search(r'data-event-id="([^"]+-submit)"', html).group(1)
+	form = {"email": "ada@example.com", "password": "correct horse"}
+	assert ada.post("/_domino/events", json={"page_id": login_page, "event_id": submit, "data": {"form": form}}).status_code == 200
+
+	# A page made for Ada, signed in
+	html = ada.get("/").get_data(as_text=True)
+	page_id, whoami = page_and_event(html)
+	assert "Signed in as" in html
+
+	# Someone who learned its id (from a log of the /_domino/ws?page= URLs, say) can't use it
+	stranger = app.test_client()
+	assert stranger.post("/_domino/events", json={"page_id": page_id, "event_id": whoami}).status_code == 404
+	assert seen == []
+
+	assert ada.post("/_domino/events", json={"page_id": page_id, "event_id": whoami}).status_code == 200
+	assert seen == ["ada@example.com"]
+
+
 # Limits (denial of service) ----------------------------------------------------------------
 
 
@@ -235,8 +324,6 @@ def slow_app():
 
 
 def page_and_event(html):
-
-	import re
 
 	return re.search(r'data-domino-page="([^"]+)"', html).group(1), re.search(r'data-event-id="([^"]+)"', html).group(1)
 
