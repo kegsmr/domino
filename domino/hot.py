@@ -41,6 +41,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 from flask import g, request
+import uvicorn
 from uvicorn._subprocess import get_subprocess
 from uvicorn.supervisors.basereload import BaseReload
 
@@ -943,13 +944,19 @@ class Supervisor(BaseReload):
 		self.process.start()
 
 
+class SubprocessConfig(uvicorn.Config):
+	"""Config for a server in a process the supervisor replaces. On Windows that means asyncio's
+	selector loop, as with uvicorn's own reloader: the proactor loop can't accept on a listening
+	socket that an earlier process used."""
+
+	use_subprocess = True
+
+
 def serve(target, root, host="127.0.0.1", port=5000, **options):
 	"""Serve the app that `target` makes (see domino.asgi.from_environ) in a process that hot
 	reloads changes to the files in `root`, and is replaced when it can't."""
 
-	import uvicorn
-
-	config = uvicorn.Config(target, factory=True, host=host, port=port, **options)
+	config = SubprocessConfig(target, factory=True, host=host, port=port, **options)
 	server = uvicorn.Server(config)
 	sock = config.bind_socket()
 	# Connections wait for the server process, instead of being refused while it starts (or
