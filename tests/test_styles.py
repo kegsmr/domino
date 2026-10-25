@@ -32,8 +32,9 @@ def test_element_styles_render_with_the_element():
 	html = box._render(indent="")
 
 	assert html.startswith("<div")
-	assert f"#{box.id()} {{" in html
-	assert f"#{box.id()}:hover {{" in html
+	selector = Style.id_selector(box.id())
+	assert f"{selector} {{" in html
+	assert f"{selector}:hover {{" in html
 
 
 def test_void_element_styles_render_before_the_element():
