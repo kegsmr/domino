@@ -28,3 +28,7 @@ Then open http://127.0.0.1:5000.
 pip install -e .[test]
 python -m pytest
 ```
+
+## Releasing
+
+Bump `version` in `setup.py`, then publish a GitHub Release (e.g. tag `v0.1.0`). The `Publish to PyPI` workflow builds the package and uploads it to PyPI as `domino-web`.
