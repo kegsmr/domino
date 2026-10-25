@@ -137,6 +137,11 @@ class MongoStore:
 						if changed is None:
 							return
 						changed()
+						# A dropped collection or database ends the stream for good, and it
+						# can't be resumed; start a new one so a recreated collection stays live
+						if change.get("operationType") == "invalidate":
+							resume = None
+							break
 			except pymongo.errors.OperationFailure as error:
 				# Change streams need a replica set; without one, only this process's own
 				# writes re-render subscribers

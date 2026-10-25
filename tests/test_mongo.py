@@ -139,3 +139,19 @@ def test_unnamed_collection_stays_in_memory(monkeypatch):
 
 	assert local.count() == 1
 	mongo.connect(None)
+
+
+@pytest.mark.mongo
+def test_pages_stay_live_after_the_collection_is_dropped_and_recreated():
+
+	name = unique_name()
+	items = Collection(name)
+	renders = []
+	page = subscribed_page(items, renders)
+
+	mongo.database().drop_collection(name)
+	time.sleep(0.3)
+	page.updates.clear()
+	mongo.database()[name].insert_one({"_id": "again", "text": "recreated", "n": 1})
+
+	assert wait_for(lambda: any("recreated" in update["html"] for update in page.updates.values()))
