@@ -2056,7 +2056,8 @@ def test_tailwind_rebuilds_are_swapped_in_without_reloading(transport, page, tmp
 	try:
 		page.goto(url)
 		page.evaluate("window.notReloaded = true")
-		assert page.evaluate(color, "#a") == "rgb(255, 0, 0)"
+		# The watcher's first build may still be running as the page loads
+		page.wait_for_function("getComputedStyle(document.querySelector('#a')).color === 'rgb(255, 0, 0)'", timeout=10000)
 		assert page.evaluate(color, "#b") != "rgb(255, 0, 0)"
 		before = page.get_attribute("link[data-domino-tailwind]", "href")
 
