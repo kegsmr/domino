@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -14,15 +16,69 @@ VOID_TAGS = [
 ]
 
 
+class Page:
+	"""Event registry for one rendered page (one page load in one browser tab)."""
+
+
+	def __init__(self):
+
+		self.id = str(uuid.uuid4())
+		self.events = {}
+		self.touch()
+
+
+	def touch(self):
+
+		self.last_access = time.monotonic()
+
+
+	def register(self, event_id, element, callback):
+
+		self.events[event_id] = (element, callback)
+
+
+	def unregister_subtree(self, root):
+
+		# Drop events bound to `root` or its descendants; they are about to be
+		# replaced in the browser and would otherwise leak
+		elements = set()
+		stack = [root]
+		while stack:
+			element = stack.pop()
+			if isinstance(element, Element) and id(element) not in elements:
+				elements.add(id(element))
+				stack.extend(element.__children__)
+
+		for event_id, (element, _) in list(self.events.items()):
+			if id(element) in elements:
+				del self.events[event_id]
+
+
+	@staticmethod
+	def current():
+
+		if has_app_context() and "domino_page" in g:
+			return g.domino_page
+
+		return DEFAULT_PAGE
+
+
+# Used for events bound outside of a request (e.g. at import time)
+DEFAULT_PAGE = Page()
+
+
 class Domino(Flask):
-
-
-	__events__ = {}
 
 
 	def __init__(self, *args, **kwargs):
 
 		super().__init__(*args, **kwargs)
+
+		self.config.setdefault("DOMINO_PAGE_TTL", 30 * 60)  # seconds of inactivity
+		self.config.setdefault("DOMINO_MAX_PAGES", 1000)
+
+		self._pages = {}
+		self._pages_lock = threading.Lock()
 
 		with open(Path(__file__).parent / 'core.js', encoding='utf-8') as js_file:
 			CORE_JS = js_file.read()
@@ -36,14 +92,26 @@ class Domino(Flask):
 		def event_handler():
 
 			# Retrieve the event data from the incoming JSON payload
-			data = request.get_json()
+			data = request.get_json(silent=True) or {}
 
-			# Access the event_id sent by the client-side JavaScript
+			# Access the page_id and event_id sent by the client-side JavaScript
+			page = self._get_page(data.get("page_id")) or DEFAULT_PAGE
 			event_id = data.get("event_id")
 
-			_, callback = Domino.__events__[event_id]
+			event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
+			if event is None:
+				return jsonify({"error": "Unknown or expired event"}), 404
+
+			g.domino_page = page
+
+			_, callback = event
 
 			result = callback()
+
+			if not isinstance(result, Element):
+				return jsonify({"id": None, "html": None})
+
+			page.unregister_subtree(result)
 
 			return jsonify({
 				"id": result.id(),
@@ -51,6 +119,51 @@ class Domino(Flask):
 			})
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
+
+
+	def _new_page(self):
+
+		page = Page()
+
+		with self._pages_lock:
+			self._pages[page.id] = page
+			self._prune_pages()
+
+		g.domino_page = page
+
+		return page
+
+
+	def _get_page(self, page_id):
+
+		with self._pages_lock:
+			self._prune_pages()
+			page = self._pages.get(page_id)
+			if page:
+				page.touch()
+
+		return page
+
+
+	def _drop_page(self, page):
+
+		with self._pages_lock:
+			self._pages.pop(page.id, None)
+
+
+	def _prune_pages(self):
+
+		# Caller must hold self._pages_lock
+		cutoff = time.monotonic() - self.config["DOMINO_PAGE_TTL"]
+		for page_id, page in list(self._pages.items()):
+			if page.last_access < cutoff:
+				del self._pages[page_id]
+
+		excess = len(self._pages) - self.config["DOMINO_MAX_PAGES"]
+		if excess > 0:
+			oldest = sorted(self._pages.values(), key=lambda page: page.last_access)
+			for page in oldest[:excess]:
+				del self._pages[page.id]
 
 
 	def _add_static_route(self, route, data):
@@ -68,16 +181,24 @@ class Domino(Flask):
 			# Define a new wrapper function
 			def wrapper(*args, **kwargs):
 				
+				# Events bound while building and rendering this response belong to a new page
+				page = self._new_page()
+
 				# Call the original handler function
 				result = function(*args, **kwargs)
-				
+
 				# Check if the result has a `render` method
 				if hasattr(result, "_render"):
-					for event_id, callback in result.__events__.items():
-						self.__events__[event_id] = (callback, result)
-					return result._render()
+					result.configure(data_domino_page=page.id)
+					html = result._render()
 				else:
-					return result
+					html = result
+
+				# Don't keep pages that have nothing to handle
+				if not page.events:
+					self._drop_page(page)
+
+				return html
 			
 			# Set a unique name for the wrapper function
 			wrapper.__name__ = function.__name__
@@ -109,7 +230,6 @@ class Element:
 		self.__void__ = None
 		self.__attributes__ = {}
 		self.__states__ = {}
-		self.__events__ = {}
 		self.__id__ = uuid.uuid4()
 
 		self.tag(tag)
@@ -203,7 +323,7 @@ class Element:
 		event_id = f"event-{self.id()}-{event.lower()}"
 
 		self.configure(data_event_id=event_id)
-		Domino.__events__[event_id] = (self, callback)
+		Page.current().register(event_id, self, callback)
 
 		return self
 
@@ -213,7 +333,7 @@ class Element:
 		event_id = f"after-{self.id()}-{delay}"
 
 		self.configure(data_after_id=event_id)
-		Domino.__events__[event_id] = (self, func)
+		Page.current().register(event_id, self, func)
 
 		return self
 
