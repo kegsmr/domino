@@ -94,9 +94,33 @@ def attribute_name(key):
 			name = None
 		else:
 			name = (key[:-1] if key.endswith("_") else key).replace("_", "-")
+			# As on the server: names aren't escaped, so one from data mustn't end the tag
+			if not name or any(character in " \t\n\r\f\"'<>/=" or ord(character) < 32 or ord(character) == 127 for character in name):
+				raise ValueError("Invalid attribute name: %r" % (name,))
 		_names[key] = name
 
 	return name
+
+
+def raw_text(tag, value):
+	"""Text for a <script> or <style>, which only "</script" ("</style") could end early."""
+
+	value = str(value)
+	end = "</" + tag
+	lower = value.lower()
+	if end not in lower:
+		return value
+
+	out = []
+	start = 0
+	found = lower.find(end)
+	while found != -1:
+		out.append(value[start:found] + "<\\/")
+		start = found + 2
+		found = lower.find(end, start)
+	out.append(value[start:])
+
+	return "".join(out)
 
 
 class Element:
@@ -323,11 +347,11 @@ def write(element, out):
 	raw = tag in RAW_TEXT_TAGS
 	inner = element.__inner__
 	if inner:
-		out.append(str(inner) if raw else escape(inner))
+		out.append(raw_text(tag, inner) if raw else escape(inner))
 
 	for child in element.__children__:
 		if isinstance(child, str):
-			out.append(child if raw else escape(child))
+			out.append(raw_text(tag, child) if raw else escape(child))
 			continue
 		if not isinstance(child, Element) and callable(child):
 			child = child()
@@ -336,7 +360,7 @@ def write(element, out):
 		if isinstance(child, Element):
 			write(child, out)
 		elif isinstance(child, str):
-			out.append(child if raw else escape(child))
+			out.append(raw_text(tag, child) if raw else escape(child))
 		else:
 			raise ValueError("Invalid child: %r" % (child,))
 

@@ -147,6 +147,65 @@ def test_trusted_proxies_can_be_networks(monkeypatch):
 	assert b"203.0.113.9" not in workers.forward_head(lines, "198.51.100.7", trusted)
 
 
+# Rendering ---------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", [
+	'onmouseover=alert(1) x',
+	'x" onclick="alert(1)',
+	"x><script>alert(1)</script",
+	"a/b",
+	"a\tb",
+	"",
+])
+def test_attribute_names_from_data_cant_inject_html(name):
+
+	import domino.tags as t
+
+	# Attributes from data, e.g. t.div(**attrs) or <div {attrs}> in a template string
+	with pytest.raises(ValueError, match="Invalid attribute name"):
+		t.div(**{name: "1"})._render()
+
+
+def test_valid_attribute_names_render():
+
+	import domino.tags as t
+
+	html = t.div(**{"data_x": 1, "aria-label": "x", "xml:lang": "en", "@click": "go()", "x.y": "1"})._render()
+
+	assert 'data-x="1"' in html and 'aria-label="x"' in html and 'xml:lang="en"' in html and '@click="go()"' in html
+
+
+def test_script_and_style_text_cant_end_their_element():
+
+	import domino.tags as t
+
+	payload = "</SCRIPT><img src=x onerror=alert(1)>"
+	html = t.script() [f"const name = {payload!r};"]._render()
+	assert "</SCRIPT><img" not in html
+	assert "<\\/SCRIPT><img" in html and html.rstrip().endswith("</script>")
+
+	html = t.script(inner="x = '</script >'")._render()
+	assert html.count("</script") == 1
+
+	html = t.style() ["p::after { content: '</style><img src=x onerror=alert(1)>' }"]._render()
+	assert "</style><img" not in html
+	assert html.count("</style") == 1
+
+
+def test_client_components_render_names_and_scripts_the_same_way():
+
+	from domino import client
+
+	tags = client.shim().tags
+
+	with pytest.raises(ValueError, match="Invalid attribute name"):
+		tags.div(**{'x" onclick="alert(1)': "1"})._render()
+
+	html = tags.script() ["a = '</Script><img src=x onerror=alert(1)>'"]._render()
+	assert html == "<script>a = '<\\/Script><img src=x onerror=alert(1)>'</script>"
+
+
 # The session hand-off (/_domino/session/<token>) ---------------------------------------------
 
 
