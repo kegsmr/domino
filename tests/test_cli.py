@@ -13,6 +13,9 @@ import domino.cli as cli
 from domino import Domino, devmongo
 
 
+# The test database conftest.py sets up, read before clean_environ removes it
+TEST_MONGO_URL = os.environ.get("DOMINO_MONGO__URL")
+
 # Set by run() and the CLI; set then deleted here so they're removed again after each test
 SET_BY_RUN = ["DOMINO_MONGO__URL", "DOMINO_MONGO__VERSION", "DOMINO_NO_MONGO"]
 
@@ -78,7 +81,7 @@ def test_run_arguments_have_meteor_like_defaults():
 
 	args = cli.build_parser().parse_args(["run"])
 
-	assert (args.command, args.app, args.port, args.host, args.no_mongo, args.mongo_version) == ("run", "app.py", 5000, "127.0.0.1", False, None)
+	assert (args.command, args.app, args.port, args.host, args.no_mongo, args.mongo_version) == ("run", ".", 5000, "127.0.0.1", False, None)
 
 
 def test_run_arguments_can_be_set():
@@ -161,7 +164,8 @@ def test_create_scaffolds_an_app(tmp_path, capsys):
 
 	assert cli.main(["create", str(folder)]) == 0
 
-	assert sorted(path.name for path in folder.iterdir()) == [".gitignore", "app.py", "settings.json"]
+	files = sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file())
+	assert files == [".gitignore", "app.py", "components/tasks.py", "data.py", "pages/index.py", "pages/layout.py", "settings.json"]
 	assert json.loads((folder / "settings.json").read_text())["public"]["title"] == "hello"
 	assert ".domino/" in (folder / ".gitignore").read_text()
 	assert "settings.local.json" in (folder / ".gitignore").read_text()
@@ -169,16 +173,31 @@ def test_create_scaffolds_an_app(tmp_path, capsys):
 
 
 @pytest.mark.mongo
-def test_created_app_renders(tmp_path, monkeypatch):
+def test_created_app_renders(tmp_path, monkeypatch, forget_modules):
 
 	monkeypatch.setattr(devmongo, "start", None)
+	monkeypatch.setenv("DOMINO_MONGO__URL", TEST_MONGO_URL)
 	cli.create(str(tmp_path / "rendered"))
 
-	app = cli.find_app(cli.load_module(tmp_path / "rendered" / "app.py"))
-	response = app.test_client().get("/")
+	try:
+		app = cli.find_app(cli.load_module(tmp_path / "rendered" / "app.py"))
+		client = app.test_client()
+		response = client.get("/")
+		html = response.get_data(as_text=True)
 
-	assert response.status_code == 200
-	assert "rendered" in response.get_data(as_text=True)
+		assert response.status_code == 200
+		assert "<h1>" in html and "rendered" in html
+
+		# The page's form adds a task to the collection, and the list shows it
+		page_id = html.split('data-domino-page="')[1].split('"')[0]
+		event_id = html.split('data-event-id="')[1].split('"')[0]
+		data = {"form": {"text": "Write tests"}}
+		result = client.post("/_domino/events", json={"page_id": page_id, "event_id": event_id, "data": data}).get_json()
+
+		assert "Write tests" in result["html"]
+	finally:
+		# Its components/ and data.py would shadow the next app's
+		forget_modules(tmp_path / "rendered")
 
 
 def test_create_refuses_a_non_empty_folder(tmp_path, capsys):

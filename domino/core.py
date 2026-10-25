@@ -307,7 +307,10 @@ class Domino(Flask):
 	session_interface = SessionInterface()
 
 
-	def __init__(self, *args, page_store: PageStore = None, settings: str = None, **kwargs):
+	def __init__(self, *args, page_store: PageStore = None, settings: str = None, pages=None, **kwargs):
+
+		# URL rule -> the file in pages/ serving it. Set first: Flask.__init__ adds a route
+		self._page_rules = {}
 
 		super().__init__(*args, **kwargs)
 
@@ -332,6 +335,38 @@ class Domino(Flask):
 		self._add_event_handler('/_domino/events')
 		self._add_stream('/_domino/stream')
 		self._add_oauth_routes('/_domino/accounts/<provider>/<action>')
+
+		# File-based routing, found once here rather than per request
+		self._add_pages(pages)
+
+
+	def _add_pages(self, pages):
+
+		from .pages import PagesError, add_pages
+
+		# pages=None uses the app's pages/ folder if there is one; False turns pages off
+		if pages is False:
+			return
+
+		folder = Path(self.root_path) / (pages or "pages")
+		if not folder.is_dir():
+			if pages:
+				raise PagesError(f"No pages folder at {folder}")
+			return
+
+		add_pages(self, folder)
+
+
+	def add_url_rule(self, rule, endpoint=None, view_func=None, **options):
+
+		# Two handlers for one URL is a mistake, and Flask would quietly use the first
+		page = self._page_rules.get(rule)
+		if page:
+			from .pages import PagesError
+			name = endpoint or getattr(view_func, "__name__", view_func)
+			raise PagesError(f'Two handlers for "{rule}": {page} and the route "{name}"')
+
+		return super().add_url_rule(rule, endpoint, view_func, **options)
 
 
 	def _apply_settings(self):
@@ -587,28 +622,8 @@ class Domino(Flask):
 
 			# Define a new wrapper function
 			def wrapper(*args, **kwargs):
-				
-				# Events bound while building and rendering this response belong to a new page
-				page = self._new_page()
 
-				# Call the original handler function
-				result = function(*args, **kwargs)
-
-				# Check if the result has a `render` method
-				if hasattr(result, "_render"):
-					result.configure(data_domino_page=page.id)
-					# Only while debugging, so the latency setting can't slow down production
-					if self.debug and self.config.get("DOMINO_LATENCY"):
-						result.configure(data_domino_latency=int(self.config["DOMINO_LATENCY"]))
-					html = result._render()
-				else:
-					html = result
-
-				# Don't keep pages that have nothing to handle or refresh
-				if not page.events and not page.live:
-					self._drop_page(page)
-
-				return html
+				return self._render_view(function, *args, **kwargs)
 			
 			# Set a unique name for the wrapper function
 			wrapper.__name__ = function.__name__
@@ -617,6 +632,32 @@ class Domino(Flask):
 			return flask_decorator(wrapper)
 
 		return decorator
+
+
+	def _render_view(self, function, *args, **kwargs):
+		"""Call a view (a route or a file in pages/) and render the component it returns."""
+
+		# Events bound while building and rendering this response belong to a new page
+		page = self._new_page()
+
+		# Call the original handler function
+		result = function(*args, **kwargs)
+
+		# Check if the result has a `render` method
+		if hasattr(result, "_render"):
+			result.configure(data_domino_page=page.id)
+			# Only while debugging, so the latency setting can't slow down production
+			if self.debug and self.config.get("DOMINO_LATENCY"):
+				result.configure(data_domino_latency=int(self.config["DOMINO_LATENCY"]))
+			html = result._render()
+		else:
+			html = result
+
+		# Don't keep pages that have nothing to handle or refresh
+		if not page.events and not page.live:
+			self._drop_page(page)
+
+		return html
 
 
 	def style(self, href="", external=False):
