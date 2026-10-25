@@ -269,6 +269,10 @@ class Domino(Flask):
 		self.settings = load_settings(self.root_path, settings)
 		self._apply_settings()
 
+		# Named Collections find MongoDB through these settings (mongo.url)
+		from . import mongo
+		mongo.use_app(self)
+
 		self.page_store = page_store or MemoryPageStore()
 
 		with open(Path(__file__).parent / 'core.js', encoding='utf-8') as js_file:

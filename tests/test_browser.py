@@ -143,6 +143,7 @@ def test_server_push_updates_the_clock_without_user_action(serve, page):
 	assert page.errors == []
 
 
+@pytest.mark.mongo
 def test_reactive_chat_updates_other_windows_and_keeps_their_typing(serve, browser):
 
 	url = serve("chat")

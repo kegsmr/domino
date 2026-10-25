@@ -21,7 +21,17 @@ def example_name(path):
 	return path.stem
 
 
-@pytest.mark.parametrize("path", EXAMPLES, ids=[example_name(path) for path in EXAMPLES])
+def example_param(path):
+
+	# Examples with named Collections store them in MongoDB
+	marks = []
+	if 'Collection("' in path.read_text(encoding="utf-8"):
+		marks.append(pytest.mark.mongo)
+
+	return pytest.param(path, id=example_name(path), marks=marks)
+
+
+@pytest.mark.parametrize("path", [example_param(path) for path in EXAMPLES])
 def test_example_home_page_renders(path):
 
 	spec = importlib.util.spec_from_file_location(f"example_{example_name(path)}", path)

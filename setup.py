@@ -13,6 +13,6 @@ setup(
 	packages=["domino"],
 	package_data={"domino": ["core.js", "tags.pyi"]},
 	python_requires=">=3.9",
-	install_requires=["Flask>=2.2"],
+	install_requires=["Flask>=2.2", "pymongo>=4"],
 	extras_require={"test": ["pytest"]},
 )

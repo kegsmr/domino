@@ -212,23 +212,65 @@ class State:
 
 
 class Collection:
-	"""An in-memory collection of documents (dicts) with a Meteor/MongoDB-like API.
+	"""A collection of documents (dicts) with a Meteor/MongoDB-like API.
 
-	Every document gets a string "_id". find() returns a reactive cursor: iterating it inside
-	render() subscribes the component to changes in the collection.
+	Collection("name") is stored in MongoDB (see domino.mongo); Collection() with no name lives
+	in memory, like Meteor's local collections. Every document gets a string "_id" unless it
+	has one. find() returns a reactive cursor: iterating it inside render() subscribes the
+	component to changes in the collection.
 	"""
 
 
 	def __init__(self, name=None):
 
 		self.name = name
-		self._documents = {}  # _id -> document, in insertion order
+		self._store = None
 		self._lock = threading.RLock()
 		self._dependency = Dependency()
 
-		# Matching and sorting per query, reused until the collection changes, since many
-		# subscribers usually render the same query after each change
+		# Query results reused until the collection changes, since many subscribers usually
+		# render the same query after each change. The version guards against caching a
+		# result read before a change that finished while it was being read.
 		self._results = {}
+		self._version = 0
+
+
+	def store(self):
+		"""Where the documents live, created on first use (named collections connect to MongoDB)."""
+
+		with self._lock:
+			if self._store is None and self.name is None:
+				self._store = MemoryStore()
+			elif self._store is None:
+				from .mongo import MongoStore
+				self._store = MongoStore(self.name, self.changed)
+
+		return self._store
+
+
+	def changed(self):
+		"""Forget cached results and re-render subscribers. Called after writes, and by the
+		MongoDB store when another process changes the collection."""
+
+		with self._lock:
+			self._results.clear()
+			self._version += 1
+
+		self._dependency.changed()
+
+
+	def _wrote(self):
+
+		# A MongoDB change stream reports our own writes too; let it announce them so each
+		# change re-renders subscribers once. Cached results are dropped right away, so the
+		# writer's own next read already sees the change.
+		if getattr(self._store, "watching", False):
+			with self._lock:
+				self._results.clear()
+				self._version += 1
+			return
+
+		self.changed()
 
 
 	def insert(self, document):
@@ -236,13 +278,8 @@ class Collection:
 		document = deepcopy(document)
 		document.setdefault("_id", uuid.uuid4().hex)
 
-		with self._lock:
-			if document["_id"] in self._documents:
-				raise ValueError(f"Duplicate _id: {document['_id']!r}")
-			self._documents[document["_id"]] = document
-			self._results.clear()
-
-		self._dependency.changed()
+		self.store().insert(document)
+		self._wrote()
 
 		return document["_id"]
 
@@ -269,60 +306,101 @@ class Collection:
 		"""Apply `changes` ($set, $unset, $inc, $push, $pull, or a whole replacement document)
 		to the first matching document, or every one with multi=True. Returns the count."""
 
-		check_query(query)
-		updated = 0
-
-		with self._lock:
-			for document in list(self._documents.values()):
-				if not matches(document, query):
-					continue
-				replacement = apply_changes(document, changes)
-				self._documents[document["_id"]] = replacement
-				updated += 1
-				if not multi:
-					break
-			if updated:
-				self._results.clear()
-
+		updated = self.store().update(query or {}, changes, multi)
 		if updated:
-			self._dependency.changed()
+			self._wrote()
 
 		return updated
 
 
 	def remove(self, query=None):
 
-		check_query(query)
-
-		with self._lock:
-			removed = [key for key, document in self._documents.items() if matches(document, query)]
-			for key in removed:
-				del self._documents[key]
-			if removed:
-				self._results.clear()
-
+		removed = self.store().remove(query or {})
 		if removed:
-			self._dependency.changed()
+			self._wrote()
 
-		return len(removed)
+		return removed
 
 
 	def _fetch(self, query, sort, limit):
 
-		check_query(query)
+		store = self.store()
 		self._dependency.depend()
 
 		key = repr((query, sort, limit))
 		with self._lock:
 			documents = self._results.get(key)
-			if documents is None:
-				documents = sort_documents([document for document in self._documents.values() if matches(document, query)], sort)
-				if limit is not None:
-					documents = documents[:limit]
-				self._results[key] = documents
+			version = self._version
 
-			# Copies, so callers can't change the stored documents
-			return [copy_document(document) for document in documents]
+		if documents is None:
+			documents = store.find(query or {}, sort, limit)
+			with self._lock:
+				if self._version == version:
+					self._results[key] = documents
+
+		# Copies, so callers can't change the stored documents or the cached results
+		return [copy_document(document) for document in documents]
+
+
+class MemoryStore:
+	"""Documents kept in this process (for Collection() without a name)."""
+
+
+	def __init__(self):
+
+		self.documents = {}  # _id -> document, in insertion order
+		self.lock = threading.Lock()
+
+
+	def insert(self, document):
+
+		with self.lock:
+			if document["_id"] in self.documents:
+				raise ValueError(f"Duplicate _id: {document['_id']!r}")
+			self.documents[document["_id"]] = document
+
+
+	def find(self, query, sort, limit):
+
+		check_query(query)
+
+		with self.lock:
+			documents = [document for document in self.documents.values() if matches(document, query)]
+
+		documents = sort_documents(documents, sort)
+		if limit is not None:
+			documents = documents[:limit]
+
+		return documents
+
+
+	def update(self, query, changes, multi):
+
+		check_query(query)
+		updated = 0
+
+		with self.lock:
+			for document in list(self.documents.values()):
+				if not matches(document, query):
+					continue
+				self.documents[document["_id"]] = apply_changes(document, changes)
+				updated += 1
+				if not multi:
+					break
+
+		return updated
+
+
+	def remove(self, query):
+
+		check_query(query)
+
+		with self.lock:
+			removed = [key for key, document in self.documents.items() if matches(document, query)]
+			for key in removed:
+				del self.documents[key]
+
+		return len(removed)
 
 
 class Cursor:
