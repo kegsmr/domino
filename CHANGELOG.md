@@ -1,12 +1,34 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-### Developer tools (debug mode only)
-- An error page for pages that fail to render: source around each frame, the component stack, the request and hints for common mistakes.
-- The event error overlay shows the frames' source, the component stack, hints, and which element and handler fired.
-- A component inspector (Alt+Shift+D or `Domino.inspect()`): State kept up to date, events and why a handler isn't instant, subscriptions, parents and children; and an event log with server time, round trip, sizes and whether predictions matched.
-- Startup warnings about in-memory `Collection()`s. Production pages are unchanged, byte for byte.
+### Development
+- Hot reload that keeps state, like React Fast Refresh: save a component, page or template and open pages update in place in about 100 ms, keeping State, typed text and focus. Changes that can't be swapped safely (app.py, settings) restart the server.
+- Developer tools (debug mode only): an error page for pages that fail to render (source around each frame, the component stack, hints); a richer event error overlay; a component inspector (Alt+Shift+D or `Domino.inspect()`) with live State, events and why a handler isn't instant; an event log with timings. Production pages are unchanged, byte for byte.
+- `python -m domino` runs the `domino` command (handy on Windows). CI also runs on Windows.
+
+### Deploying
+- `domino build` writes a Dockerfile (non-root, health check, `domino serve`), `.dockerignore` and `requirements.txt`.
+- `domino deploy fly|render|docker`: fly.toml and secrets through flyctl, render.yaml, or a docker-compose.yml with MongoDB as a replica set.
+- `/_domino/health`, and `domino serve` reads `WEB_CONCURRENCY`.
+
+### Accounts and email
+- `domino.mail`: SMTP, a console backend while debugging, and an outbox under pytest (`mail_outbox` fixture).
+- Password reset, email verification (`login_required(verified=True)`) and changing the password. The login and sign-up forms are built on `domino.forms`.
+
+### Speed
+- Over the WebSocket, updates are sent as line-diff patches against what the tab already has: a chat message to a 200-message list goes from 28 KB to 198 bytes. Large predicted states are patched too.
+- Hidden tabs pause: the server skips their updates until they're shown again.
+- `{"domino": {"ws_compression": false}}` saves ~43 KB per idle tab.
+
+### Documentation
+- A documentation site built with Domino (`docs/`, `python docs/app.py`): a tutorial with live demos, and guide pages made from the README.
+
+### Experimental
+- Client components: `client = True` runs a component in the browser on MicroPython (or Pyodide), server-rendered first, working offline once loaded. See `docs/research/client-python.md`.
+
+### Fixes
+- `<pre>` and `<textarea>` content is no longer indented by the renderer.
 
 ## 0.2.0
 
