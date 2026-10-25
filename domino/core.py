@@ -530,6 +530,7 @@ class Domino(Flask):
 		self._add_stream('/_domino/stream')
 		self._add_oauth_routes('/_domino/accounts/<provider>/<action>')
 		self._add_session_handoff('/_domino/session/<token>')
+		self._add_health_check('/_domino/health')
 
 		# File-based routing, found once here rather than per request
 		self._add_pages(pages)
@@ -957,6 +958,15 @@ class Domino(Flask):
 	def _prune_pages(self):
 
 		self.page_store.prune(self.config["DOMINO_PAGE_TTL"], self.config["DOMINO_MAX_PAGES"])
+
+
+	def _add_health_check(self, route):
+
+		# For load balancers and container platforms to check the app answers: no page is made
+		def health():
+			return Response("ok", mimetype="text/plain", headers={"Cache-Control": "no-store"})
+
+		self.add_url_rule(route, "domino_health", health, methods=["GET"])
 
 
 	def _add_static_route(self, route, data):

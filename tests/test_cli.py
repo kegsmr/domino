@@ -26,7 +26,7 @@ def clean_environ(monkeypatch):
 
 	# DOMINO_* and Flask variables from the shell running the tests would change what run() does
 	for name in list(os.environ):
-		if name.startswith("DOMINO_") or name in ("FLASK_DEBUG", "WERKZEUG_RUN_MAIN", "FLASK_RUN_FROM_CLI"):
+		if name.startswith("DOMINO_") or name in ("FLASK_DEBUG", "WERKZEUG_RUN_MAIN", "FLASK_RUN_FROM_CLI", "WEB_CONCURRENCY", "MONGO_URL"):
 			monkeypatch.delenv(name)
 
 	for name in SET_BY_RUN:
@@ -116,6 +116,49 @@ def test_serve_needs_at_least_one_worker(workers, capsys):
 	assert "--workers" in capsys.readouterr().err
 
 
+def test_build_arguments():
+
+	args = cli.build_parser().parse_args(["build"])
+	assert (args.command, args.app, args.force) == ("build", ".", False)
+
+	args = cli.build_parser().parse_args(["build", "site", "--force"])
+	assert (args.app, args.force) == ("site", True)
+
+
+def test_deploy_arguments():
+
+	args = cli.build_parser().parse_args(["deploy", "fly"])
+	assert (args.command, args.platform, args.app, args.name, args.mongo_url, args.force) == ("deploy", "fly", ".", None, None, False)
+
+	args = cli.build_parser().parse_args(["deploy", "render", "site", "--name", "My Site", "--mongo-url", "mongodb+srv://db/x", "--force"])
+	assert (args.platform, args.app, args.name, args.mongo_url, args.force) == ("render", "site", "My Site", "mongodb+srv://db/x", True)
+
+	assert cli.build_parser().parse_args(["deploy", "docker"]).platform == "docker"
+
+
+def test_deploy_needs_a_known_platform(capsys):
+
+	with pytest.raises(SystemExit) as exit:
+		cli.main(["deploy", "heroku"])
+
+	assert exit.value.code == 2
+	assert "invalid choice" in capsys.readouterr().err
+
+	with pytest.raises(SystemExit):
+		cli.main(["deploy"])
+
+
+def test_build_and_deploy_errors_are_one_line(tmp_path, capsys):
+
+	(tmp_path / "empty").mkdir()
+
+	assert cli.main(["build", str(tmp_path / "empty")]) == 1
+	assert "domino: No app.py or pages/ folder" in capsys.readouterr().err
+
+	assert cli.main(["deploy", "docker", str(tmp_path / "nope")]) == 1
+	assert "domino: No app at" in capsys.readouterr().err
+
+
 def test_version_flag(capsys):
 
 	with pytest.raises(SystemExit) as exit:
@@ -194,7 +237,9 @@ def test_create_scaffolds_an_app(tmp_path, capsys):
 	assert json.loads((folder / "settings.json").read_text())["public"]["title"] == "hello"
 	assert ".domino/" in (folder / ".gitignore").read_text()
 	assert "settings.local.json" in (folder / ".gitignore").read_text()
-	assert "domino run" in capsys.readouterr().out
+	output = capsys.readouterr().out
+	assert "domino run" in output
+	assert "domino deploy" in output
 
 
 @pytest.mark.mongo
@@ -432,6 +477,29 @@ def test_serve_with_one_worker_serves_the_app_itself(tmp_path, workers_serve, st
 	assert started["run"] == [{"host": "0.0.0.0", "port": 8000, "reload": False, "debug": False}]
 	assert started["mongo"] == []
 	assert "App: http://0.0.0.0:8000/ (1 worker)" in capsys.readouterr().err
+
+
+def test_serve_reads_the_number_of_workers_from_web_concurrency(tmp_path, workers_serve, started, monkeypatch, capsys):
+
+	folder = tmp_path / "prod"
+	write_app(folder)
+
+	# As uvicorn and gunicorn do; platforms (and the Dockerfile `domino build` writes) set it
+	monkeypatch.setenv("WEB_CONCURRENCY", "3")
+	assert cli.main(["serve", str(folder)]) == 0
+	assert workers_serve == [(str(folder.resolve()), "127.0.0.1", 8000, 3)]
+
+	# --workers wins
+	assert cli.main(["serve", str(folder), "--workers", "2"]) == 0
+	assert workers_serve[-1][-1] == 2
+
+	monkeypatch.setenv("WEB_CONCURRENCY", "1")
+	assert cli.main(["serve", str(folder)]) == 0
+	assert len(workers_serve) == 2 and len(started["run"]) == 1
+
+	monkeypatch.setenv("WEB_CONCURRENCY", "lots")
+	assert cli.main(["serve", str(folder)]) == 1
+	assert "WEB_CONCURRENCY" in capsys.readouterr().err
 
 
 def test_serve_checks_the_app_is_there(tmp_path, workers_serve, capsys):

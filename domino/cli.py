@@ -1,5 +1,5 @@
 """The `domino` command: `domino run` and `domino create`, like `meteor run` and `meteor create`,
-and `domino serve` for production."""
+`domino serve` for production, and `domino build` and `domino deploy`, like `meteor deploy`."""
 
 import argparse
 import importlib.util
@@ -10,7 +10,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from . import devmongo
+from . import deploy, devmongo
 
 
 APP_TEMPLATE = '''\
@@ -157,6 +157,17 @@ def build_parser():
 	serve.add_argument("--port", type=int, default=8000, help="port to serve on (default: 8000)")
 	serve.add_argument("--host", default="127.0.0.1", help="interface to serve on (default: 127.0.0.1; 0.0.0.0 for every one)")
 
+	build = commands.add_parser("build", help="write a Dockerfile for an app, to deploy it anywhere")
+	build.add_argument("app", nargs="?", default=".", help="the app's folder (default: the current folder)")
+	build.add_argument("--force", action="store_true", help="write the files again even if they're there")
+
+	ship = commands.add_parser("deploy", help="deploy an app to Fly.io or Render, or as a Docker image")
+	ship.add_argument("platform", choices=sorted(deploy.PLATFORMS), help="where to deploy: fly, render or docker")
+	ship.add_argument("app", nargs="?", default=".", help="the app's folder (default: the current folder)")
+	ship.add_argument("--name", help="the app's name on the platform (default: from the folder's name)")
+	ship.add_argument("--mongo-url", help="the production MongoDB URL (default: DOMINO_MONGO__URL, MONGO_URL or settings.local.json)")
+	ship.add_argument("--force", action="store_true", help="write the deployment files again even if they're there")
+
 	create = commands.add_parser("create", help="create a new app folder")
 	create.add_argument("name", help="folder to create")
 
@@ -184,7 +195,12 @@ def main(argv=None):
 			return serve(args)
 		if args.command == "create":
 			return create(args.name)
-	except (CliError, devmongo.DevMongoError) as error:
+		if args.command == "build":
+			deploy.build(args.app, args.force)
+			return 0
+		if args.command == "deploy":
+			return deploy.deploy(args.platform, args.app, name=args.name, mongo_url=args.mongo_url, force=args.force)
+	except (CliError, devmongo.DevMongoError, deploy.DeployError) as error:
 		print(f"domino: {error}", file=sys.stderr)
 		return 1
 
@@ -293,11 +309,25 @@ def app_path(path):
 	return str(path)
 
 
+def env_workers():
+	"""The number of workers in WEB_CONCURRENCY, as uvicorn and gunicorn read it (platforms and
+	the Dockerfile `domino build` writes set it), or None."""
+
+	value = os.environ.get("WEB_CONCURRENCY", "").strip()
+	if not value:
+		return None
+
+	try:
+		return positive_int(value)
+	except (ValueError, argparse.ArgumentTypeError):
+		raise CliError(f"WEB_CONCURRENCY must be a number of workers, at least 1, not {value!r}") from None
+
+
 def serve(args):
 
 	from . import asgi, workers
 
-	count = args.workers or workers.default_count()
+	count = args.workers or env_workers() or workers.default_count()
 
 	# One process needs no router: the app served by uvicorn, as `uvicorn app:app.asgi` would
 	if count == 1:
@@ -337,6 +367,6 @@ def create(name):
 		(folder / path).parent.mkdir(parents=True, exist_ok=True)
 		(folder / path).write_text(text, encoding="utf-8")
 
-	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n\nTo test it:\n\n    pytest\n")
+	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n\nTo test it:\n\n    pytest\n\nTo deploy it (to Fly.io, Render, or anywhere Docker runs):\n\n    domino deploy fly\n")
 
 	return 0
