@@ -355,6 +355,24 @@ def test_account_emails_are_one_plain_address(users, email):
 		accounts.create_user(email, "correct horse")
 
 
+def test_signup_email_check_takes_linear_time(users):
+
+	import time
+
+	from domino import accounts
+
+	# The old pattern backtracked over "a.a.a...": 16 KB took 1.5 s, an event's 1 MB hours
+	email = "a@" + "a." * 100000 + " "
+
+	start = time.perf_counter()
+	assert accounts.EMAIL_PATTERN.match(email) is None
+	with pytest.raises(accounts.AccountError):
+		accounts.create_user(email, "correct horse")
+	assert time.perf_counter() - start < 1
+
+	assert accounts.EMAIL_PATTERN.match("ada.lovelace+x@mail.example.co.uk")
+
+
 def test_reset_links_stop_working_when_the_email_changes(users):
 
 	from domino import accounts, mail
