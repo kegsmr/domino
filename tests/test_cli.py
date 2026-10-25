@@ -234,7 +234,7 @@ def test_create_scaffolds_an_app(tmp_path, capsys):
 	assert cli.main(["create", str(folder)]) == 0
 
 	files = sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file())
-	assert files == [".gitignore", "app.py", "components/tasks.py", "data.py", "pages/index.py", "pages/index_test.py", "pages/layout.py", "settings.json"]
+	assert files == [".gitignore", "app.py", "components/tasks.html", "components/tasks.py", "data.py", "pages/index.py", "pages/index_test.py", "pages/layout.html", "settings.json"]
 	assert json.loads((folder / "settings.json").read_text())["public"]["title"] == "hello"
 	assert ".domino/" in (folder / ".gitignore").read_text()
 	assert "settings.local.json" in (folder / ".gitignore").read_text()

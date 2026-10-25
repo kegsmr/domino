@@ -1,3 +1,9 @@
-<p>Count: <strong>{{ count }}</strong></p>
-<button {{ on(click=increment) }}>+1</button>
-<button {{ on(click=reset) }} {% if count == 0 %}disabled{% endif %}>Reset</button>
+<!-- The markup of the Counter class in counter.py. Its attributes go on the component's own <div> -->
+<Counter class="counter">
+	<p>Count: <strong>{{ count }}</strong></p>
+	<button on-click="increment">+1</button>
+	<button on-click="reset" :disabled="at_zero">Reset</button>
+	<p if="at_zero" class="hint">Click +1. Every click shows at once, even on a slow connection.</p>
+	<p elif="big" class="hint">{{ count }} clicks: that's plenty.</p>
+	<p else class="hint">Keep going.</p>
+</Counter>

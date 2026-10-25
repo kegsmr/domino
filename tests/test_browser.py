@@ -919,22 +919,117 @@ def test_component_css_from_an_event_response_is_added_once(page):
 		server.shutdown()
 
 
-def test_counter_paired_with_a_jinja_template_in_a_jinja_page(serve, page):
+def test_template_counter_is_instant(serve, page):
 
 	page.goto(serve("templating"))
 	page.evaluate("Domino.enableLatencySim(1000)")
 	counter = page.locator(".Counter")
 
-	counter.get_by_text("+1").click()
+	counter.get_by_role("button", name="+1").click()
+	# Predicted from the template, long before the server answers: Reset is enabled at once too
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '1'", timeout=500)
+	assert not counter.get_by_role("button", name="Reset").is_disabled()
+	assert counter.locator(".hint").inner_text() == "Keep going."
+	# A counter can go on forever, so only the next state is shipped; the server catches up
+	counter.get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '2'", timeout=8000)
+	page.wait_for_function("!document.querySelector('.Counter').hasAttribute('data-predicted')", timeout=8000)
+	assert counter.locator("strong").inner_text() == "2"
+
+	counter.get_by_role("button", name="Reset").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '0'", timeout=5000)
+	page.wait_for_function("document.querySelector('.Counter button:nth-of-type(2)').disabled", timeout=5000)
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_template_todo_list_adds_toggles_and_removes_each_item(serve, page):
+
+	page.goto(serve("templating"))
+	todos = page.locator(".Todos")
+
+	todos.locator("input[name=text]").fill("Third <one>")
+	todos.locator("input[name=text]").press("Enter")
+	page.wait_for_function("document.querySelectorAll('.TodoList li').length === 3")
+	assert todos.locator("li span").all_inner_texts() == ["Write the markup in HTML", "Keep the logic in Python", "Third <one>"]
+	assert todos.locator("input[name=text]").input_value() == ""
+
+	# Each item's checkbox and button have their own index
+	todos.locator("li input[type=checkbox]").nth(1).click()
+	page.wait_for_function("document.querySelector('.TodoList .hint').textContent === '1 left.'")
+	assert "done" in todos.locator("li").nth(1).get_attribute("class")
+
+	todos.locator("li .remove").nth(0).click()
+	page.wait_for_function("document.querySelectorAll('.TodoList li').length === 2")
+	assert todos.locator("li span").all_inner_texts() == ["Keep the logic in Python", "Third <one>"]
+
+	for remaining in (1, 0):
+		todos.locator("li .remove").first.click()
+		page.wait_for_function(f"document.querySelectorAll('.TodoList li').length === {remaining}")
+	page.wait_for_function("document.querySelector('.EmptyState')?.textContent === 'Nothing to do. Add something above!'")
+	assert page.errors == []
+
+
+def test_template_faq_toggles_instantly(serve, page):
+
+	page.goto(serve("templating"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+	faq = page.locator(".Faq")
+
+	# on-click="toggle(index)": every state is shipped, so any number of clicks show at once
+	faq.get_by_text("Where does the logic go?").click()
+	page.wait_for_function("document.querySelectorAll('.Faq dd').length === 1", timeout=500)
+	assert faq.locator("dd").inner_text().startswith("In Python")
+	faq.get_by_text("Why is it instant?").click()
+	page.wait_for_function("document.querySelector('.Faq dd').textContent.startsWith('toggle()')", timeout=500)
+	faq.get_by_text("Why is it instant?").click()
+	page.wait_for_function("document.querySelectorAll('.Faq dd').length === 0", timeout=500)
+	assert faq.locator("button[aria-expanded=true]").count() == 0
+
+	# The server agrees once it has answered every click
+	page.wait_for_function("!document.querySelector('.Faq').hasAttribute('data-predicted')", timeout=10000)
+	assert faq.locator("dd").count() == 0
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_moving_between_template_pages_keeps_the_layouts_nodes(serve, page):
+
+	page.goto(serve("templating"))
+	# A property of the layout's <nav> node: a page load, or a rebuilt <nav>, would lose it
+	page.evaluate("document.querySelector('nav').domino_kept = 'yes'")
+
+	page.locator("nav").get_by_text("About").click()
+	page.wait_for_function("document.querySelector('h1').textContent === 'About'")
+	assert page.evaluate("document.querySelector('nav').domino_kept") == "yes"
+	assert page.evaluate("location.pathname") == "/about"
+
+	# The page's components work at once
+	page.locator(".Counter").get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '1'")
+
+	page.go_back()
+	page.wait_for_function("document.querySelector('h1').textContent === 'Templates'")
+	assert page.evaluate("document.querySelector('nav').domino_kept") == "yes"
+	assert page.errors == []
+
+
+def test_counter_in_a_jinja_page(serve, page):
+
+	page.goto(serve("templating") + "jinja")
+	page.evaluate("Domino.enableLatencySim(1000)")
+	counter = page.locator(".Counter")
+
+	counter.get_by_role("button", name="+1").click()
 	# Predicted from the paired template, before the server answers
 	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '1'", timeout=500)
-	counter.get_by_text("+1").click()
+	counter.get_by_role("button", name="+1").click()
 	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '2'", timeout=5000)
 	page.wait_for_function("!document.querySelector('.Counter').hasAttribute('data-predicted')", timeout=5000)
 
-	counter.get_by_text("Reset").click()
+	counter.get_by_role("button", name="Reset").click()
 	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '0'", timeout=5000)
-	assert counter.get_by_text("Reset").is_disabled()
+	assert counter.get_by_role("button", name="Reset").is_disabled()
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []
 
@@ -942,7 +1037,7 @@ def test_counter_paired_with_a_jinja_template_in_a_jinja_page(serve, page):
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="template strings need Python 3.14")
 def test_template_string_todo(serve, page):
 
-	page.goto(serve("templating"))
+	page.goto(serve("templating") + "jinja")
 	todo = page.locator(".Todo")
 
 	for number, text in enumerate(["one", "two"], 1):

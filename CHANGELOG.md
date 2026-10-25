@@ -19,6 +19,10 @@
 ### Styles
 - Tailwind CSS with zero setup: `{"tailwind": true}` (or a `tailwind.css` in the app's folder) and classes work anywhere. Tailwind's standalone CLI is downloaded once into `~/.domino/tailwind/`; `domino run` rebuilds as files change and open pages swap in the new CSS; `domino serve` builds it minified; `domino tailwind build` for Dockerfiles; `domino create --tailwind`.
 
+### Templates
+- Domino templates: markup in `.html` files, logic in Python. A capitalized tag at the top level of a file defines that component (`<TodoList as="aside">...</TodoList>`, found anywhere in the app by class name); anywhere else it uses one (`<Card heading="x">children</Card>`, with `<slot />`). `each=`, `if=`/`elif=`/`else` are attributes; `{{ value }}`, `:attr="helper(item)"` and `on-click="remove(item)"` read only from Python. Compiled once, escaped, whitespace kept as written, instant updates included. `.html` pages in `pages/`, layouts as HTML (`pages/layout.html`, a whole `<html>` document with `<slot />` where the page goes; nested ones are fragments; a `layout.py` next to one gives it values), and Meteor-style `index.html` documents. Jinja stays available. `domino create` and `examples/templating` use them.
+- Components take data and handlers from their parent: keyword arguments set what the class declares (`State`, properties, class attributes, `on_add = None` callbacks).
+
 ### Speed
 - Over the WebSocket, updates are sent as line-diff patches against what the tab already has: a chat message to a 200-message list goes from 28 KB to 198 bytes. Large predicted states are patched too.
 - Hidden tabs pause: the server skips their updates until they're shown again.

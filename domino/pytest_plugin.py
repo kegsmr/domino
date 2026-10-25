@@ -367,7 +367,8 @@ def open_page(request, _domino_database):
 	def open_(path=None, **params):
 
 		if path is None:
-			if not page_file.is_file():
+			# The page may be a template: pages/index.html
+			if not page_file.is_file() and not page_file.with_suffix(".html").is_file():
 				raise pytest.UsageError(f"{request.path.name} tests {page_file.name}, which doesn't exist; pass a path to open_page()")
 			path = page_url(pages, page_file, params)
 

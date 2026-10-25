@@ -193,6 +193,24 @@ def test_page_module_change_updates_open_pages_and_its_route(make_app):
 	assert app.test_page("/").text("h1") == "Hot counter"
 
 
+LAYOUT_HTML = '<html><head><title>Site</title></head><body><nav>{nav}</nav><slot /></body></html>'
+
+
+def test_a_saved_layout_html_updates_open_pages_and_new_template_pages_get_routes(make_app):
+
+	app, reloader = make_app({"pages/layout.html": LAYOUT_HTML.format(nav="old"), "pages/about.html": "<p>About</p>"})
+	page = app.test_page("/about")
+	assert page.text("nav") == "old" and page.text("p") == "About"
+
+	assert change(reloader, "pages/layout.html", LAYOUT_HTML.format(nav="new")) == "hot"
+	(message,) = messages(app, page)
+	assert "<nav>new</nav>" in message["html"] and "<p>About</p>" in message["html"]
+
+	assert app.test_client().get("/contact").status_code == 404
+	assert change(reloader, "pages/contact.html", "<p>Contact</p>") == "hot"
+	assert "<p>Contact</p>" in app.test_client().get("/contact").get_data(as_text=True)
+
+
 def test_new_and_deleted_pages(make_app):
 
 	app, reloader = make_app()

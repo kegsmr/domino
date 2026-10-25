@@ -568,6 +568,10 @@ def _component(node, values, kwargs):
 # Folders never searched for templates
 SKIPPED_FOLDERS = ("node_modules", "static", "__pycache__", "site-packages")
 
+# A file that starts (after comments and an optional {# domino #}) with a capitalized tag defines
+# components; see domino.dtemplates
+DEFINITION_START = re.compile(r"\A(?:\s|<!--.*?-->|\{#\s*domino\s*#\})*<[A-Z]", re.S)
+
 
 class TemplateFinder(BaseLoader):
 	"""Finds .html templates anywhere under the app's folder by file name, like Meteor.
@@ -577,13 +581,19 @@ class TemplateFinder(BaseLoader):
 	"""
 
 
-	def __init__(self, root, template_folder=None):
+	def __init__(self, root, template_folder=None, pages=None, setting=None):
 
 		self.root = os.path.abspath(root)
 		self.template_folder = None
 		if template_folder:
 			self.template_folder = os.path.join(self.root, template_folder)
+		# Templates in pages/ are pages, found by their URL, so names there may repeat
+		self.pages = os.path.join(self.root, pages) if pages else None
+		self.setting = setting  # {"templates": "jinja"} reads every file as Jinja
 		self.paired = {}  # paired component templates, by path
+		self.ambiguous = {}  # names of several pages' templates -> their paths
+		self.stale = False  # definitions to find again (hot reloading)
+		self.warned = False  # about definitions without a class
 		self.index = self.scan()
 
 
@@ -601,11 +611,32 @@ class TemplateFinder(BaseLoader):
 	def scan(self):
 
 		found = {}
+		files_found = []
 		for folder, folders, files in os.walk(self.root):
 			folders[:] = sorted(name for name in folders if not self.skip(folder, name))
 			for name in sorted(files):
-				if name.endswith(".html"):
-					found.setdefault(name, []).append(os.path.join(folder, name))
+				if name.endswith((".html", ".jinja")):
+					files_found.append(os.path.join(folder, name))
+
+		# Files that define components (<TodoList>...</TodoList>) are found by the names they define
+		self.definitions = self.find_definitions(files_found)
+		defining = {path for paths in self.definitions.values() for path in paths}
+
+		self.ambiguous = {}
+		in_pages = {}
+		for path in files_found:
+			if path in defining:
+				continue
+			name = os.path.basename(path)
+			if self.pages and path.startswith(self.pages + os.sep):
+				in_pages.setdefault(name, []).append(path)
+			else:
+				found.setdefault(name, []).append(path)
+		for name, paths in in_pages.items():
+			if len(paths) > 1 and name not in found:
+				self.ambiguous[name] = paths
+			else:
+				found.setdefault(name, []).extend(paths)
 
 		# Flask's loader would win silently, so a template there with the same name is ambiguous too
 		if self.template_folder:
@@ -626,6 +657,71 @@ class TemplateFinder(BaseLoader):
 			)
 
 		return {name: paths[0] for name, paths in found.items()}
+
+
+	def find_definitions(self, paths):
+		"""{component name: [files defining it]} from the files whose top level is component
+		definitions (<TodoList>...</TodoList>). Pages, Jinja templates and partials are skipped."""
+
+		from . import dtemplates
+
+		definitions = {}
+		for path in paths:
+			if not path.endswith(".html"):
+				continue
+			with open(path, encoding="utf-8") as file:
+				source = file.read()
+			if not DEFINITION_START.match(source) or dtemplates.source_format(path, source, self.setting) != "domino":
+				continue
+			for name in dtemplates.definitions_in(path):
+				definitions.setdefault(name, []).append(path)
+
+		# Two classes with one name, in different modules, can each have the template next to
+		# their module; any other repeat is a mistake
+		for name, found in sorted(definitions.items()):
+			if len(found) > 1 and not all(os.path.isfile(os.path.splitext(path)[0] + ".py") for path in found):
+				files = "\n".join(f"    {dtemplates.shown_path(path)}" for path in found)
+				raise TemplateError(
+					f"<{name}> is defined in more than one file. Each component has one definition; "
+					f"remove or rename one of them:\n{files}"
+				)
+
+		return definitions
+
+
+	def current_definitions(self):
+
+		if self.stale:
+			self.stale = False
+			self.warned = False
+			self.index = self.scan()
+
+		return self.definitions
+
+
+	def path(self, name, environment=None, auto_reload=False):
+		"""The file of the template called `name`, or None."""
+
+		if name in self.ambiguous:
+			files = "\n".join(f"    {path}" for path in self.ambiguous[name])
+			raise TemplateError(f"Several templates are called {name}; pages are found by their URL, so use a page's own path, or rename one:\n{files}")
+
+		path = self.paired.get(name) or self.index.get(name)
+		if path is None and self.template_folder:
+			candidate = os.path.join(self.template_folder, name)
+			if os.path.isfile(candidate):
+				path = candidate
+
+		# While debugging, a template added since startup is found without a restart
+		if path is None and auto_reload:
+			self.index = self.scan()
+			path = self.index.get(name)
+
+		# A file of component definitions, which rendering says isn't a page
+		if path is None:
+			path = next((path for paths in self.definitions.values() for path in paths if os.path.basename(path) == name), None)
+
+		return path
 
 
 	def get_source(self, environment, template):
@@ -659,12 +755,52 @@ class TemplateFinder(BaseLoader):
 
 
 def template(name, /, **context):
-	"""A Jinja template as an element: templates/<name>, or <name> anywhere in the app's folder.
-
-	Inside it, {{ component(Counter) }} and {{ element }} render live Domino components.
+	"""A template as an element: templates/<name>, or <name> anywhere in the app's folder. A Domino
+	template (see domino.dtemplates) shows components as tags, <Counter />, found in the context,
+	the calling module, or the app's components; a Jinja one with {{ component(Counter) }}.
 	"""
 
+	try:
+		app = _app()
+	except RuntimeError:
+		app = None
+
+	finder = getattr(app, "template_finder", None)
+	path = None
+	if finder is not None:
+		path = finder.path(name, auto_reload=bool(app.debug or app.config.get("TEMPLATES_AUTO_RELOAD")))
+
+	if path is not None and template_format(path) != "jinja":
+		from .dtemplates import DominoTemplate
+		return DominoTemplate(path, context, sys._getframe(1).f_globals)
+
 	return JinjaTemplate(name, **context)
+
+
+def page_template(path, /, **context):
+	"""A template in pages/ as its page, with the URL's parameters as its context."""
+
+	if template_format(path) == "jinja":
+		_app().template_finder.paired[path] = path
+		return JinjaTemplate(path, **context)
+
+	from .dtemplates import DominoTemplate
+
+	return DominoTemplate(path, context)
+
+
+def template_format(path):
+	""""components", "domino" or "jinja" for a template file (see dtemplates.file_format)."""
+
+	from .dtemplates import file_format
+
+	setting = None
+	try:
+		setting = (getattr(_app(), "settings", None) or {}).get("templates")
+	except RuntimeError:
+		pass
+
+	return file_format(path, setting)
 
 
 class JinjaTemplate(Element):
@@ -789,8 +925,10 @@ def snake_case(name):
 
 
 def paired_template(cls):
-	"""The .html file next to a component's module named after the class (TodoList ->
-	todo_list.html) or the module (counter.py -> counter.html), or None."""
+	"""The template file of a component without render(), or None: the file defining it
+	(<TodoList>...</TodoList>, see domino.dtemplates), the one next to its module winning when
+	several classes share the name; or a Jinja template next to its module named after the class
+	(TodoList -> todo_list.html) or the module (counter.py -> counter.html)."""
 
 	if cls.__module__.split(".")[0] == "domino":
 		return None
@@ -800,16 +938,40 @@ def paired_template(cls):
 		return None
 
 	folder, filename = os.path.split(os.path.abspath(path))
-	for name in (snake_case(cls.__name__), os.path.splitext(filename)[0]):
-		candidate = os.path.join(folder, f"{name}.html")
-		if os.path.isfile(candidate):
-			return candidate
+	stem = os.path.splitext(filename)[0]
+
+	# The older way: a Jinja template, the markup as it is (not inside <TodoList>)
+	for name in (snake_case(cls.__name__), stem):
+		for extension in (".html", ".jinja"):
+			candidate = os.path.join(folder, f"{name}{extension}")
+			if os.path.isfile(candidate) and template_format(candidate) != "components":
+				return candidate
+
+	beside = os.path.join(folder, f"{stem}.html")
+	try:
+		finder = getattr(_app(), "template_finder", None)
+	except RuntimeError:
+		finder = None
+	if finder is not None:
+		defined = finder.current_definitions().get(cls.__name__, ())
+		if beside in defined:
+			return beside
+		if defined:
+			return defined[0]
+
+	# A file of definitions next to the module, without this class's: rendering says so
+	if os.path.isfile(beside) and template_format(beside) == "components":
+		return beside
 
 	return None
 
 
 def render_paired(element, path):
 	"""Render a component with its paired template; the HTML becomes its children."""
+
+	if template_format(path) == "components":
+		from .dtemplates import render_component
+		return render_component(element, path)
 
 	app = _app()
 	finder = getattr(app, "template_finder", None)

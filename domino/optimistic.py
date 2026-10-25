@@ -221,6 +221,12 @@ def predictable_callback(component, callback):
 	"""Whether `callback`, bound in `component`'s render, can run ahead of time: a predictable
 	method of the component, or a lambda that only calls one with plain values."""
 
+	# on-click="remove(item)" in a Domino template: one of the component's methods, with values
+	call = getattr(callback, "__domino_call__", None)
+	if call is not None:
+		method, args = call
+		return getattr(method, "__self__", None) is component and callable_methods(type(component)).get(method.__name__) == len(args)
+
 	if getattr(callback, "__self__", None) is component:
 		return getattr(callback, "__name__", None) in predictable_methods(type(component))
 
@@ -548,6 +554,18 @@ def explain(component, callback):
 
 	states = state_names(cls)
 	nothing = f"{cls.__name__} has no State attributes, so there's nothing to predict"
+
+	# on-click="remove(item)" in a Domino template
+	if hasattr(callback, "__domino_call__"):
+		call = callback.__domino_call__
+		if call is None:
+			return "the handler takes the event, which isn't known before the click"
+		method, args = call
+		if getattr(method, "__self__", None) is not component:
+			return f"it calls a method of {type(method.__self__).__name__}, not of this {cls.__name__}"
+		if not states:
+			return nothing
+		return f"it calls {method.__name__}() with {len(args)} value(s), and " + method_reason(method.__func__, states, read_parameters=True)
 
 	owner = getattr(callback, "__self__", None)
 	if owner is not None:
