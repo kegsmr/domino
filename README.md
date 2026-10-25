@@ -120,7 +120,7 @@ cd myapp
 domino run
 ```
 
-`domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, `pages/index.py` and `pages/layout.py`, a component in `components/`, a `Collection` in `data.py`, a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
+`domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, `pages/index.py` and `pages/layout.py`, a component in `components/`, a `Collection` in `data.py`, a test for the page in `pages/index_test.py` (run it with `pytest`; see [Testing your app](#testing-your-app)), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
 
 `domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode with uvicorn's reloader, so it restarts when you save a `.py` file in the app's folder. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `domino --version` prints the version.
 
@@ -128,7 +128,7 @@ domino run
 
 ### Development MongoDB
 
-Like `meteor run`, running an app in debug mode starts a local MongoDB for it, unless its settings already have `mongo.url`. This happens with `domino run`, and also with `app.run(debug=True)` (or `FLASK_DEBUG=1`, or `app.debug = True`). Importing the app, tests, `flask run` and production servers never start one.
+Like `meteor run`, running an app in debug mode starts a local MongoDB for it, unless its settings already have `mongo.url`. This happens with `domino run`, and also with `app.run(debug=True)` (or `FLASK_DEBUG=1`, or `app.debug = True`). Importing the app, `flask run` and production servers never start one. Page tests get one of their own (see [MongoDB in tests](#mongodb-in-tests)).
 
 - The first time, the newest MongoDB 7.0 release built for your OS and CPU is downloaded from mongodb.org (about 100MB), checked against its published SHA-256, and only `mongod` is kept, in `~/.domino/mongodb/<version>/`. Set `DOMINO_HOME` to keep it somewhere else. Later runs use the cached binary and work offline. `--mongo-version` (or the setting `mongo.version`) picks another release series, such as `8.0`.
 - `mongod` listens on 127.0.0.1, on the app's port + 1 (5001 for 5000), or on any free port if that one is busy. Its data goes in `.domino/db` in the app's folder and its log in `.domino/mongod.log`. Add `.domino/` to your app's `.gitignore` (`domino create` does).
@@ -480,7 +480,17 @@ There's no real browser and no server running, but clicks, typing and form submi
 
 Find elements with simple CSS selectors (`tag`, `.class`, `#id`, `[attr=value]`, and descendants like `form input`), optionally narrowed with `text=`. Pages can be driven with `click`, `fill` (set a value without firing events), `type` (fires `input`), `select`, `check`, and `submit`. Inspect them with `text`, `value`, `find`/`find_all`, `html`, `status` and `path`. `sync()` applies changes other pages pushed to this one, `run_timers()` fires pending `after()` timers right away, and `load(path)` navigates (redirects are followed and cookies kept, like a browser, so a login carries over). A failing handler, or a selector that matches nothing, fails the test with the traceback and the page's text.
 
-Outside `pages/`, `app.test_page(path)` gives the same simulated browser for any app. See the examples' `pages/*_test.py`, e.g. [examples/counter/pages/index_test.py](examples/counter/pages/index_test.py).
+Outside `pages/`, `app.test_page(path)` gives the same simulated browser for any app. See the examples' `pages/*_test.py`, e.g. [examples/counter/pages/index_test.py](examples/counter/pages/index_test.py), [examples/chat/pages/index_test.py](examples/chat/pages/index_test.py) (two windows) and [examples/accounts/pages/private_test.py](examples/accounts/pages/private_test.py) (signing up and logging out).
+
+### MongoDB in tests
+
+Like `meteor test`, pages with named Collections can be tested with nothing to set up. The first time a test that uses `page` or `open_page` connects to MongoDB, a `mongod` is started for the test session (the same cached download as `domino run`'s, on a free port, with its data in a temporary folder, so your development database in `.domino/` is never touched), and it's stopped when the session ends. Tests that don't use named Collections never start it.
+
+- Each test gets an empty database of its own (`domino_test_<session>_<n>`), dropped in the background after the test. Collections switch to it by themselves, and change streams follow, so changes from one test never reach the next. `sync()` waits for the change stream to announce this process's writes, so a second tab sees them straight away. The overhead is about a millisecond per test.
+- The `domino_db` fixture gives the same database (as a pymongo `Database`) to any test, including tests that use collections directly: `def test_import(domino_db): ...`.
+- To use a server you run instead (e.g. in CI), set `DOMINO_TEST_MONGO_URL=mongodb://127.0.0.1:27017/?replicaSet=rs0`; nothing is started then. A `mongo.url` setting (or `DOMINO_MONGO__URL`) is used the same way. Either way, tests only create and drop their own databases on it, never the one the URL names. Use a replica set, so pages update live.
+- To turn it off, pass `pytest --no-mongo`, set `DOMINO_NO_MONGO=1`, or set `{"mongo": {"auto": false}}`. A test that uses a named Collection then fails with a message saying so. If `mongod` can't be downloaded or started (offline, say), tests that need it fail with the reason and a pointer to `DOMINO_TEST_MONGO_URL`.
+- With pytest-xdist, each worker starts its own `mongod`, or shares the `DOMINO_TEST_MONGO_URL` server with databases of its own.
 
 ## How the browser talks to the server
 
@@ -513,6 +523,8 @@ Because of that, run a single process, or use sticky sessions so a browser keeps
 pip install -e .[test]
 python -m pytest
 ```
+
+Tests marked `mongo` are skipped unless `DOMINO_TEST_MONGO_URL` points at a MongoDB replica set, e.g. `DOMINO_TEST_MONGO_URL="mongodb://127.0.0.1:27017/?replicaSet=rs0" python -m pytest`. The examples' page tests use it too, or else start a `mongod` themselves (see [MongoDB in tests](#mongodb-in-tests)).
 
 ## Releasing
 

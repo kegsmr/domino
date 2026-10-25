@@ -10,6 +10,8 @@ import os
 import threading
 import time
 import weakref
+from contextlib import contextmanager
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 
 log = logging.getLogger(__name__)
@@ -17,8 +19,11 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _url = None
 _client = None
+_client_server = None  # the URL _client was made for, without its database
 _database = None
 _app = None
+_generation = 0  # bumped by connect(): stores made before it are stale
+_stores = weakref.WeakSet()
 
 
 class MongoNotConfigured(RuntimeError):
@@ -34,20 +39,69 @@ def use_app(app):
 
 
 def connect(url):
-	"""Use MongoDB at `url` from now on (the database name comes from the URL, default "domino")."""
+	"""Use MongoDB at `url` from now on (the database name comes from the URL, default "domino").
+	`url` can also be a function returning it, called on first use: the pytest plugin passes one,
+	so that MongoDB is only started for tests that use it.
 
-	global _url, _client, _database
+	Collections switch to the new database the next time they're used, and their change streams
+	on the old one stop without announcing anything more."""
 
-	# The old client isn't closed: change stream watchers may still be reading from it, and
-	# it's closed when nothing uses it any more
+	global _url, _database, _generation
+
+	# The client is kept for the same server (another database on it needs no new connections).
+	# One for another server replaces it, unclosed: it's closed when nothing uses it any more
 	with _lock:
 		_url = url
-		_client = None
 		_database = None
+		_generation += 1
+
+
+def close():
+	"""Close the connection (the pytest plugin does before it stops the MongoDB it started)."""
+
+	global _client, _client_server, _database, _generation
+
+	with _lock:
+		client = _client
+		_client = _client_server = _database = None
+		_generation += 1
+
+	if client is not None:
+		client.close()
+
+
+def split_url(url):
+	"""(the URL without its database, the database name) for a MongoDB URL."""
+
+	parts = urlsplit(url)
+	name = unquote(parts.path.lstrip("/")) or "domino"
+
+	return urlunsplit((parts.scheme, parts.netloc, "/", parts.query, parts.fragment)), name
+
+
+def drop_database(url):
+	"""Drop the database `url` names, if this process is connected to its server."""
+
+	server, name = split_url(url)
+	with _lock:
+		client = _client if _client_server == server else None
+
+	if client is not None:
+		client.drop_database(name)
+
+
+def wait(timeout=5):
+	"""Wait until change streams have announced this process's writes, so subscribers were
+	re-rendered (domino.wait() calls this)."""
+
+	for store in list(_stores):
+		store.wait(timeout)
 
 
 def configured_url():
 
+	if callable(_url):
+		return _url()
 	if _url:
 		return _url
 
@@ -63,7 +117,7 @@ def configured_url():
 def database():
 	"""The connected database, connecting on first use."""
 
-	global _client, _database
+	global _client, _client_server, _database
 
 	with _lock:
 		if _database is not None:
@@ -83,8 +137,12 @@ def database():
 		except ImportError:
 			raise MongoNotConfigured("MongoDB needs pymongo: pip install pymongo") from None
 
-		_client = pymongo.MongoClient(url)
-		_database = _client.get_default_database(default="domino")
+		# Made with the whole URL, so credentials are checked against its database as usual
+		server, name = split_url(url)
+		if _client is None or _client_server != server:
+			_client = pymongo.MongoClient(url)
+			_client_server = server
+		_database = _client[name]
 
 		return _database
 
@@ -108,18 +166,23 @@ class MongoStore:
 
 		self.name = name
 		database()  # fail early, with a clear message, when MongoDB isn't configured
+		self.generation = _generation
 		self.watching = False
-		self._watch_failed = False
+
+		# Cluster times of this process's last write and of the last change the stream
+		# announced, for wait()
+		self._written = None
+		self._seen = None
+		self._caught_up = threading.Condition()
+		_stores.add(self)
 
 		# Weak, so a collection nobody uses any more doesn't keep a watcher alive
 		self._changed = weakref.WeakMethod(changed)
+		self._started = threading.Event()
 		threading.Thread(target=self._watch, name=f"domino-watch-{name}", daemon=True).start()
 
 		# Give the change stream a moment to open, so a write made right away is seen by it
-		for _ in range(50):
-			if self.watching or self._watch_failed:
-				break
-			time.sleep(0.01)
+		self._started.wait(0.5)
 
 
 	def _watch(self):
@@ -127,32 +190,76 @@ class MongoStore:
 		import pymongo.errors
 
 		resume = None
-		while True:
+		while not self.stale:
 			try:
 				with self.collection.watch(resume_after=resume) as stream:
 					self.watching = True
-					for change in stream:
+					self._started.set()
+					while stream.alive:
+						# None after a second without changes, so a stale watcher ends soon
+						change = stream.try_next()
+						# Stale: connect() switched databases, e.g. for the next test
+						if self.stale:
+							return
+						if change is None:
+							continue
 						resume = stream.resume_token
 						changed = self._changed()
 						if changed is None:
 							return
 						changed()
+						with self._caught_up:
+							self._seen = change.get("clusterTime")
+							self._caught_up.notify_all()
 						# A dropped collection or database ends the stream for good, and it
 						# can't be resumed; start a new one so a recreated collection stays live
 						if change.get("operationType") == "invalidate":
 							resume = None
 							break
 			except pymongo.errors.OperationFailure as error:
+				if self.stale:
+					return
 				# Change streams need a replica set; without one, only this process's own
 				# writes re-render subscribers
 				self.watching = False
-				self._watch_failed = True
+				self._started.set()
 				log.warning("No change stream for %r (%s): changes from other processes won't update pages live", self.name, error)
 				return
 			except pymongo.errors.PyMongoError:
 				self.watching = False
+				if self.stale:
+					return
 				log.exception("Change stream for %r stopped; reconnecting", self.name)
 				time.sleep(1)
+
+
+	@property
+	def stale(self):
+		"""Whether connect() was called since this store was made (Collection makes a new one)."""
+
+		return self.generation != _generation
+
+
+	def wait(self, timeout=5):
+
+		with self._caught_up:
+			self._caught_up.wait_for(lambda: not self.watching or self.stale or self._written is None or (self._seen is not None and self._seen >= self._written), timeout)
+
+
+	@contextmanager
+	def _session(self):
+
+		# Its operation time is the write's cluster time, which the change stream reports
+		with self.collection.database.client.start_session() as session:
+			yield session
+
+
+	def _wrote(self, session):
+
+		if self.watching and session.operation_time is not None:
+			with self._caught_up:
+				if self._written is None or session.operation_time > self._written:
+					self._written = session.operation_time
 
 
 	@property
@@ -164,7 +271,9 @@ class MongoStore:
 
 	def insert(self, document):
 
-		self.collection.insert_one(document)
+		with self._session() as session:
+			self.collection.insert_one(document, session=session)
+			self._wrote(session)
 
 
 	def find(self, query, sort, limit):
@@ -181,15 +290,27 @@ class MongoStore:
 
 	def update(self, query, changes, multi):
 
-		# Matched, not modified, like the in-memory store: an update that changes nothing still counts
-		if not any(key.startswith("$") for key in changes):
-			return self.collection.replace_one(query, changes).matched_count
-		if multi:
-			return self.collection.update_many(query, changes).matched_count
+		with self._session() as session:
+			if not any(key.startswith("$") for key in changes):
+				result = self.collection.replace_one(query, changes, session=session)
+			elif multi:
+				result = self.collection.update_many(query, changes, session=session)
+			else:
+				result = self.collection.update_one(query, changes, session=session)
 
-		return self.collection.update_one(query, changes).matched_count
+			# An update that changes nothing makes no change event to wait for
+			if result.modified_count:
+				self._wrote(session)
+
+		# Matched, not modified, like the in-memory store: an update that changes nothing still counts
+		return result.matched_count
 
 
 	def remove(self, query):
 
-		return self.collection.delete_many(query).deleted_count
+		with self._session() as session:
+			deleted = self.collection.delete_many(query, session=session).deleted_count
+			if deleted:
+				self._wrote(session)
+
+		return deleted

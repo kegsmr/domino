@@ -149,7 +149,11 @@ def _flush_in_background(pending):
 
 
 def wait():
-	"""Wait until background updates have been sent (useful in tests)."""
+	"""Wait until background updates have been sent (useful in tests), including those for
+	changes a MongoDB change stream has yet to announce."""
+
+	from . import mongo
+	mongo.wait()
 
 	_flushes.join()
 
@@ -317,8 +321,12 @@ class Collection:
 		with self._lock:
 			if self._store is None and self.name is None:
 				self._store = MemoryStore()
-			elif self._store is None:
+			elif self._store is None or getattr(self._store, "stale", False):
+				# A new one after domino.mongo.connect() (each test gets its own database);
+				# results read from the old database are forgotten
 				from .mongo import MongoStore
+				self._results.clear()
+				self._version += 1
 				self._store = MongoStore(self.name, self.changed)
 
 		return self._store

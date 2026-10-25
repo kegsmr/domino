@@ -8,19 +8,33 @@
 `page` is the page this file tests, already open in a simulated browser (domino.testing),
 and `open_page(**params)` opens it with URL parameters (pages/users/[id]_test.py) or opens
 any path of the app. Installed with Domino, so plain `pytest` finds these files.
+
+Like `meteor test`, these tests get MongoDB for named Collections without any setup: each test
+uses a database of its own, dropped after it, on DOMINO_TEST_MONGO_URL, the app's mongo.url, or
+else a mongod started (once, the first time a test connects) in a temporary folder and stopped
+at the end of the session. `domino_db` gives the same to tests that use collections directly.
 """
 
 import importlib.util
 import os
 import re
+import secrets
+import shutil
 import sys
+import tempfile
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import pytest
 
 
 TEST_SUFFIX = "_test.py"
+
+# An existing MongoDB for tests (e.g. in CI); nothing is started then
+ENV_TEST_URL = "DOMINO_TEST_MONGO_URL"
 
 _apps = {}  # app folder -> its Domino app, loaded once per test session
 _active = [None]  # the app folder whose modules (components, data, ...) are importable now
@@ -74,6 +88,9 @@ def load_app(folder):
 		app = _apps[folder] = load(folder)
 		# Handler errors come back to the test with their traceback
 		app.testing = True
+		# Session cookies (accounts) need one; `domino run` makes one up the same way
+		if not app.secret_key:
+			app.secret_key = secrets.token_hex(16)
 
 	return app
 
@@ -118,8 +135,215 @@ def pytest_pycollect_makemodule(module_path, parent):
 	return None
 
 
+def pytest_addoption(parser):
+
+	parser.addoption("--no-mongo", action="store_true", help=f"Domino: don't start a MongoDB for tests (use {ENV_TEST_URL} or mongo.url instead)")
+
+
+def pytest_unconfigure(config):
+
+	server = _servers.pop(config, None)
+	if server is not None:
+		server.stop()
+
+
+_servers = {}  # pytest config -> its TestMongo
+
+
+def with_database(url, name):
+
+	parts = urlsplit(url)
+
+	return urlunsplit((parts.scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))
+
+
+class TestMongo:
+	"""The MongoDB server of a test session, and a new database on it for each test."""
+
+
+	__test__ = False
+
+
+	def __init__(self, config):
+
+		self.config = config
+		self.token = uuid.uuid4().hex[:8]  # several sessions (and xdist workers) can share a server
+		self.count = 0
+		self.lock = threading.Lock()
+		self.mongod = None
+		self.folder = None
+		self.error = None
+		# Tests' databases are dropped one by one in the background, while the next tests run
+		self.drops = ThreadPoolExecutor(max_workers=1, thread_name_prefix="domino-test-drop")
+
+
+	def server_url(self, app, previous):
+		"""The server to use: DOMINO_TEST_MONGO_URL, mongo.connect()'s or the app's mongo.url,
+		or else a mongod started now, the first time a test needs one."""
+
+		from . import devmongo, mongo
+
+		url = os.environ.get(ENV_TEST_URL) or (previous if isinstance(previous, str) else None)
+		settings = app.settings if app is not None else {}
+		if not url:
+			url = (settings.get("mongo") or {}).get("url") or os.environ.get("DOMINO_MONGO__URL") or os.environ.get("MONGO_URL")
+		if url:
+			return url
+
+		if self.config.getoption("no_mongo") or devmongo.disabled_reason(settings):
+			raise mongo.MongoNotConfigured(
+				"This test uses a named Collection, which is stored in MongoDB, but starting one for "
+				"tests is turned off (--no-mongo, DOMINO_NO_MONGO or the setting mongo.auto: false). "
+				f"Set {ENV_TEST_URL} to a MongoDB server for tests, e.g. "
+				"mongodb://127.0.0.1:27017/?replicaSet=rs0, or use Collection() without a name."
+			)
+
+		with self.lock:
+			if self.error is None and self.mongod is None:
+				self.start(settings)
+			if self.error is not None:
+				raise mongo.MongoNotConfigured(self.error)
+
+			return self.mongod.url
+
+
+	def start(self, settings):
+
+		from . import devmongo
+
+		version = str((settings.get("mongo") or {}).get("version") or devmongo.DEFAULT_VERSION)
+		self.folder = tempfile.mkdtemp(prefix="domino-test-mongo-")
+		mongod = devmongo.DevMongo(self.folder, major=version)
+		mongod.dbname = "domino"
+
+		try:
+			mongod.start()
+		except (devmongo.DevMongoError, OSError) as error:
+			mongod.stop()
+			# Kept, so the other tests fail straight away instead of trying again
+			self.error = (
+				f"Couldn't start a MongoDB for the tests: {error}\n"
+				f"Set {ENV_TEST_URL} to a MongoDB server for tests (a replica set, so pages update "
+				"live), e.g. mongodb://127.0.0.1:27017/?replicaSet=rs0, or pass --no-mongo."
+			)
+			return
+
+		self.mongod = mongod
+
+
+	def database_url(self, app, previous):
+		"""A database of its own for the next test (MongoDB creates it on first write)."""
+
+		url = self.server_url(app, previous)
+
+		with self.lock:
+			self.count += 1
+			count = self.count
+
+		from . import mongo
+
+		_, name = mongo.split_url(url)
+
+		return with_database(url, f"{name[:24]}_test_{self.token}_{count}")
+
+
+	def drop(self, url):
+
+		from . import mongo
+
+		def drop():
+			try:
+				mongo.drop_database(url)
+			except Exception as error:
+				print(f"domino: couldn't drop the test database {url}: {error}", file=sys.stderr)
+
+		self.drops.submit(drop)
+
+
+	def stop(self):
+
+		from . import mongo
+
+		self.drops.shutdown()
+
+		if self.mongod is not None:
+			mongo.close()
+			self.mongod.stop()
+			self.mongod = None
+
+		if self.folder is not None:
+			shutil.rmtree(self.folder, ignore_errors=True)
+			self.folder = None
+
+
+class TestDatabase:
+	"""One test's MongoDB database, chosen (and the server started) only when it connects."""
+
+
+	__test__ = False
+
+
+	def __init__(self, server, previous):
+
+		self.server = server
+		self.previous = previous
+		self.app = None
+		self.url = None
+
+
+	def __call__(self):
+
+		from . import mongo
+
+		if self.url is None:
+			app = self.app
+			if app is None and mongo._app is not None:
+				app = mongo._app()
+			self.url = self.server.database_url(app, self.previous)
+
+		return self.url
+
+
+	def finish(self):
+
+		from . import mongo
+
+		# The test's change streams stop, without announcing anything to the next test
+		mongo.connect(self.previous)
+
+		if self.url is not None:
+			self.server.drop(self.url)
+
+
 @pytest.fixture
-def open_page(request):
+def _domino_database(request):
+
+	from . import mongo
+
+	server = _servers.get(request.config)
+	if server is None:
+		server = _servers[request.config] = TestMongo(request.config)
+
+	database = TestDatabase(server, mongo._url)
+	mongo.connect(database)
+
+	yield database
+
+	database.finish()
+
+
+@pytest.fixture
+def domino_db(_domino_database):
+	"""This test's MongoDB database (pymongo), the one named Collections use. Empty at the
+	start of each test and dropped after it."""
+
+	from . import mongo
+
+	return mongo.database()
+
+
+@pytest.fixture
+def open_page(request, _domino_database):
 	"""Open the page this test file is next to (`open_page(id=3)` fills in [id]), or any
 	path of its app (`open_page("/about")`). Each call is a new browser tab."""
 
@@ -129,6 +353,7 @@ def open_page(request):
 
 	folder, pages, page_file = target
 	app = load_app(folder)
+	_domino_database.app = app
 
 	def open_(path=None, **params):
 

@@ -97,6 +97,31 @@ from domino import Collection
 tasks = Collection("tasks")
 '''
 
+INDEX_TEST_TEMPLATE = '''\
+# Tests for pages/index.py, run with `pytest`. `page` is the page, open in a simulated browser.
+# Each test gets an empty database, on a MongoDB started for the tests
+
+
+def test_add_a_task(page):
+
+	page.fill("input[name=text]", "Buy milk")
+	page.click("button", text="Add")
+
+	assert page.text("ul") == "Buy milk"
+	assert page.value("input[name=text]") == ""
+
+
+def test_other_tabs_see_it(page, open_page):
+
+	other = open_page()
+
+	page.fill("input[name=text]", "Walk the dog")
+	page.click("button", text="Add")
+	other.sync()
+
+	assert other.text("ul") == "Walk the dog"
+'''
+
 GITIGNORE_TEMPLATE = '''\
 settings.local.json
 .domino/
@@ -254,6 +279,7 @@ def create(name):
 		"app.py": APP_TEMPLATE,
 		"pages/layout.py": LAYOUT_TEMPLATE,
 		"pages/index.py": INDEX_TEMPLATE,
+		"pages/index_test.py": INDEX_TEST_TEMPLATE,
 		"components/tasks.py": COMPONENT_TEMPLATE,
 		"data.py": DATA_TEMPLATE,
 		"settings.json": json.dumps(settings, indent=4) + "\n",
@@ -264,6 +290,6 @@ def create(name):
 		(folder / path).parent.mkdir(parents=True, exist_ok=True)
 		(folder / path).write_text(text, encoding="utf-8")
 
-	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n")
+	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n\nTo test it:\n\n    pytest\n")
 
 	return 0
