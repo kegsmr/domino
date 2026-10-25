@@ -8,6 +8,7 @@ import uuid
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
+from typing import Any, Generic, TypeVar, overload
 
 
 _state = threading.local()
@@ -224,7 +225,11 @@ def is_predicting():
 	return getattr(_state, "overlay", None) is not None
 
 
-class State:
+# The type of a State's value: State(0) holds an int, so editors know self.count is one
+T = TypeVar("T")
+
+
+class State(Generic[T]):
 	"""A reactive value. Read it with .value (or get()), change it with .value = x (or set()).
 
 	As a class attribute of a component it's a value per component instance, read and set like
@@ -235,7 +240,7 @@ class State:
 	"""
 
 
-	def __init__(self, value=None):
+	def __init__(self, value: T = None):
 
 		self._value = value
 		self._dependency = Dependency()
@@ -247,6 +252,12 @@ class State:
 		self._name = name
 
 
+	@overload
+	def __get__(self, instance: None, owner: Any) -> "State[T]": ...
+
+	@overload
+	def __get__(self, instance: object, owner: Any) -> T: ...
+
 	def __get__(self, instance, owner):
 
 		if instance is None:
@@ -255,7 +266,7 @@ class State:
 		return self._of(instance).get()
 
 
-	def __set__(self, instance, value):
+	def __set__(self, instance: object, value: T) -> None:
 
 		self._of(instance).set(value)
 
@@ -272,7 +283,7 @@ class State:
 		return state
 
 
-	def get(self):
+	def get(self) -> T:
 
 		self._dependency.depend()
 
@@ -283,7 +294,7 @@ class State:
 		return self._value
 
 
-	def set(self, value):
+	def set(self, value: T) -> None:
 
 		# While predicting a handler's outcome, changes go to the overlay and change nothing real
 		overlay = getattr(_state, "overlay", None)
@@ -420,6 +431,23 @@ class Collection:
 			self._wrote()
 
 		return removed
+
+
+	def raw_collection(self):
+		"""The pymongo collection behind a named Collection, like Meteor's rawCollection(): for
+		what Collection doesn't do, such as indexes and aggregation. Writes made through it still
+		update open pages, since MongoDB's change stream reports them."""
+
+		if self.name is None:
+			raise TypeError('Collection() without a name lives in memory, so it has no MongoDB collection; name it: Collection("tasks")')
+
+		return self.store().collection
+
+
+	def raw_database(self):
+		"""The pymongo database a named Collection is in, like Meteor's rawDatabase()."""
+
+		return self.raw_collection().database
 
 
 	def _fetch(self, query, sort, limit):

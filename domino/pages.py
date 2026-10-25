@@ -15,6 +15,8 @@ import re
 import sys
 from pathlib import Path
 
+from flask import abort
+
 from . import tags as t
 from .components import Document
 from .core import Element
@@ -22,17 +24,41 @@ from .templates import JinjaTemplate
 
 
 # [id], [int:id] and [...rest]
-PARAM = re.compile(r"^\[(\.\.\.)?(?:(\w+):)?(\w+)\]$")
+# [name], [converter:name], [name=converter] (colons can't be in Windows file names) or [...name]
+PARAM = re.compile(r"^\[(\.\.\.)?(?:(\w+):)?(\w+)(?:=(\w+))?\]$")
 
 
 class PagesError(Exception):
 	"""A pages/ folder Domino can't turn into routes."""
 
 
-def add_pages(app, folder):
-	"""Add a route for every page in `folder`, once, when the app is created."""
+class PageRoute:
+	"""The view of a page's URL rule. Hot reloading (see domino.hot) gives it a new view when the
+	page changes, since Flask can't replace or remove a rule; with none (the page's file was
+	deleted) it answers 404. `modules` are the names of the page's module and its layouts'."""
+
+
+	def __init__(self):
+
+		self.view = None
+		self.modules = ()
+
+
+	def __call__(self, **params):
+
+		if self.view is None:
+			abort(404)
+
+		return self.view(**params)
+
+
+def add_pages(app, folder, reload=False):
+	"""Add a route for every page in `folder`, when the app is created. Hot reloading calls this
+	again with reload=True, after reloading the modules that changed: pages get their new views,
+	new pages get routes, and the routes of pages deleted since answer 404."""
 
 	folder = Path(folder).resolve()
+	app._pages_folder = folder
 
 	# Pages import the app's own modules (components, data) whatever the current folder is
 	root = os.path.abspath(app.root_path)
@@ -45,36 +71,69 @@ def add_pages(app, folder):
 	def load(path):
 
 		if path not in modules:
-			modules[path] = load_module(path, module_name(prefix, folder, path))
+			name = module_name(prefix, folder, path)
+			# Reloading uses the modules already imported (and reloaded); new pages are imported
+			modules[path] = (reload and sys.modules.get(name)) or load_module(path, name)
 
 		return modules[path]
 
 	existing = {rule.rule: rule.endpoint for rule in app.url_map.iter_rules()}
 
+	# Every view first, so a page that can't be served leaves the routes as they were
+	found = {}
 	for path in find_pages(folder):
 
 		relative = path.relative_to(folder).as_posix()
 		rule = url_rule(path.relative_to(folder))
 
-		if rule in app._page_rules:
-			raise PagesError(f'Two pages for "{rule}": {app._page_rules[rule]} and {relative}')
-		if rule in existing:
+		if rule in found:
+			raise PagesError(f'Two pages for "{rule}": {found[rule][0]} and {relative}')
+		if rule in existing and rule not in app._page_routes:
 			raise PagesError(f'Two handlers for "{rule}": {relative} and the route "{existing[rule]}"')
 
-		view = page_view(load(path), relative, rule, [load(layout) for layout in find_layouts(folder, path)])
-
-		app.add_url_rule(rule, f"pages/{relative[:-3]}", functools.partial(app._render_view, view))
-		app._page_rules[rule] = relative
+		layouts = [(load(code) if code else None, markup) for code, markup in find_layouts(folder, path)]
+		names = tuple(module.__name__ for module, _ in layouts if module is not None)
+		if path.suffix == ".html":
+			view = template_page_view(path, relative, layouts)
+			found[rule] = (relative, view, names)
+			continue
+		view = page_view(load(path), relative, rule, layouts)
+		found[rule] = (relative, view, (load(path).__name__,) + names)
 
 	not_found = folder / "404.py"
 	if not_found.is_file():
-		view = page_view(load(not_found), "404.py", "", [load(layout) for layout in find_layouts(folder, not_found)])
+		layouts = [(load(code) if code else None, markup) for code, markup in find_layouts(folder, not_found)]
+		view = page_view(load(not_found), "404.py", "", layouts)
+		found[None] = ("404.py", view, (load(not_found).__name__,) + tuple(module.__name__ for module, _ in layouts if module is not None))
 
-		def page_not_found(error):
+	for rule, (relative, view, names) in found.items():
 
-			return app._render_view(view), 404
+		route = app._page_routes.get(rule)
+		if route is None:
+			route = app._page_routes[rule] = PageRoute()
+			if rule is None:
+				app.register_error_handler(404, functools.partial(page_not_found, app, route))
+			else:
+				app.add_url_rule(rule, f"pages/{relative.rsplit('.', 1)[0]}", functools.partial(app._render_view, route))
+		route.view = view
+		route.modules = names
+		if rule is not None:
+			app._page_rules[rule] = relative
 
-		app.register_error_handler(404, page_not_found)
+	# Deleted since the app was created (hot reloading): Flask keeps the rule, which answers 404
+	for rule, route in app._page_routes.items():
+		if rule not in found:
+			route.view = None
+			app._page_rules.pop(rule, None)
+
+
+def page_not_found(app, route, error):
+
+	# Without 404.py (deleted while hot reloading), Flask's own 404
+	if route.view is None:
+		return error
+
+	return app._render_view(route), 404
 
 
 def find_pages(folder):
@@ -98,15 +157,41 @@ def find_pages(folder):
 
 		yield path
 
+	yield from find_template_pages(folder)
+
+
+def find_template_pages(folder):
+	"""Templates in `folder` that are pages: about.html is /about, like about.py, unless there's an
+	about.py (then about.html is its components' template)."""
+
+	for path in sorted(folder.rglob("*.html")):
+
+		parts = path.relative_to(folder).parts
+		if any(part.startswith(("_", ".")) for part in parts) or path.name == "404.html":
+			continue
+		if path.name == "layout.html":
+			raise PagesError(
+				f"{path.relative_to(folder).as_posix()}: layouts are files of their own that pages name. Move it "
+				"to layouts/main.html as <layout name=\"Main\">...</layout> (with <slot /> where the page goes), "
+				"and put pages in it with <page layout=\"Main\">...</page>"
+			)
+		# about.html next to about.py is the markup of about.py's components
+		if path.with_suffix(".py").exists():
+			continue
+
+		yield path
+
 
 def find_layouts(folder, path):
-	"""The layout.py files that wrap `path`, outermost (the pages folder's own) first."""
+	"""The layout.py files that wrap `path`, outermost (the pages folder's own) first, as
+	(layout.py, None). Layouts in HTML are components pages name (<Layout>...</Layout>) instead."""
 
 	layouts = []
 	directory = path.parent
 	while True:
-		if (directory / "layout.py").is_file():
-			layouts.insert(0, directory / "layout.py")
+		code = directory / "layout.py"
+		if code.is_file():
+			layouts.insert(0, (code, None))
 		if directory == folder:
 			return layouts
 		directory = directory.parent
@@ -129,9 +214,12 @@ def url_segment(segment, relative):
 
 	match = PARAM.match(segment)
 	if not match:
-		raise PagesError(f"{relative.as_posix()}: {segment!r} isn't a URL parameter; use [name], [converter:name] or [...name]")
+		raise PagesError(f"{relative.as_posix()}: {segment!r} isn't a URL parameter; use [name], [converter:name], [name=converter] or [...name]")
 
-	catch_all, converter, name = match.groups()
+	catch_all, converter, name, after = match.groups()
+	if converter and after:
+		raise PagesError(f"{relative.as_posix()}: {segment!r} names two converters; use [{converter}:{name}] or [{name}={after}]")
+	converter = converter or after
 	if catch_all:
 		converter = "path"
 	if converter:
@@ -177,30 +265,53 @@ def page_view(module, relative, rule, layouts):
 	else:
 		raise PagesError(f"{relative} has no page() function or Page class")
 
+	return layout_view(make, layouts)
+
+
+def template_page_view(path, relative, layouts):
+	"""The view of a template in pages/: the template, with the URL's parameters as its context."""
+
+	from .templates import page_template
+
+	return layout_view(functools.partial(page_template, str(path)), layouts)
+
+
+def layout_view(make, layouts):
+
 	wrappers = []
-	for layout in layouts:
-		if not callable(getattr(layout, "layout", None)):
-			raise PagesError(f"{layout.__file__} has no layout(content) function")
-		wrappers.append((layout.layout, accepted_params(layout.layout)))
+	for module, markup in layouts:
+		function = getattr(module, "layout", None) if module is not None else None
+		if module is not None and not callable(function):
+			if markup is None:
+				raise PagesError(f"{module.__file__} has no layout(content) function")
+			raise PagesError(f"{module.__file__} has no layout() function giving layout.html its values")
+		wrappers.append((function, accepted_params(function) if function else None, markup))
 
 	def view(**params):
 
 		result = make(**params)
 
-		# A whole document (Document or any <html>), a Jinja template(...) and Flask
-		# responses are already complete
-		if isinstance(result, (t.html, JinjaTemplate)) or not isinstance(result, (Element, str)):
+		# A layout component (Layout(title="About") [...]) is the whole page
+		from .dtemplates import whole_page
+		result = whole_page(result)
+
+		# A whole document (Document or any <html>), a Jinja template(...), a Domino template with
+		# <html>, <head> or <body>, and Flask responses are already complete
+		if is_complete(result):
 			return result
 
 		# The innermost layout wraps the page first, the pages folder's own layout last
-		for layout, names in reversed(wrappers):
+		for index, (layout, names, markup) in reversed(list(enumerate(wrappers))):
 			kwargs = params
 			if names is not None:
 				kwargs = {name: value for name, value in params.items() if name in names}
-			result = layout(result, **kwargs)
+			if markup is None:
+				result = layout(result, **kwargs)
+			else:
+				result = template_layout(markup, layout, names, result, params, kwargs, wrappers[:index])
 
 		# Without a layout that makes one, a component still needs a document for its events
-		if isinstance(result, Element) and not isinstance(result, t.html):
+		if isinstance(result, Element) and not isinstance(result, t.html) and not getattr(result, "is_document", False):
 			result = Document() [
 				result
 			]
@@ -208,6 +319,52 @@ def page_view(module, relative, rule, layouts):
 		return result
 
 	return view
+
+
+def is_complete(result):
+	"""Whether a page's result is already the whole response, which layouts leave alone."""
+
+	return (
+		isinstance(result, (t.html, JinjaTemplate))
+		or getattr(result, "is_document", False)
+		or not isinstance(result, (Element, str))
+	)
+
+
+def template_layout(markup, layout, names, content, params, kwargs, outer):
+	"""layout.html around `content`, which goes where it has <slot />. Its values are the URL's
+	parameters, and what layout() returns when there's a layout.py next to it."""
+
+	from .dtemplates import DominoTemplate
+
+	values = dict(params)
+	if layout is not None:
+		if names is None or "content" in names:
+			kwargs = dict(kwargs, content=content)
+		returned = layout(**kwargs)
+		if returned is not None and not isinstance(returned, dict):
+			raise PagesError(
+				f"layout() next to {os.path.basename(markup)} returns the template's values as a dict "
+				f"(or nothing), not {type(returned).__name__}; the page goes where the template has <slot />"
+			)
+		values.update(returned or {})
+
+	element = DominoTemplate(markup, values, slot=[content])
+
+	# Only the outermost layout can be the document; the others go in its <slot />
+	if outer and element.is_document:
+		first = next((markup or module_file(function)) for function, _, markup in outer)
+		raise PagesError(
+			f"{markup} is a whole document (<html>), but it's inside {first}; only the outermost layout "
+			"can be, so leave out <html>, <head> and <body> here"
+		)
+
+	return element
+
+
+def module_file(function):
+
+	return getattr(sys.modules.get(getattr(function, "__module__", "")), "__file__", None) or "a layout"
 
 
 def accepted_params(function):

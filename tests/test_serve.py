@@ -342,7 +342,7 @@ def test_login_over_the_websocket_hands_the_session_over_on_its_worker(server):
 
 		# Only the worker that made the token has it
 		connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
-		connection.request("POST", f"/_domino/session/{answer['session']}")
+		connection.request("POST", f"/_domino/session/{answer['session']}", headers={"X-Domino-Page": page_id})
 		response = connection.getresponse()
 		response.read()
 		assert response.status == 204
@@ -396,7 +396,7 @@ def test_unknown_pages_and_tokens_are_not_found(server):
 
 	connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
 	assert post_event(connection, "w9-nope", "x")[0] == 404
-	connection.request("POST", "/_domino/session/w1-nope")
+	connection.request("POST", "/_domino/session/w1-nope", headers={"X-Domino-Page": "w1-page"})
 	assert connection.getresponse().status == 404
 
 	with hello(server, "w2-nope") as ws:

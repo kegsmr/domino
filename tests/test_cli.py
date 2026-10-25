@@ -10,6 +10,7 @@ import pytest
 # Imported by module path: `from domino import cli` finds flask.cli, which core's
 # `from flask import *` brings into the package namespace
 import domino.asgi
+import domino.hot
 import domino.cli as cli
 from domino import Domino, devmongo
 
@@ -26,7 +27,7 @@ def clean_environ(monkeypatch):
 
 	# DOMINO_* and Flask variables from the shell running the tests would change what run() does
 	for name in list(os.environ):
-		if name.startswith("DOMINO_") or name in ("FLASK_DEBUG", "WERKZEUG_RUN_MAIN", "FLASK_RUN_FROM_CLI"):
+		if name.startswith("DOMINO_") or name in ("FLASK_DEBUG", "WERKZEUG_RUN_MAIN", "FLASK_RUN_FROM_CLI", "WEB_CONCURRENCY", "MONGO_URL"):
 			monkeypatch.delenv(name)
 
 	for name in SET_BY_RUN:
@@ -116,6 +117,49 @@ def test_serve_needs_at_least_one_worker(workers, capsys):
 	assert "--workers" in capsys.readouterr().err
 
 
+def test_build_arguments():
+
+	args = cli.build_parser().parse_args(["build"])
+	assert (args.command, args.app, args.force) == ("build", ".", False)
+
+	args = cli.build_parser().parse_args(["build", "site", "--force"])
+	assert (args.app, args.force) == ("site", True)
+
+
+def test_deploy_arguments():
+
+	args = cli.build_parser().parse_args(["deploy", "fly"])
+	assert (args.command, args.platform, args.app, args.name, args.mongo_url, args.force) == ("deploy", "fly", ".", None, None, False)
+
+	args = cli.build_parser().parse_args(["deploy", "render", "site", "--name", "My Site", "--mongo-url", "mongodb+srv://db/x", "--force"])
+	assert (args.platform, args.app, args.name, args.mongo_url, args.force) == ("render", "site", "My Site", "mongodb+srv://db/x", True)
+
+	assert cli.build_parser().parse_args(["deploy", "docker"]).platform == "docker"
+
+
+def test_deploy_needs_a_known_platform(capsys):
+
+	with pytest.raises(SystemExit) as exit:
+		cli.main(["deploy", "heroku"])
+
+	assert exit.value.code == 2
+	assert "invalid choice" in capsys.readouterr().err
+
+	with pytest.raises(SystemExit):
+		cli.main(["deploy"])
+
+
+def test_build_and_deploy_errors_are_one_line(tmp_path, capsys):
+
+	(tmp_path / "empty").mkdir()
+
+	assert cli.main(["build", str(tmp_path / "empty")]) == 1
+	assert "domino: No app.py or pages/ folder" in capsys.readouterr().err
+
+	assert cli.main(["deploy", "docker", str(tmp_path / "nope")]) == 1
+	assert "domino: No app at" in capsys.readouterr().err
+
+
 def test_version_flag(capsys):
 
 	with pytest.raises(SystemExit) as exit:
@@ -190,11 +234,13 @@ def test_create_scaffolds_an_app(tmp_path, capsys):
 	assert cli.main(["create", str(folder)]) == 0
 
 	files = sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file())
-	assert files == [".gitignore", "app.py", "components/tasks.py", "data.py", "pages/index.py", "pages/index_test.py", "pages/layout.py", "settings.json"]
+	assert files == [".gitignore", "app.py", "components/tasks.html", "components/tasks.py", "data.py", "layouts/main.html", "pages/index.html", "pages/index_test.py", "settings.json"]
 	assert json.loads((folder / "settings.json").read_text())["public"]["title"] == "hello"
 	assert ".domino/" in (folder / ".gitignore").read_text()
 	assert "settings.local.json" in (folder / ".gitignore").read_text()
-	assert "domino run" in capsys.readouterr().out
+	output = capsys.readouterr().out
+	assert "domino run" in output
+	assert "domino deploy" in output
 
 
 @pytest.mark.mongo
@@ -434,6 +480,29 @@ def test_serve_with_one_worker_serves_the_app_itself(tmp_path, workers_serve, st
 	assert "App: http://0.0.0.0:8000/ (1 worker)" in capsys.readouterr().err
 
 
+def test_serve_reads_the_number_of_workers_from_web_concurrency(tmp_path, workers_serve, started, monkeypatch, capsys):
+
+	folder = tmp_path / "prod"
+	write_app(folder)
+
+	# As uvicorn and gunicorn do; platforms (and the Dockerfile `domino build` writes) set it
+	monkeypatch.setenv("WEB_CONCURRENCY", "3")
+	assert cli.main(["serve", str(folder)]) == 0
+	assert workers_serve == [(str(folder.resolve()), "127.0.0.1", 8000, 3)]
+
+	# --workers wins
+	assert cli.main(["serve", str(folder), "--workers", "2"]) == 0
+	assert workers_serve[-1][-1] == 2
+
+	monkeypatch.setenv("WEB_CONCURRENCY", "1")
+	assert cli.main(["serve", str(folder)]) == 0
+	assert len(workers_serve) == 2 and len(started["run"]) == 1
+
+	monkeypatch.setenv("WEB_CONCURRENCY", "lots")
+	assert cli.main(["serve", str(folder)]) == 1
+	assert "WEB_CONCURRENCY" in capsys.readouterr().err
+
+
 def test_serve_checks_the_app_is_there(tmp_path, workers_serve, capsys):
 
 	assert cli.main(["serve", str(tmp_path / "nope.py")]) == 1
@@ -459,6 +528,11 @@ def uvicorn_runs(monkeypatch):
 
 	calls = []
 	monkeypatch.setattr(uvicorn, "run", lambda target, **kwargs: calls.append((target, kwargs)))
+	# Hot reloading serves with uvicorn too, never for real here
+	monkeypatch.setattr(domino.hot, "serve", lambda target, root, **kwargs: calls.append(("hot", target, root, kwargs)))
+	# Recorded as unset, so what serve() sets is undone after the test
+	monkeypatch.setenv("DOMINO_ASGI_HOT", "")
+	monkeypatch.delenv("DOMINO_ASGI_HOT")
 
 	return calls
 
@@ -469,7 +543,7 @@ def test_serve_without_reload_runs_the_asgi_app(tmp_path, uvicorn_runs):
 
 	domino.asgi.serve(app, "127.0.0.1", 5000)
 
-	assert uvicorn_runs == [(app.asgi, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3})]
+	assert uvicorn_runs == [(app.asgi, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3, "ws_per_message_deflate": True})]
 	assert "DOMINO_ASGI_APP" not in os.environ
 
 
@@ -478,6 +552,8 @@ def test_serve_with_reload_names_the_app_for_new_processes(tmp_path, uvicorn_run
 	path = write_app(tmp_path / "reloading")
 	app = cli.find_app(cli.load_module(path))
 	app.debug = True
+	# Restarting on every change rather than hot reloading (see test_hot_reload.py)
+	app.config["DOMINO_HOT_RELOAD"] = False
 
 	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
@@ -526,7 +602,7 @@ def test_from_environ_reuses_the_main_module(tmp_path, monkeypatch):
 def test_database_name_is_sanitized():
 
 	assert devmongo.database_name("/srv/My App.v2") == "MyAppv2"
-	assert devmongo.database_name("/srv/...") == "domino"
+	assert devmongo.database_name("/srv/@@@") == "domino"
 
 
 # Choosing a MongoDB build
@@ -799,6 +875,8 @@ def test_a_folder_with_just_pages_reloads_too(tmp_path, uvicorn_runs, monkeypatc
 	(folder / "pages" / "index.py").write_text("def page():\n\treturn 'hi'\n", encoding="utf-8")
 	app = cli.load_app(folder)
 	app.debug = True
+	# Restarting on every change rather than hot reloading (see test_hot_reload.py)
+	app.config["DOMINO_HOT_RELOAD"] = False
 
 	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
@@ -811,3 +889,20 @@ def test_a_folder_with_just_pages_reloads_too(tmp_path, uvicorn_runs, monkeypatc
 	assert child.app is not app
 	assert child.app.root_path == str(folder.resolve())
 	assert child.app.test_client().get("/").get_data(as_text=True) == "hi"
+
+
+def test_python_m_domino_runs_the_command(tmp_path):
+
+	import subprocess
+	import sys
+
+	root = str(Path(__file__).resolve().parent.parent)
+	env = dict(os.environ, PYTHONPATH=root)
+
+	version = subprocess.run([sys.executable, "-m", "domino", "--version"], capture_output=True, text=True, env=env)
+	assert version.returncode == 0, version.stderr
+	assert version.stdout.startswith("domino ")
+
+	created = subprocess.run([sys.executable, "-m", "domino", "create", "app"], capture_output=True, text=True, env=env, cwd=tmp_path)
+	assert created.returncode == 0, created.stderr
+	assert (tmp_path / "app" / "app.py").is_file()

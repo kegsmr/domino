@@ -577,14 +577,14 @@ def test_session_changes_over_the_socket_reach_the_browser_with_a_one_time_token
 
 	# The page exchanges the token for the cookie, once
 	connection = http.client.HTTPConnection("127.0.0.1", server.port)
-	connection.request("POST", f"/_domino/session/{second['session']}")
+	connection.request("POST", f"/_domino/session/{second['session']}", headers={"X-Domino-Page": page_id})
 	response = connection.getresponse()
 	response.read()
 	assert response.status == 204
 	cookie = response.getheader("Set-Cookie")
 	assert cookie.startswith("session=") and "HttpOnly" in cookie
 
-	connection.request("POST", f"/_domino/session/{second['session']}")
+	connection.request("POST", f"/_domino/session/{second['session']}", headers={"X-Domino-Page": page_id})
 	again = connection.getresponse()
 	again.read()
 	assert again.status == 404
@@ -619,7 +619,7 @@ def test_clearing_the_session_over_the_socket_deletes_the_cookie(asgi_server):
 
 	# The browser still sends its old cookie with the hand-off; only the deletion comes back
 	connection = http.client.HTTPConnection("127.0.0.1", server.port)
-	connection.request("POST", f"/_domino/session/{result['session']}", headers={"Cookie": cookie})
+	connection.request("POST", f"/_domino/session/{result['session']}", headers={"Cookie": cookie, "X-Domino-Page": page_id})
 	response = connection.getresponse()
 	response.read()
 	cookies = response.msg.get_all("Set-Cookie")

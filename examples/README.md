@@ -10,7 +10,7 @@ or, with Domino installed (`pip install -e .`), `domino run examples/counter`. `
 
 The examples run in debug mode. Only `chat` stores data in MongoDB, so the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it; running `chat` starts one, as `domino run` does.
 
-Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms`, `functional`, `uploads` and `instant`. Run them all with `python -m pytest examples`.
+Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms`, `functional`, `uploads`, `instant`, `client` and `tailwind`. Run them all with `python -m pytest examples`.
 
 | Example | Shows |
 |---|---|
@@ -18,6 +18,7 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `functional/` | Several pages in `pages/`, a shared `layout.py` with the navigation, a page with a URL parameter (`hello/[name].py`), a `Page` class with `State` (`counter.py`) and a `404.py`. Links swap pages in without reloading (the navigation stays put and the counter works at once); the About page has a link that opts out with `data_domino_reload` |
 | `counter/` | A component with `State`, re-rendered by `on_click=` |
 | `instant/` | Tabs, an accordion, a dropdown menu, a stepper and a carousel whose clicks all show at once, any number in a row, even with 1 s of simulated latency (button on the page): the server ships every state they can reach |
+| `client/` | Experimental client components (`client = True`): a Game of Life computed in the browser in Python, 30 generations a second, that keeps running offline, inside a server component it saves patterns to with `self.emit()`; and one text-statistics component run both in the browser and on the server. The first visit while debugging downloads the MicroPython runtime (about 0.5 MB) into `~/.domino/client-runtime` |
 | `random_number/` | `after(ms, ...)` updating a component on a timer |
 | `clock/` | `refresh()` pushing a component to the browser from a background thread |
 | `todo/` | Form submits handled in Python with `event.form`, without reloading the page |
@@ -28,8 +29,10 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `styles/` | Component `css` (nested selectors, `:hover`, `::before`, `@media`, plain CSS strings, inheritance), written once per page; a theme with a dark variant; CSS arriving with the event response that first shows a component |
 | `uploads/` | File uploads: a `multiple` file input submitted with its form, read with `event.files.getlist()`, and an avatar input that uploads `on_change=`; thumbnails served back by a page (`pages/images/[id].py`) after checking the files really are images; a progress bar styled with `data-uploading` and `--domino-upload-progress` in CSS alone; tests with `page.upload()` |
 | `loading/` | Styling a slow event's loading state with `[data-loading]`, and the debug error overlay when a callback raises |
+| `devtools/` | The debug-mode developer tools: a button whose handler raises (the overlay with source frames and a hint), links to pages whose render fails (the error page with the component stack; a Jinja template's line), and a counter and a todo list to inspect with Alt+Shift+D or `Domino.inspect()`, plus the event log |
 | `attributes/` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
 | `bootstrap/` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
 | `settings/` | `app.settings` from `settings.json`, the `domino` block, and `public` settings read in the browser as `Domino.settings`. Copy `settings.local.json.example` to `settings.local.json` to override locally |
-| `templating/` | A Jinja page (`home.html`, found by name, returned from `pages/index.py`) with live components inside: a counter paired with its template (`components/counter.py` + `components/counter.html`) and, on Python 3.14, a todo list written with a template string (`html(t"...")`) |
+| `tailwind/` | Tailwind CSS with zero setup: `"tailwind": true` in `settings.json`, and pages styled only with Tailwind classes: a responsive navbar whose menu button toggles classes (`State`), a card grid, a form, dark mode with `dark:` variants, and a pricing toggle written as a paired Jinja template. The first run downloads Tailwind's CLI; edit a class and open pages pick up the new CSS |
+| `templating/` | Domino templates, markup in HTML and logic in Python: `layouts/main.html`, the `<layout name="Main">` document with the navigation and a `<slot />` for the page, which stays as you move between pages; `pages/index.html` and `pages/about.html`, `<page layout="Main" title="...">` pages that use components as tags; a counter (`components/counter.py` + `counter.html`: `{{ }}` values, `disabled="{{ at_zero }}"`, `{{ if }}`/`{{ elif }}`/`{{ else }}` blocks); a todo list whose `Todos` composes in Python (`TodoForm(on_add=self.add)`, then `TodoList` or `EmptyState`), with `{{ for }}`, `on-click="on_remove(index)"` and `class="{{ item_class(item) }}"`; an instant FAQ (`on-click="toggle(index)"`); a `Card` with a `<slot />`. `/jinja` is a Jinja page (`jinja_home.html`) with the same counter and, on Python 3.14, a todo list written with a template string (`html(t"...")`) |
 | `showcase/` | A full landing page using the imperative style (`t.h1(parent, "text")`), written as a `Page` class, styled with each component's `css`, and a contact form event |

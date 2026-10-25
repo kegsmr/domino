@@ -1,0 +1,23 @@
+<!-- One file can define several components: each <component> is the markup of the class of that name -->
+
+<component name="TodoForm" class="todo-form" on-submit="submit">
+	<input name="text" placeholder="What needs doing?" autocomplete="off" required>
+	<button type="submit">Add</button>
+</component>
+
+<component name="TodoList">
+	<ul>
+		{{ for index, item in enumerate(items) }}
+		<li class="{{ item_class(item) }}">
+			<input type="checkbox" checked="{{ item.done }}" on-change="on_toggle(index)" aria-label="Done">
+			<span>{{ item.text }}</span>
+			<button class="remove" on-click="on_remove(index)" aria-label="Remove">×</button>
+		</li>
+		{{ /for }}
+	</ul>
+	<p class="hint">{{ remaining }} left.</p>
+</component>
+
+<component name="EmptyState" class="hint">
+	<p>Nothing to do. Add something above!</p>
+</component>

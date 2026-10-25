@@ -79,7 +79,7 @@ window.Domino = (() => {
 
         const focused = from === document.activeElement;
         const typing = isTyping(from);
-        const resetting = reset && reset.root.contains(from) && (reset.submit || !typing);
+        const resetting = reset && reset.root.contains(from) && (reset.submit || !typing) && !editedSince(from, reset);
         if (field && (resetting || (serverChanged && !focused))) {
             if (from.type === 'checkbox' || from.type === 'radio') {
                 from.checked = to.hasAttribute('checked');
@@ -120,7 +120,7 @@ window.Domino = (() => {
 
         for (const field of fields) {
             const typing = field === document.activeElement && !reset.submit && !TOGGLES.includes(field.type);
-            if (typing) continue;
+            if (typing || editedSince(field, reset)) continue;
             if (field.type === 'checkbox' || field.type === 'radio') {
                 field.checked = field.defaultChecked;
             } else if (field.tagName === 'SELECT') {
@@ -129,6 +129,24 @@ window.Domino = (() => {
                 field.value = field.defaultValue;
             }
         }
+    }
+
+    // The fields' values when an event fired, so its answer doesn't reset what's typed since
+    // (the next chat message, typed while the last one was being sent)
+    function fieldValues(root) {
+        const values = new Map();
+        const fields = Array.from(root.querySelectorAll('input, select, textarea'));
+        if (FIELDS.includes(root.tagName)) fields.push(root);
+        for (const field of fields) values.set(field, fieldValue(field));
+        return values;
+    }
+
+    function fieldValue(field) {
+        return field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value;
+    }
+
+    function editedSince(field, reset) {
+        return Boolean(reset.values && reset.values.has(field) && reset.values.get(field) !== fieldValue(field));
     }
 
     function morphChildren(from, to, reset) {
@@ -140,6 +158,15 @@ window.Domino = (() => {
 
         let current = from.firstChild;
         for (const next of Array.from(to.childNodes)) {
+            // A client component running in the browser (see domino/client.js) keeps what it
+            // shows when the server re-renders what's around it
+            if (current && current.dominoIsland && next.nodeType === Node.ELEMENT_NODE
+                && next.getAttribute('data-domino-client') === current.getAttribute('data-domino-client')) {
+                if (current.id) keyed.delete(current.id);
+                current = current.nextSibling;
+                continue;
+            }
+
             let match = null;
             if (next.nodeType === Node.ELEMENT_NODE && next.id && keyed.has(next.id)) {
                 match = keyed.get(next.id);
@@ -182,7 +209,7 @@ window.Domino = (() => {
 
         // With the other component CSS, before the page's own stylesheets, so those still win
         const last = blocks[blocks.length - 1];
-        const firstSheet = document.head.querySelector('style, link[rel=stylesheet]');
+        const firstSheet = document.head.querySelector('style, link[rel=stylesheet]:not([data-domino-tailwind])');
         if (last) {
             last.after(style);
         } else if (firstSheet) {
@@ -214,15 +241,19 @@ window.Domino = (() => {
         const target = document.getElementById(data.id);
         if (!target) return;
 
-        const template = document.createElement('template');
-        template.innerHTML = data.html;
-        const replacement = template.content.firstElementChild;
-        if (!replacement) return;
+        if (target === document.documentElement) {
+            morphDocument(data.html, reset);
+        } else {
+            const template = document.createElement('template');
+            template.innerHTML = data.html;
+            const replacement = template.content.firstElementChild;
+            if (!replacement) return;
 
-        // Before morphing, which moves nodes out of the template
-        const found = readGraphs(replacement);
-        morph(target, replacement, reset);
-        found.forEach(installGraph);
+            // Before morphing, which moves nodes out of the template
+            const found = readGraphs(replacement);
+            morph(target, replacement, reset);
+            found.forEach(installGraph);
+        }
 
         const updated = document.getElementById(data.id);
         if (updated) {
@@ -246,6 +277,10 @@ window.Domino = (() => {
             pageExpired();
             return;
         }
+        if (data.type === 'hot') {
+            hot(data);
+            return;
+        }
         const el = request ? request.el : null;
         if (status < 200 || status >= 300) {
             reportError(el, request ? request.eventId : null, data);
@@ -254,7 +289,10 @@ window.Domino = (() => {
         // The handler changed the session (e.g. logged in) while running over the WebSocket,
         // which can't set cookies: fetch the new cookie before going on
         if (data.session) {
-            await fetch('/_domino/session/' + encodeURIComponent(data.session), { method: 'POST', credentials: 'same-origin' });
+            // The header shows it's this page asking, not another site's form
+            await fetch('/_domino/session/' + encodeURIComponent(data.session), {
+                method: 'POST', credentials: 'same-origin', headers: { 'X-Domino-Page': pageId() || '' }
+            });
         }
         // The handler called domino.redirect(); the server only allows paths on this site
         if (data.redirect && data.redirect.startsWith('/') && !data.redirect.startsWith('//')) {
@@ -288,6 +326,53 @@ window.Domino = (() => {
     let nextRef = 0;
     const waiting = new Map(); // ref -> the event sent over the socket that awaits its result
 
+    // Each socket keeps, per component id, the last HTML it brought and its version (ws.bases).
+    // The server keeps the same, and sends a component that changed little as a patch against
+    // it (domino/patches.py): ops that are either [start, count], lines of the old HTML, or a
+    // string of new lines.
+    function applyPatch(base, ops) {
+        const lines = base.split('\n');
+        const pieces = [];
+        for (const op of ops) {
+            pieces.push(typeof op === 'string' ? op : lines.slice(op[0], op[0] + op[1]).join('\n'));
+        }
+        return pieces.join('\n');
+    }
+
+    // Turn a patched result or update back into HTML and keep it as the next base, in the order
+    // the socket brought them (before anything waits), as the server encoded them
+    function unpatch(ws, data) {
+        if (data.patch) {
+            const base = ws.bases.get(data.id);
+            if (base && base.version === data.base) {
+                data.html = applyPatch(base.html, data.patch);
+            } else {
+                // Can't happen unless something went wrong: ask for the whole HTML again
+                data.html = null;
+                ws.send(JSON.stringify({ type: 'resend', id: data.id }));
+            }
+            delete data.patch;
+        }
+        if (data.id && data.html) ws.bases.set(data.id, { version: data.version, html: data.html });
+    }
+
+    function hello(ws) {
+        // The server starts patches afresh for the page, so forget what was kept for the last one
+        ws.bases = new Map();
+        ws.bound = false;
+        ws.send(JSON.stringify({ type: 'hello', page_id: pageId(), patch: true }));
+    }
+
+    // A hidden tab tells the server, which stops rendering for it until it's shown again, then
+    // sends each component that changed meanwhile, once
+    function sendVisibility(ws) {
+        if (!ws || !ws.bound || ws.readyState !== WebSocket.OPEN) return;
+        const hidden = document.visibilityState === 'hidden';
+        if (hidden === !!ws.paused) return;
+        ws.paused = hidden;
+        ws.send(JSON.stringify({ type: hidden ? 'pause' : 'resume' }));
+    }
+
     // Open what this page needs to hear from the server: the socket, or else the stream
     function connect() {
         if (useHttp || !window.WebSocket || !document.querySelector('[data-domino-ws]')) {
@@ -299,9 +384,14 @@ window.Domino = (() => {
         openSocket();
     }
 
-    // Nothing to send or receive (e.g. a static page)
+    // Nothing to send or receive (e.g. a static page that isn't hot reloaded)
     function needsServer() {
-        return !!document.querySelector('[data-event-id], [data-after-id], [data-live]');
+        return !!document.querySelector('[data-event-id], [data-after-id], [data-live], [data-domino-hot]');
+    }
+
+    // Hot reloading (debug mode): the server updates this page when the app's files change
+    function hotReloading() {
+        return !!document.querySelector('[data-domino-hot]');
     }
 
     // The worker process of `domino serve` that has a page ("w3" from "w3-<id>"), or "" with
@@ -317,6 +407,7 @@ window.Domino = (() => {
         const ws = new WebSocket(scheme + location.host + '/_domino/ws?page=' + encodeURIComponent(pageId()));
         let readyAt = 0;
         ws.worker = workerOf(pageId());
+        ws.bases = new Map();
         socket = ws;
         socketReady = new Promise((resolve) => { settleReady = resolve; });
 
@@ -326,7 +417,7 @@ window.Domino = (() => {
         // For the page shown now, which may not be the one that opened it (see rebind)
         ws.onopen = () => {
             if (needsServer()) {
-                ws.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+                hello(ws);
             } else {
                 clearTimeout(timer);
                 settleReady(true);
@@ -337,10 +428,16 @@ window.Domino = (() => {
             let data;
             try { data = JSON.parse(e.data); } catch (err) { return; }
 
+            if (data.type === 'result' || data.type === 'update') unpatch(ws, data);
+
             if (data.type === 'ready') {
                 clearTimeout(timer);
                 readyAt = Date.now();
                 settleReady(true);
+                // A new page starts out shown, as far as the server knows
+                ws.bound = true;
+                ws.paused = false;
+                sendVisibility(ws);
             } else if (data.type === 'result') {
                 const request = waiting.get(data.ref);
                 if (!request) return;
@@ -378,13 +475,14 @@ window.Domino = (() => {
                 return;
             }
             if (readyAt && Date.now() - readyAt > 30000) failures = 0;
-            if (++failures > RETRIES) {
+            // While hot reloading, the server is restarting for a change: wait for it
+            if (++failures > RETRIES && !hotReloading()) {
                 useHttp = true;
                 connect();
                 return;
             }
             // Meanwhile events go over HTTP, and pushes wait on the server for the new socket
-            setTimeout(connect, 250 * 2 ** (failures - 1));
+            setTimeout(connect, Math.min(250 * 2 ** (failures - 1), 2000));
         };
     }
 
@@ -393,7 +491,40 @@ window.Domino = (() => {
     // event the server doesn't know reloads the page (and events bound globally still work).
     function pageExpired() {
         useHttp = true;
-        if (document.querySelector('[data-live]')) window.location.reload();
+        if (document.querySelector('[data-live]') || hotReloading()) window.location.reload();
+    }
+
+    // While hot reloading (see domino/hot.py), the server sends this when the app's files change:
+    // the whole page to morph into, the component CSS the page now has, stylesheets to fetch
+    // again, a reload, or the error the change hit, shown until a change works.
+    function hot(data) {
+        if (data.reload) {
+            window.location.reload();
+            return;
+        }
+        if (data.html) {
+            // Like moving to another page, but what's typed in fields stays
+            swap(new DOMParser().parseFromString(data.html, 'text/html'), null);
+            if (inFlight === 0) document.documentElement.removeAttribute('data-domino-loading');
+        }
+        if (data.css) {
+            document.querySelectorAll('style[data-domino-css]').forEach((block) => block.remove());
+            addStyles(data.css);
+        }
+        if (data.stylesheets) {
+            for (const link of document.querySelectorAll('link[rel=stylesheet]')) {
+                const url = new URL(link.href, location.href);
+                if (url.origin !== location.origin) continue;
+                url.searchParams.set('domino-hot', String(Date.now()));
+                link.href = url.href;
+            }
+        }
+        const shown = document.getElementById('domino-error');
+        if (shown && shown.dataset.hot && 'error' in data) shown.remove();
+        if (data.error) {
+            showOverlay({ error: data.error, traceback: data.traceback || null });
+            document.getElementById('domino-error').dataset.hot = '1';
+        }
     }
 
     async function sendOverSocket(ws, eventId, payload) {
@@ -443,7 +574,7 @@ window.Domino = (() => {
     let stream = null;
 
     function openStream() {
-        if (stream || !document.querySelector('[data-live]')) return;
+        if (stream || !document.querySelector('[data-live], [data-domino-hot]')) return;
         const id = pageId();
         if (!id) return;
 
@@ -480,7 +611,7 @@ window.Domino = (() => {
         }
         if (needsServer()) {
             socketReady = new Promise((resolve) => { settleReady = resolve; });
-            socket.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+            hello(socket);
         } else {
             socket.send(JSON.stringify({ type: 'leave' }));
             socketReady = Promise.resolve(true);
@@ -556,7 +687,10 @@ window.Domino = (() => {
         if (!target.dispatchEvent(event)) return;
 
         console.error('Domino event error:', data.traceback || data.error);
-        if (data.debug) showOverlay(detail);
+        if (!data.debug) return;
+        // debug.js, on pages served in debug mode, shows the frames' source and the component too
+        const devtools = window.Domino.devtools;
+        if (devtools) devtools.showError(el, detail, data); else showOverlay(detail);
     }
 
     // Only shown in debug mode. Server text goes in as textContent, never as HTML.
@@ -696,11 +830,15 @@ window.Domino = (() => {
         const unmark = el ? markBusy(el, reset && reset.submit) : null;
         const page = pageId();
         let answered = false;
+        // debug.js's event log, on pages served in debug mode: told now (with the predicted state) and when answered
+        const devtools = window.Domino.devtools;
+        const watched = devtools ? devtools.event(eventId, el, payload, owner ? graphs.get(owner) : null) : null;
         if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
             if (files.length) {
                 const uploaded = await upload(el, files);
                 if (uploaded.status !== 200) {
+                    if (watched) watched(uploaded.status, uploaded.data);
                     // Shown like a failed event (and an expired page reloads)
                     await handleMessage(uploaded.data, uploaded.status, { el, eventId, reset, unmark });
                     return;
@@ -710,6 +848,7 @@ window.Domino = (() => {
             await wait(latency / 2);
             const { status, data } = await sendEvent(eventId, payload);
             await wait(latency / 2);
+            if (watched) watched(status, data);
             // Before handling, so the answer to the last event in flight is shown
             if (owner) {
                 release(owner);
@@ -719,6 +858,7 @@ window.Domino = (() => {
             if (pageId() !== page) return;
             await handleMessage(data, status, { el, eventId, reset, unmark });
         } catch (err) {
+            if (watched) watched(0, { error: String(err) });
             reportError(el, eventId, { error: String(err) });
         } finally {
             if (owner) {
@@ -752,10 +892,32 @@ window.Domino = (() => {
             const current = owner.cloneNode(true);
             current.querySelector(':scope > script[data-domino-predict]').remove();
             graph.states[0] = current.outerHTML;
+            // Large states come as patches against the one at graph.base, and repeats as an index
+            const base = graph.states[graph.base];
+            graph.states = graph.states.map((html) => (Array.isArray(html) ? applyPatch(base, html) : html));
             graph.states = graph.states.map((html) => (typeof html === 'number' ? graph.states[html] : html));
             found.push([owner.id, graph]);
         }
         return found;
+    }
+
+    // A component that is the whole document (a layout: <Layout><html>...</html></Layout>) can't
+    // be parsed in a <template>, which drops <html>, <head> and <body>. Its <html>'s attributes,
+    // the title and the body are updated; the head keeps Domino's script and the page's styles.
+    function morphDocument(html, reset) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const root = document.documentElement;
+        const next = doc.documentElement;
+        for (const { name, value } of Array.from(next.attributes)) {
+            if (root.getAttribute(name) !== value) root.setAttribute(name, value);
+        }
+        for (const { name } of Array.from(root.attributes)) {
+            if (!next.hasAttribute(name) && !name.startsWith('data-domino')) root.removeAttribute(name);
+        }
+        if (doc.title !== document.title) document.title = doc.title;
+        const found = readGraphs(doc.body);
+        morph(document.body, doc.body, reset);
+        found.forEach(installGraph);
     }
 
     function installGraph([id, graph]) {
@@ -835,6 +997,7 @@ window.Domino = (() => {
         const payload = eventData(el);
         const reset = { root: el, submit };
         const owner = predict(el, eventId, reset);
+        reset.values = fieldValues(el);
         triggerEvent(eventId, payload, reset, el, owner);
     }
 
@@ -881,7 +1044,19 @@ window.Domino = (() => {
         return found;
     }
 
+    // Client components run in Python in the browser; their loader comes only to pages with one
+    let clientLoader = null;
+
+    function hydrateClients() {
+        clientLoader = clientLoader || import('/_domino/client/loader.js');
+        clientLoader.then((loader) => loader.hydrate()).catch((err) => {
+            clientLoader = null; // try again with the next page or update
+            console.error('Domino: client components failed to load', err);
+        });
+    }
+
     function listen(root = document) {
+        if (within(root, '[data-domino-client]').length) hydrateClients();
         for (const el of within(root, '[data-event-id]')) {
             for (const eventId of el.getAttribute('data-event-id').split(' ')) {
                 const type = eventId.split('-').pop();
@@ -1009,14 +1184,14 @@ window.Domino = (() => {
     }
 
     // Do what a page load does, keeping what's the same: the whole document is morphed into the
-    // new one, its fields taking the new page's values
-    function swap(doc) {
+    // new one, its fields taking the new page's values (unless `reset` is null: see hot)
+    function swap(doc, reset = { root: document.documentElement, submit: true }) {
         const scripts = new Set(document.scripts);
         latest.clear();
         // The new page's components and their states, read from its HTML before it's shown
         const found = readGraphs(doc.documentElement);
 
-        morph(document.documentElement, doc.documentElement, { root: document.documentElement, submit: true });
+        morph(document.documentElement, doc.documentElement, reset);
         graphs.clear();
         deferred.clear();
         found.forEach(installGraph);
@@ -1068,14 +1243,64 @@ window.Domino = (() => {
         setTimeout(() => { announcer.textContent = document.title; }, 100);
     }
 
+    // While debugging an app that uses Tailwind CSS, the server says each time its CSS is rebuilt
+    // (and when this connects again, after a restart), and the page swaps in the new stylesheet
+    // without reloading. Nothing to do with the page's own socket or stream, so static pages get it too.
+    // Pages served over ASGI hear it on a WebSocket of its own, which the server closes at once when
+    // it restarts (it waits for streams); others on Server-Sent Events. Both reconnect by themselves.
+    let tailwindWatch = null;
+    let tailwindFailures = 0; // socket closes in a row
+    let tailwindOpened = false; // a socket worked, so it's worth waiting for the server to be back
+
+    function watchTailwind() {
+        if (tailwindWatch || !document.querySelector('link[data-domino-tailwind][data-domino-watch]')) return;
+        const onmessage = (e) => {
+            let data;
+            try { data = JSON.parse(e.data); } catch (err) { return; }
+            if (data.version) swapTailwind(data.version);
+        };
+        if (window.WebSocket && document.querySelector('[data-domino-ws]') && (tailwindOpened || tailwindFailures <= RETRIES)) {
+            const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const ws = tailwindWatch = new WebSocket(scheme + location.host + '/_domino/tailwind/watch');
+            ws.onopen = () => {
+                tailwindFailures = 0;
+                tailwindOpened = true;
+            };
+            ws.onmessage = onmessage;
+            ws.onclose = () => {
+                tailwindWatch = null;
+                tailwindFailures++;
+                setTimeout(watchTailwind, Math.min(250 * 2 ** tailwindFailures, 2000));
+            };
+        } else if (window.EventSource) {
+            tailwindWatch = new EventSource('/_domino/tailwind/watch');
+            tailwindWatch.onmessage = onmessage;
+        }
+    }
+
+    function swapTailwind(version) {
+        const links = Array.from(document.querySelectorAll('link[data-domino-tailwind]'));
+        const link = links[links.length - 1];
+        const href = '/_domino/tailwind.css?v=' + encodeURIComponent(version);
+        if (!link || link.getAttribute('href') === href) return;
+        // The new sheet loads next to the old one, which goes once it's in, so nothing shows unstyled
+        const next = link.cloneNode();
+        next.setAttribute('href', href);
+        next.addEventListener('load', () => links.forEach((old) => old.remove()), { once: true });
+        next.addEventListener('error', () => next.remove(), { once: true });
+        link.after(next);
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         latency = readLatency();
         readGraphs(document).forEach(installGraph);
         listen();
         scheduleAfterEvents();
         connect();
+        watchTailwind();
         document.addEventListener('click', onClick);
         window.addEventListener('popstate', onPopState);
+        document.addEventListener('visibilitychange', () => sendVisibility(socket));
     });
 
     return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen, enableLatencySim, disableLatencySim, navigate };

@@ -1,0 +1,32 @@
+<!-- The layout the pages go in (<page layout="Main" title="...">): the page goes where <slot /> is.
+     Domino adds the doctype, its script and the components' CSS -->
+<layout name="Main">
+	<html lang="en">
+		<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<title>{{ title }}</title>
+			<style>
+				body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+				nav { display: flex; gap: 1rem; margin-bottom: 1rem; }
+				.card { border: 1px solid #ddd; border-radius: 8px; padding: 0 1rem 1rem; margin-bottom: 1rem; }
+				.hint { color: #666; }
+				.todo-form { display: flex; gap: .5rem; }
+				.todo-form input { flex: 1; }
+				li.done span { text-decoration: line-through; color: #888; }
+				.remove { border: 0; background: none; cursor: pointer; font-size: 1.1rem; }
+				.faq dt button { all: unset; cursor: pointer; font-weight: 600; }
+				.faq dd { margin: .25rem 0 .75rem; }
+				button[data-loading] { opacity: .6; }
+			</style>
+		</head>
+		<body>
+			<nav>
+				<a href="/">Home</a>
+				<a href="/about">About</a>
+				<a href="/jinja">Jinja</a>
+			</nav>
+			<slot />
+		</body>
+	</html>
+</layout>

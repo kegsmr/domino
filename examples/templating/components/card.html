@@ -1,0 +1,7 @@
+<component name="Card" class="card">
+	<h2>{{ heading }}</h2>
+	{{ if note }}
+	<p><small>{{ note }}</small></p>
+	{{ /if }}
+	<slot />
+</component>

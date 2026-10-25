@@ -10,5 +10,7 @@ def page():
 
 	return t.section() [
 		t.h1() ["Private"],
-		Notes()
+		Notes(),
+		t.h2() ["Change your password"],
+		accounts.ChangePasswordForm()
 	]

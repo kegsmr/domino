@@ -22,7 +22,7 @@ import textwrap
 import types
 from copy import deepcopy
 
-from . import reactive
+from . import patches, reactive
 from .reactive import State
 from .util import accepts_argument
 
@@ -221,6 +221,12 @@ def predictable_callback(component, callback):
 	"""Whether `callback`, bound in `component`'s render, can run ahead of time: a predictable
 	method of the component, or a lambda that only calls one with plain values."""
 
+	# on-click="remove(item)" in a Domino template: one of the component's methods, with values
+	call = getattr(callback, "__domino_call__", None)
+	if call is not None:
+		method, args = call
+		return getattr(method, "__self__", None) is component and callable_methods(type(component)).get(method.__name__) == len(args)
+
 	if getattr(callback, "__self__", None) is component:
 		return getattr(callback, "__name__", None) in predictable_methods(type(component))
 
@@ -393,7 +399,8 @@ def graph(component, callbacks, render, limit=None, budget=None):
 	"""The states the component's predictable handlers reach from its current one, for core.js:
 	{"states": [html per state], "edges": [{event: state index} per state]}. State 0 is the
 	current one, whose HTML the browser already has (null here); a state whose HTML another
-	state already has refers to it by its index. Event ids leave out the component's prefix
+	state already has refers to it by its index, and a large state may be a patch (a list, see
+	domino.patches) against the state whose index is "base". Event ids leave out the component's prefix
 	("event-<id>-"), which is the same for all of them.
 
 	When more than `limit` states are reachable, or their HTML is longer than `budget`, only the
@@ -516,7 +523,144 @@ class Graph:
 
 	def data(self):
 
-		return {"states": self.states, "edges": self.edges}
+		data = {"states": self.states, "edges": self.edges}
+
+		# States usually differ in a line or two (one item of a list toggled, say), so a large
+		# one is sent as a patch against the first, which core.js applies (see domino.patches)
+		texts = [index for index, html in enumerate(self.states) if isinstance(html, str)]
+		if len(texts) < 2 or len(self.states[texts[0]]) < patches.MIN_SIZE:
+			return data
+
+		base = self.states[texts[0]]
+		states = list(self.states)
+		for index in texts[1:]:
+			ops = patches.diff(base, states[index])
+			if ops is not None:
+				states[index] = ops
+				data = {"states": states, "edges": self.edges, "base": texts[0]}
+
+		return data
+
+
+def explain(component, callback):
+	"""Why `callback`, bound in `component`'s render, isn't run ahead of time, or None if it is.
+	Only for the inspector in debug mode (see domino.devtools), so it can take its time."""
+
+	cls = type(component)
+	if getattr(cls, "optimistic", True) is False:
+		return f"{cls.__name__} sets optimistic = False"
+	if predictable_callback(component, callback):
+		return None
+
+	states = state_names(cls)
+	nothing = f"{cls.__name__} has no State attributes, so there's nothing to predict"
+
+	# on-click="remove(item)" in a Domino template
+	if hasattr(callback, "__domino_call__"):
+		call = callback.__domino_call__
+		if call is None:
+			return "the handler takes the event, which isn't known before the click"
+		method, args = call
+		if getattr(method, "__self__", None) is not component:
+			return f"it calls a method of {type(method.__self__).__name__}, not of this {cls.__name__}"
+		if not states:
+			return nothing
+		return f"it calls {method.__name__}() with {len(args)} value(s), and " + method_reason(method.__func__, states, read_parameters=True)
+
+	owner = getattr(callback, "__self__", None)
+	if owner is not None:
+		if owner is not component and type(owner) is cls:
+			return f"it's a method of another {cls.__name__}, not of this one"
+		if owner is not component:
+			return f"it's a method of {type(owner).__name__}, not of {cls.__name__}"
+		return method_reason(callback.__func__, states) if states else nothing
+
+	if not isinstance(callback, types.FunctionType) or callback.__name__ != "<lambda>":
+		return "only the component's own methods, and lambdas that call one, are predicted"
+
+	calls = lambda_calls(callback.__code__)
+	if not calls:
+		return "the lambda does more than call a method of the component with plain values (its defaults or variables)"
+
+	methods = callable_methods(cls)
+	for target, method, count in calls:
+		other = lambda_value(callback, target)
+		if other is not component:
+			# Lambdas are found by their line, so with several on it this can't tell which it is
+			called = " or ".join(sorted({f"{name}.{function}()" for name, function, _ in calls}))
+			whose = f" of {type(other).__name__}" if other is not None else ""
+			return f"the lambda calls {called}{whose}, not a method of this {cls.__name__}"
+		if not states:
+			return nothing
+		if methods.get(method) != count:
+			function = getattr(cls, method, None)
+			if not isinstance(function, types.FunctionType):
+				return f"the lambda calls {method}(), which isn't a plain method of {cls.__name__}"
+			return f"the lambda calls {method}(), and " + method_reason(function, states, read_parameters=True)
+
+	return "it isn't a predictable method of the component"
+
+
+def method_reason(function, states, read_parameters=False):
+	"""What keeps a method from being predicted: its first statement that isn't a plain change of
+	the component's own State."""
+
+	name = getattr(function, "__name__", "it")
+	definition = parse_function(function)
+	if definition is None:
+		return f"{name}() can't be read: its source is missing, or it has decorators, *args, **kwargs or keyword-only parameters"
+
+	arguments = definition.args
+	self_name = arguments.args[0].arg
+	if read_parameters:
+		if arguments.defaults:
+			return f"{name}() has parameters with defaults"
+		unused = set()
+		checker = Checker(self_name, states, unused, {argument.arg for argument in arguments.args[1:]})
+	else:
+		unused = {argument.arg for argument in arguments.args[1:]}
+		if len(unused) > 1:
+			return f"{name}() takes more than the event"
+		checker = Checker(self_name, states, unused)
+
+	for statement in definition.body:
+		if checker.statement(statement):
+			continue
+		line = function.__code__.co_firstlineno + statement.lineno - 1
+		try:
+			code = ast.unparse(statement).split("\n")[0]
+		except Exception:
+			code = type(statement).__name__
+		if len(code) > 60:
+			code = code[:57] + "..."
+		return f"{name}() line {line}, `{code}`: {statement_reason(statement, checker, unused)}"
+
+	return f"{name}() isn't predictable"
+
+
+def statement_reason(statement, checker, unused):
+
+	names = {node.id for node in ast.walk(statement) if isinstance(node, ast.Name)}
+	if names & unused:
+		return "it reads the event, which isn't known before the click"
+	for node in ast.walk(statement):
+		if isinstance(node, ast.Call) and not (isinstance(node.func, ast.Name) and node.func.id in SAFE_CALLS):
+			try:
+				called = ast.unparse(node.func)
+			except Exception:
+				called = "a function"
+			return f"it calls {called}(), which could change things outside the component"
+	if isinstance(statement, (ast.Assign, ast.AugAssign)):
+		targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+		if not all(checker.state_attribute(target) for target in targets):
+			return "it changes something other than the component's own State"
+		return "it reads something other than the component's State, constants and plain expressions"
+	if isinstance(statement, ast.Return):
+		return "it returns a value (the component it re-renders is up to the server)"
+	if isinstance(statement, (ast.For, ast.While, ast.With, ast.Try)):
+		return "only assignments to State and if/else are followed, not loops, with or try"
+
+	return "it reads something other than the component's State, constants and plain expressions"
 
 
 def script_json(graph):

@@ -11,6 +11,8 @@ def layout(content):
 			t.a(href="/") ["Home"],
 			" ",
 			t.a(href="/private") ["Private"],
+			" ",
+			t.a(href="/members") ["Members"],
 			accounts.UserMenu()
 		],
 		t.main() [

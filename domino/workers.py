@@ -20,6 +20,7 @@ its worker.
 """
 
 import asyncio
+import ipaddress
 import itertools
 import json
 import multiprocessing
@@ -66,6 +67,15 @@ def default_count():
 def log(message):
 
 	print(f"domino: {message}", file=sys.stderr, flush=True)
+
+
+def warn_if_debug(app):
+	"""`domino serve` is for production, where debug mode shows visitors tracebacks with source
+	code, the component inspector and its data: say so loudly if it's on (FLASK_DEBUG=1, say)."""
+
+	if app.debug:
+		log("WARNING: the app is in debug mode (is FLASK_DEBUG set?): visitors can see tracebacks with "
+			"source code and the inspector's data. Don't serve it like this in production.")
 
 
 def serve(location, host="127.0.0.1", port=8000, workers=None):
@@ -130,19 +140,48 @@ def body_hint(body):
 
 
 def trusted_hosts():
-	"""Clients whose X-Forwarded-* headers are kept, as uvicorn decides: FORWARDED_ALLOW_IPS."""
+	"""Clients whose X-Forwarded-* headers are kept, as uvicorn decides: FORWARDED_ALLOW_IPS,
+	addresses or networks ("10.0.0.0/8")."""
 
 	value = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1")
 
 	return {host.strip() for host in value.split(",") if host.strip()}
 
 
-def forward_head(lines, client, trusted):
+def is_trusted(client, trusted):
+	"""Whether `client` is one of the `trusted` addresses or in one of its networks."""
+
+	if "*" in trusted or client in trusted:
+		return True
+
+	try:
+		address = ipaddress.ip_address(client or "")
+	except ValueError:
+		return False
+
+	for entry in trusted:
+		if "/" not in entry:
+			continue
+		try:
+			if address in ipaddress.ip_network(entry, strict=False):
+				return True
+		except ValueError:
+			continue
+
+	return False
+
+
+def forward_head(lines, client, trusted, connection=None):
 	"""The request's head for a worker: the client's address added to X-Forwarded-For, which
 	the workers trust since the router connects from 127.0.0.1. A client that isn't a trusted
-	proxy can't pass its own X-Forwarded-* headers on, just as without the router."""
+	proxy can't pass its own X-Forwarded-* headers on, just as without the router.
 
-	trust = "*" in trusted or client in trusted
+	`connection`, if given, replaces the request's Connection and Upgrade headers: b"close" for
+	a connection the router pipes from then on (it reads no more requests on it, so one sent
+	after this would reach the worker unchecked, X-Forwarded-For and all), b"Upgrade, close"
+	for a WebSocket, b"" to drop an upgrade to anything else."""
+
+	trust = is_trusted(client, trusted)
 	forwarded = []
 	out = [lines[0]]
 
@@ -154,14 +193,26 @@ def forward_head(lines, client, trusted):
 			if name == b"x-forwarded-for":
 				forwarded.append(line.split(b":", 1)[1].strip())
 				continue
+		if connection is not None and name in (b"connection", b"upgrade"):
+			continue
 		out.append(line)
 
 	if client:
 		forwarded.append(client.encode("latin-1"))
 	if forwarded:
 		out.append(b"X-Forwarded-For: " + b", ".join(forwarded))
+	if connection:
+		out.append(b"Connection: " + connection)
+		if b"upgrade" in connection.lower():
+			out.append(b"Upgrade: websocket")
 
 	return b"\r\n".join(out) + b"\r\n\r\n"
+
+
+def tokens(value):
+	"""The comma-separated tokens of a header like Connection, lowercased."""
+
+	return {token.strip().lower() for token in value.split(",") if token.strip()}
 
 
 class Router:
@@ -266,22 +317,43 @@ class Proxy:
 		try:
 			method, target, _ = lines[0].decode("latin-1").split(" ", 2)
 			headers = {}
+			for line in lines:
+				# The router and the worker must read the head alike, or a header only the worker
+				# sees (after a bare \n, say) could make it read the body as another request
+				if b"\r" in line or b"\n" in line or b"\0" in line or line[:1] in (b" ", b"\t"):
+					raise ValueError("Malformed header line")
 			for line in lines[1:]:
 				name, value = line.decode("latin-1").split(":", 1)
-				name, value = name.strip().lower(), value.strip()
+				if not name or name != name.strip():
+					raise ValueError("Malformed header name")
+				name, value = name.lower(), value.strip()
 				# Two lengths would let the router and the worker disagree on where the body ends
 				if name == "content-length" and headers.get(name, value) != value:
 					raise ValueError("Conflicting Content-Length headers")
 				headers[name] = value
-			length = int(headers.get("content-length", 0))
-			if length < 0:
-				raise ValueError("Negative Content-Length")
+			length = headers.get("content-length", "0")
+			if not length.isdigit() or not length.isascii():
+				raise ValueError("Invalid Content-Length")
+			length = int(length)
+			# Both: which one the worker goes by is up to it (RFC 9112 says reject it)
+			if "content-length" in headers and "transfer-encoding" in headers:
+				raise ValueError("Content-Length and Transfer-Encoding")
 		except ValueError:
 			await self.refuse(400, "Bad Request")
 			return False
 
-		upgrade = "upgrade" in headers and "upgrade" in headers.get("connection", "").lower()
 		chunked = "transfer-encoding" in headers
+		# Only a WebSocket is piped as an upgrade; other upgrades are dropped and the request is
+		# answered as plain HTTP. A piped connection is closed by the worker after its answer
+		# (a WebSocket's handshake refused, a chunked body read), so nothing more the client
+		# sends on it reaches the worker without the router reading it first
+		connection = None
+		upgrade = False
+		if "upgrade" in headers:
+			upgrade = headers["upgrade"].lower() == "websocket" and "upgrade" in tokens(headers.get("connection", ""))
+			connection = b"Upgrade, close" if upgrade else b""
+		if chunked and not upgrade:
+			connection = b"close"
 
 		path, _, query = target.partition("?")
 		hint = None
@@ -305,7 +377,7 @@ class Proxy:
 		self.active = upstream
 		upstream.waiting += 1
 		self.router.waiting[worker] += 1
-		upstream.writer.write(forward_head(lines, self.client, self.router.trusted) + body)
+		upstream.writer.write(forward_head(lines, self.client, self.router.trusted, connection) + body)
 
 		while length > 0:
 			data = await self.reader.read(min(length, CHUNK))
@@ -587,8 +659,11 @@ def worker_main(location, worker_id, sock, ready):
 	watch_parent()
 
 	asgi = load_asgi(location)
+	if worker_id == 1:
+		warn_if_debug(asgi.app)
 
-	config = uvicorn.Config(asgi, timeout_graceful_shutdown=GRACEFUL)
+	config = uvicorn.Config(asgi, timeout_graceful_shutdown=GRACEFUL,
+		ws_per_message_deflate=bool(asgi.app.config["DOMINO_WS_COMPRESSION"]))
 	# The address users need is the router's, which it prints
 	logging.getLogger("uvicorn.error").addFilter(lambda record: not str(record.msg).startswith("Uvicorn running on"))
 

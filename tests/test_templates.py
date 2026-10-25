@@ -92,7 +92,7 @@ COUNTER_HTML = '<p>Count: {{ count }}</p><button {{ on(click=increment) }}>+</bu
 def test_templates_are_found_by_name_anywhere_in_the_app(tmp_path):
 
 	write(tmp_path / "templates" / "flask.html", "flask {{ name }}")
-	write(tmp_path / "pages" / "deep" / "er" / "card.html", "card {{ name }}")
+	write(tmp_path / "pages" / "deep" / "er" / "card.html", "<page>card {{ name }}</page>")
 	app = Domino("app", root_path=str(tmp_path))
 
 	with app.test_request_context():

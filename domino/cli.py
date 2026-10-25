@@ -1,7 +1,9 @@
 """The `domino` command: `domino run` and `domino create`, like `meteor run` and `meteor create`,
-and `domino serve` for production."""
+`domino serve` for production, `domino build` and `domino deploy`, like `meteor deploy`, and
+`domino tailwind build` before deploying."""
 
 import argparse
+import html
 import importlib.util
 import json
 import os
@@ -10,7 +12,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from . import devmongo
+from . import deploy, devmongo, tailwind
 
 
 APP_TEMPLATE = '''\
@@ -25,34 +27,30 @@ if __name__ == "__main__":
 	app.run(debug=True)
 '''
 
+# "{title}" is replaced with the app's name
 LAYOUT_TEMPLATE = '''\
-from flask import current_app
-
-import domino.tags as t
-from domino.components import Document
-
-
-# Wraps every page in this folder and below
-def layout(content):
-
-	title = current_app.settings.public.title
-
-	return Document(title=title) [
-		t.h1() [
-			title
-		],
-		content
-	]
+<!-- The layout pages go in (<page layout="Main" title="...">): the page goes where <slot /> is.
+     Domino adds the doctype, its script and the components' CSS -->
+<layout name="Main">
+	<html lang="en">
+		<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<title>{{ title }} · {title}</title>
+		</head>
+		<body>
+			<h1>{{ title }}</h1>
+			<slot />
+		</body>
+	</html>
+</layout>
 '''
 
 INDEX_TEMPLATE = '''\
-from components.tasks import Tasks
-
-
-# This file is the page at /
-def page():
-
-	return Tasks()
+<!-- The page at /, in the layout called Main (layouts/main.html) -->
+<page layout="Main" title="Tasks">
+	<Tasks />
+</page>
 '''
 
 COMPONENT_TEMPLATE = '''\
@@ -63,31 +61,66 @@ import domino.tags as t
 from data import tasks
 
 
+# Logic in Python, markup in tasks.html next to this file: <TaskForm>, <TaskList> and <NoTasks>
+# there are the markup of the classes of those names. Tasks only composes, so it has a render()
 class Tasks(t.div):
 
 
 	def render(self):
 
 		# Reading the collection here re-renders this on every open page when it changes
+		found = tasks.find(sort=[("created", -1)]).fetch()
+
 		return [
-			t.form(on_submit=self.add) [
-				t.input(name="text", placeholder="What needs doing?", required=True, autocomplete="off"),
-				t.button(type="submit") [
-					"Add"
-				]
-			],
-			t.ul()([
-				t.li() [
-					task["text"]
-				]
-				for task in tasks.find(sort=[("created", -1)])
-			])
+			TaskForm(on_add=self.add),
+			TaskList(tasks=found) if found else NoTasks(),
 		]
 
 
-	def add(self, event):
+	def add(self, text):
 
-		tasks.insert({"text": event.form.get("text", "").strip()[:200], "created": time.time()})
+		tasks.insert({"text": text[:200], "created": time.time()})
+
+
+class TaskForm(t.form):
+
+	on_add = None  # a prop: the parent's handler, called with the text
+
+
+	def submit(self, event):
+
+		text = event.form.get("text", "").strip()
+		if text:
+			self.on_add(text)
+
+
+class TaskList(t.div):
+
+	tasks = None  # a prop: the tasks to show
+
+
+class NoTasks(t.p):
+
+	pass
+'''
+
+COMPONENT_HTML_TEMPLATE = '''\
+<!-- The markup of the components in tasks.py: each <component> is the class of that name -->
+
+<component name="TaskForm" on-submit="submit">
+	<input name="text" placeholder="What needs doing?" required autocomplete="off">
+	<button type="submit">Add</button>
+</component>
+
+<component name="TaskList">
+	<ul>
+		{{ for task in tasks }}
+		<li>{{ task.text }}</li>
+		{{ /for }}
+	</ul>
+</component>
+
+<component name="NoTasks">Nothing to do yet.</component>
 '''
 
 DATA_TEMPLATE = '''\
@@ -99,7 +132,7 @@ tasks = Collection("tasks")
 '''
 
 INDEX_TEST_TEMPLATE = '''\
-# Tests for pages/index.py, run with `pytest`. `page` is the page, open in a simulated browser.
+# Tests for pages/index.html, run with `pytest`. `page` is the page, open in a simulated browser.
 # Each test gets an empty database, on a MongoDB started for the tests
 
 
@@ -121,6 +154,49 @@ def test_other_tabs_see_it(page, open_page):
 	other.sync()
 
 	assert other.text("ul") == "Walk the dog"
+'''
+
+# `domino create --tailwind`: the same app, styled with Tailwind CSS classes
+TAILWIND_LAYOUT_TEMPLATE = '''\
+<!-- The layout pages go in (<page layout="Main" title="...">): the page goes where <slot /> is.
+     Tailwind CSS classes work anywhere ("tailwind": true in settings.json), built into the CSS every
+     page links -->
+<layout name="Main">
+	<html lang="en">
+		<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<title>{{ title }} · {title}</title>
+		</head>
+		<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+			<main class="mx-auto max-w-xl px-6 py-12">
+				<h1 class="mb-6 text-3xl font-bold tracking-tight">{{ title }}</h1>
+				<slot />
+			</main>
+		</body>
+	</html>
+</layout>
+'''
+
+# The Python side is the same (components/tasks.py); the markup has Tailwind classes
+TAILWIND_COMPONENT_HTML_TEMPLATE = '''\
+<!-- The markup of the components in tasks.py: each <component> is the class of that name -->
+
+<component name="TaskForm" class="flex gap-2" on-submit="submit">
+	<input name="text" placeholder="What needs doing?" required autocomplete="off"
+		class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+	<button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Add</button>
+</component>
+
+<component name="TaskList">
+	<ul class="mt-4 space-y-2">
+		{{ for task in tasks }}
+		<li class="rounded-lg bg-white px-3 py-2 shadow-sm dark:bg-slate-900">{{ task.text }}</li>
+		{{ /for }}
+	</ul>
+</component>
+
+<component name="NoTasks" class="mt-4 text-slate-500">Nothing to do yet.</component>
 '''
 
 GITIGNORE_TEMPLATE = '''\
@@ -157,8 +233,26 @@ def build_parser():
 	serve.add_argument("--port", type=int, default=8000, help="port to serve on (default: 8000)")
 	serve.add_argument("--host", default="127.0.0.1", help="interface to serve on (default: 127.0.0.1; 0.0.0.0 for every one)")
 
+	build = commands.add_parser("build", help="write a Dockerfile for an app, to deploy it anywhere")
+	build.add_argument("app", nargs="?", default=".", help="the app's folder (default: the current folder)")
+	build.add_argument("--force", action="store_true", help="write the files again even if they're there")
+
+	ship = commands.add_parser("deploy", help="deploy an app to Fly.io or Render, or as a Docker image")
+	ship.add_argument("platform", choices=sorted(deploy.PLATFORMS), help="where to deploy: fly, render or docker")
+	ship.add_argument("app", nargs="?", default=".", help="the app's folder (default: the current folder)")
+	ship.add_argument("--name", help="the app's name on the platform (default: from the folder's name)")
+	ship.add_argument("--mongo-url", help="the production MongoDB URL (default: DOMINO_MONGO__URL, MONGO_URL or settings.local.json)")
+	ship.add_argument("--force", action="store_true", help="write the deployment files again even if they're there")
+
 	create = commands.add_parser("create", help="create a new app folder")
 	create.add_argument("name", help="folder to create")
+	create.add_argument("--tailwind", action="store_true", help="style it with Tailwind CSS")
+
+	tailwind_parser = commands.add_parser("tailwind", help="Tailwind CSS: `domino tailwind build` before deploying")
+	tailwind_parser.set_defaults(usage=tailwind_parser)
+	tailwind_commands = tailwind_parser.add_subparsers(dest="tailwind_command", metavar="command")
+	tailwind_build = tailwind_commands.add_parser("build", help="build an app's minified Tailwind CSS into .domino/tailwind.css (e.g. in a Dockerfile)")
+	tailwind_build.add_argument("app", nargs="?", default=".", help="the app's folder or Python file (default: the current folder)")
 
 	return parser
 
@@ -183,12 +277,20 @@ def main(argv=None):
 		if args.command == "serve":
 			return serve(args)
 		if args.command == "create":
-			return create(args.name)
-	except (CliError, devmongo.DevMongoError) as error:
+			return create(args.name, args.tailwind)
+		if args.command == "build":
+			deploy.build(args.app, args.force)
+			return 0
+		if args.command == "deploy":
+			return deploy.deploy(args.platform, args.app, name=args.name, mongo_url=args.mongo_url, force=args.force)
+		if args.command == "tailwind" and args.tailwind_command == "build":
+			return tailwind_build(args)
+	except (CliError, devmongo.DevMongoError, deploy.DeployError, tailwind.TailwindError) as error:
 		print(f"domino: {error}", file=sys.stderr)
 		return 1
 
-	parser.print_help()
+	# `domino` or `domino tailwind` alone
+	getattr(args, "usage", parser).print_help()
 	return 2
 
 
@@ -271,8 +373,9 @@ def run(args):
 
 	app = load_app(args.app)
 
-	# The reloader runs this again in a child process, which shouldn't repeat it
-	if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+	# The reloader runs this again in a child process, which shouldn't repeat it. With --port 0
+	# the server says which port it picked
+	if os.environ.get("WERKZEUG_RUN_MAIN") != "true" and args.port:
 		print(f"domino: App: http://{args.host}:{args.port}/", file=sys.stderr, flush=True)
 
 	# Domino.run() starts the local MongoDB, once, outside the reloader's child process
@@ -293,24 +396,66 @@ def app_path(path):
 	return str(path)
 
 
+def env_workers():
+	"""The number of workers in WEB_CONCURRENCY, as uvicorn and gunicorn read it (platforms and
+	the Dockerfile `domino build` writes set it), or None."""
+
+	value = os.environ.get("WEB_CONCURRENCY", "").strip()
+	if not value:
+		return None
+
+	try:
+		return positive_int(value)
+	except (ValueError, argparse.ArgumentTypeError):
+		raise CliError(f"WEB_CONCURRENCY must be a number of workers, at least 1, not {value!r}") from None
+
+
 def serve(args):
 
 	from . import asgi, workers
 
-	count = args.workers or workers.default_count()
+	count = args.workers or env_workers() or workers.default_count()
 
 	# One process needs no router: the app served by uvicorn, as `uvicorn app:app.asgi` would
 	if count == 1:
 		app = load_app(args.app)
+		workers.warn_if_debug(app)
+		tailwind.prepare(app.root_path, app.tailwind)
 		print(f"domino: App: http://{args.host}:{args.port}/ (1 worker)", file=sys.stderr, flush=True)
 		asgi.serve(app, args.host, args.port, False)
 		return 0
 
-	# The workers load the app themselves; this process only routes
-	return workers.serve(app_path(args.app), args.host, args.port, count)
+	# The workers load the app themselves; this process only routes (and builds the CSS they serve)
+	path = app_path(args.app)
+	tailwind.prepare(*app_tailwind(path))
+
+	return workers.serve(path, args.host, args.port, count)
 
 
-def create(name):
+def app_tailwind(path):
+	"""The app's folder and how it uses Tailwind, from its settings, without importing it."""
+
+	from .settings import load_settings
+
+	path = Path(path).resolve()
+	root = path if path.is_dir() else path.parent
+
+	return root, tailwind.options(load_settings(str(root)), root)
+
+
+def tailwind_build(args):
+
+	root, options = app_tailwind(app_path(args.app))
+	if options is None:
+		raise CliError(f'{root} doesn\'t use Tailwind CSS: add {{"tailwind": true}} to its settings.json, or a tailwind.css')
+
+	output = tailwind.build(root, options, minify=True)
+	print(f"domino: Tailwind CSS: built {output} ({output.stat().st_size // 1024} KB)", file=sys.stderr, flush=True)
+
+	return 0
+
+
+def create(name, with_tailwind=False):
 
 	folder = Path(name)
 
@@ -321,13 +466,16 @@ def create(name):
 
 	title = folder.resolve().name
 	settings = {"public": {"title": title}}
+	if with_tailwind:
+		settings["tailwind"] = True
 
 	files = {
 		"app.py": APP_TEMPLATE,
-		"pages/layout.py": LAYOUT_TEMPLATE,
-		"pages/index.py": INDEX_TEMPLATE,
+		"layouts/main.html": (TAILWIND_LAYOUT_TEMPLATE if with_tailwind else LAYOUT_TEMPLATE).replace("{title}", html.escape(title)),
+		"pages/index.html": INDEX_TEMPLATE,
 		"pages/index_test.py": INDEX_TEST_TEMPLATE,
 		"components/tasks.py": COMPONENT_TEMPLATE,
+		"components/tasks.html": TAILWIND_COMPONENT_HTML_TEMPLATE if with_tailwind else COMPONENT_HTML_TEMPLATE,
 		"data.py": DATA_TEMPLATE,
 		"settings.json": json.dumps(settings, indent=4) + "\n",
 		".gitignore": GITIGNORE_TEMPLATE,
@@ -337,6 +485,6 @@ def create(name):
 		(folder / path).parent.mkdir(parents=True, exist_ok=True)
 		(folder / path).write_text(text, encoding="utf-8")
 
-	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n\nTo test it:\n\n    pytest\n")
+	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n\nTo test it:\n\n    pytest\n\nTo deploy it (to Fly.io, Render, or anywhere Docker runs):\n\n    domino deploy fly\n")
 
 	return 0

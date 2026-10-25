@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import struct
 import sys
 import threading
@@ -351,12 +352,13 @@ def test_debug_error_shows_overlay(serve, page):
 	overlay.wait_for(timeout=5000)
 
 	assert "RuntimeError: Something went wrong while saving" in overlay.inner_text()
-	assert "Traceback" in overlay.locator("pre").inner_text()
+	# Folded under the frames debug.js shows (see test_overlay_shows_frames_for_a_failing_handler)
+	assert "Traceback" in overlay.locator("pre").text_content()
 	assert any("Domino event error" in error for error in page.errors)
 	assert unexpected(page.errors) == []
 
 	# The button works again, and the overlay can be closed
-	assert page.get_by_text("Raise an exception").is_enabled()
+	assert page.get_by_role("button", name="Raise an exception").is_enabled()
 	overlay.get_by_role("button", name="Close").click()
 	assert page.locator("#domino-error").count() == 0
 
@@ -389,6 +391,123 @@ def test_cancelled_error_event_shows_nothing(serve, page):
 	assert page.evaluate("window.caught.eventId").endswith("-click")
 	assert page.locator("#domino-error").count() == 0
 	assert unexpected(page.errors) == []
+
+
+def test_overlay_shows_frames_for_a_failing_handler(serve, page):
+
+	page.goto(serve("devtools", debug))
+
+	page.get_by_text("Raise an exception").click()
+	overlay = page.locator("#domino-error")
+	overlay.wait_for(timeout=5000)
+	text = overlay.inner_text()
+
+	# The error, which element fired which handler, and a hint
+	assert "KeyError: 'name'" in text
+	assert 'click on button.crash "Raise an exception" → Crash.save' in text
+	assert "event.form.get(" in text
+
+	# The app's own frame open, with its source and the line that raised; Domino's folded
+	frame = overlay.locator(".dt-frame[data-app=true]")
+	assert frame.count() == 1
+	assert re.search(r"Crash\.save\s+components/crash\.py:\d+", frame.inner_text())
+	assert frame.locator(".dt-current").inner_text().strip().endswith('name = event.form["name"]')
+	assert overlay.locator("details.dt-library .dt-frame[data-app=false]").count() >= 1
+
+	# Still dismissable, with Esc too
+	page.keyboard.press("Escape")
+	assert page.locator("#domino-error").count() == 0
+	assert unexpected(page.errors) == []
+
+
+def test_inspector_picks_a_component_and_follows_its_state(serve, page):
+
+	page.goto(serve("devtools", debug))
+	counter = page.locator("section.Counter")
+
+	page.keyboard.press("Alt+Shift+D")
+	panel = page.locator("#domino-inspector")
+	panel.wait_for(timeout=5000)
+	assert page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	page.wait_for_function("Domino.devtools.inspector.components.size > 0", timeout=5000)
+
+	# Hovering outlines the component under the cursor, with its class name
+	counter.locator("h2").hover()
+	highlight = page.locator("#domino-highlight")
+	page.wait_for_function("getComputedStyle(document.getElementById('domino-highlight')).display === 'block'", timeout=5000)
+	assert highlight.inner_text().startswith("Counter")
+	outlined, actual = highlight.bounding_box(), counter.bounding_box()
+	assert all(abs(outlined[key] - actual[key]) < 1 for key in ("x", "y", "width", "height"))
+
+	# Clicking pins the panel, and doesn't reach the page's own events
+	counter.get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('#domino-inspector .dt-name') !== null", timeout=5000)
+	assert panel.locator(".dt-name").inner_text().startswith("Counter")
+	assert counter.locator("p").inner_text() == "Count: 0"
+	assert not page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	assert panel.locator("td.dt-key").all_inner_texts() == ["count", "step"]
+	assert panel.locator("td.dt-value").all_inner_texts() == ["0", "1"]
+	assert "Counter.increment" in panel.inner_text() and "instant" in panel.inner_text()
+
+	# The State follows the component as it's clicked
+	counter.get_by_role("button", name="+1").click()
+	counter.get_by_role("button", name="Bigger steps").click()
+	page.wait_for_function("Array.from(document.querySelectorAll('#domino-inspector td.dt-value')).map((td) => td.textContent).join() === '1,10'", timeout=5000)
+
+	# Its parent, by its breadcrumb
+	panel.locator(".dt-crumb", has_text="Layout").click()
+	page.wait_for_function("document.querySelector('#domino-inspector .dt-name').textContent.startsWith('Layout')", timeout=5000)
+
+	# The shortcut toggles picking
+	page.keyboard.press("Alt+Shift+D")
+	assert page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	page.keyboard.press("Alt+Shift+D")
+	assert not page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	assert page.errors == []
+
+
+def test_event_log_lists_events_with_timings(serve, page):
+
+	page.goto(serve("devtools", debug))
+
+	page.get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('section.Counter p').textContent.trim() === 'Count: 1'", timeout=5000)
+	page.fill("input[name=text]", "Write tests")
+	page.press("input[name=text]", "Enter")
+	page.wait_for_function("document.querySelectorAll('li.TodoItem').length === 2", timeout=5000)
+	page.wait_for_function("Domino.devtools.log.every((entry) => entry.status !== null)", timeout=5000)
+
+	page.evaluate("Domino.inspect()")
+	page.keyboard.press("Escape")
+	panel = page.locator("#domino-inspector")
+	panel.locator(".dt-tab", has_text="Events").click()
+
+	rows = panel.locator(".dt-log tbody tr")
+	assert rows.count() == 2
+	assert "submit" in rows.nth(0).inner_text() and "TodoList.add" in rows.nth(0).inner_text()
+	assert "click" in rows.nth(1).inner_text() and "Counter.increment" in rows.nth(1).inner_text()
+	assert "✓ matched" in rows.nth(1).inner_text()
+	assert re.search(r"\d+(\.\d+)? ms", rows.nth(0).locator(".dt-server").inner_text())
+	assert re.search(r"\d+ ms", rows.nth(0).locator(".dt-rtt").inner_text())
+
+	submit, click = page.evaluate("Domino.devtools.log")
+	assert submit["event"] == "submit" and submit["predicted"] is False and submit["status"] == 200
+	assert click["event"] == "click" and click["predicted"] is True and click["matched"] is True
+	for entry in (submit, click):
+		assert entry["serverMs"] >= 0 and entry["roundTrip"] >= 0
+		assert entry["sent"] > 0 and entry["received"] > 0
+	assert submit["sent"] > click["sent"]  # the form's fields
+	assert page.errors == []
+
+
+def test_no_devtools_outside_debug(serve, page):
+
+	page.goto(serve("devtools"))
+	page.keyboard.press("Alt+Shift+D")
+
+	assert page.evaluate("typeof Domino.inspect === 'undefined' && Domino.devtools === undefined")
+	assert page.locator("#domino-inspector").count() == 0
+	assert page.errors == []
 
 
 def test_submit_marks_the_form_and_its_submit_button(serve, page):
@@ -667,6 +786,63 @@ def test_accounts_sign_up_log_out_log_in_and_keep_private_notes(serve, page):
 	assert page.errors == []
 
 
+@pytest.mark.mongo
+def test_accounts_forgot_password_email_and_reset(serve, page, mail_outbox):
+
+	from domino import accounts
+
+	def configure(module):
+		module.app.secret_key = "test"
+
+	accounts._mailed.clear()
+	email = f"ada-{time.time_ns()}@example.com"
+	home = serve("accounts", configure)
+	menu = page.locator(".UserMenu")
+
+	page.goto(home + "signup")
+	page.fill("input[name=email]", email)
+	page.fill("input[name=password]", "correct horse")
+	page.get_by_role("button", name="Sign up").click()
+	menu.get_by_role("button", name="Log out").click()
+	menu.get_by_role("link", name="Log in").click()
+
+	page.get_by_role("link", name="Forgot your password?").click()
+	page.wait_for_url(home + "forgot-password")
+	page.fill("input[name=email]", email)
+	page.get_by_role("button", name="Email me a link").click()
+	assert "we've emailed a link" in page.get_by_role("status").inner_text()
+
+	# The server runs in this process, so its emails are in the outbox
+	(message,) = [message for message in mail_outbox if message.subject == "Reset your password"]
+	assert message.links[0].startswith(home + "reset-password?token=")
+	page.goto(message.links[0])
+	page.fill("input[name=password]", "a new password")
+	page.fill("input[name=confirm]", "a different one")
+	page.get_by_role("button", name="Change password").click()
+	page.get_by_role("alert").wait_for()
+	assert page.get_by_role("alert").inner_text() == "The passwords don't match"
+
+	page.fill("input[name=password]", "a new password")
+	page.fill("input[name=confirm]", "a new password")
+	page.get_by_role("button", name="Change password").click()
+	page.get_by_role("status").wait_for()
+	assert page.get_by_role("status").inner_text().strip() == "Your password has been changed."
+
+	page.locator("main").get_by_role("link", name="Log in").click()
+	page.wait_for_url(home + "login")
+	page.fill("input[name=email]", email)
+	page.fill("input[name=password]", "a new password")
+	page.get_by_role("button", name="Log in").click()
+	page.locator(".LoginForm").get_by_text("Signed in as").wait_for()
+	# The menu updates by itself, a moment later
+	menu.get_by_text("Signed in as").wait_for()
+
+	# The link was used up
+	page.goto(message.links[0])
+	assert page.locator("main [role=alert]").inner_text() == "This link is invalid or has expired."
+	assert page.errors == []
+
+
 def test_file_routed_pages_share_a_layout(serve, page):
 
 	url = serve("functional")
@@ -744,22 +920,117 @@ def test_component_css_from_an_event_response_is_added_once(page):
 		server.shutdown()
 
 
-def test_counter_paired_with_a_jinja_template_in_a_jinja_page(serve, page):
+def test_template_counter_is_instant(serve, page):
 
 	page.goto(serve("templating"))
 	page.evaluate("Domino.enableLatencySim(1000)")
 	counter = page.locator(".Counter")
 
-	counter.get_by_text("+1").click()
+	counter.get_by_role("button", name="+1").click()
+	# Predicted from the template, long before the server answers: Reset is enabled at once too
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '1'", timeout=500)
+	assert not counter.get_by_role("button", name="Reset").is_disabled()
+	assert counter.locator(".hint").inner_text() == "Keep going."
+	# A counter can go on forever, so only the next state is shipped; the server catches up
+	counter.get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '2'", timeout=8000)
+	page.wait_for_function("!document.querySelector('.Counter').hasAttribute('data-predicted')", timeout=8000)
+	assert counter.locator("strong").inner_text() == "2"
+
+	counter.get_by_role("button", name="Reset").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '0'", timeout=5000)
+	page.wait_for_function("document.querySelector('.Counter button:nth-of-type(2)').disabled", timeout=5000)
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_template_todo_list_adds_toggles_and_removes_each_item(serve, page):
+
+	page.goto(serve("templating"))
+	todos = page.locator(".Todos")
+
+	todos.locator("input[name=text]").fill("Third <one>")
+	todos.locator("input[name=text]").press("Enter")
+	page.wait_for_function("document.querySelectorAll('.TodoList li').length === 3")
+	assert todos.locator("li span").all_inner_texts() == ["Write the markup in HTML", "Keep the logic in Python", "Third <one>"]
+	assert todos.locator("input[name=text]").input_value() == ""
+
+	# Each item's checkbox and button have their own index
+	todos.locator("li input[type=checkbox]").nth(1).click()
+	page.wait_for_function("document.querySelector('.TodoList .hint').textContent === '1 left.'")
+	assert "done" in todos.locator("li").nth(1).get_attribute("class")
+
+	todos.locator("li .remove").nth(0).click()
+	page.wait_for_function("document.querySelectorAll('.TodoList li').length === 2")
+	assert todos.locator("li span").all_inner_texts() == ["Keep the logic in Python", "Third <one>"]
+
+	for remaining in (1, 0):
+		todos.locator("li .remove").first.click()
+		page.wait_for_function(f"document.querySelectorAll('.TodoList li').length === {remaining}")
+	page.wait_for_function("document.querySelector('.EmptyState')?.textContent === 'Nothing to do. Add something above!'")
+	assert page.errors == []
+
+
+def test_template_faq_toggles_instantly(serve, page):
+
+	page.goto(serve("templating"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+	faq = page.locator(".Faq")
+
+	# on-click="toggle(index)": every state is shipped, so any number of clicks show at once
+	faq.get_by_text("Where does the logic go?").click()
+	page.wait_for_function("document.querySelectorAll('.Faq dd').length === 1", timeout=500)
+	assert faq.locator("dd").inner_text().startswith("In Python")
+	faq.get_by_text("Why is it instant?").click()
+	page.wait_for_function("document.querySelector('.Faq dd').textContent.startsWith('toggle()')", timeout=500)
+	faq.get_by_text("Why is it instant?").click()
+	page.wait_for_function("document.querySelectorAll('.Faq dd').length === 0", timeout=500)
+	assert faq.locator("button[aria-expanded=true]").count() == 0
+
+	# The server agrees once it has answered every click
+	page.wait_for_function("!document.querySelector('.Faq').hasAttribute('data-predicted')", timeout=10000)
+	assert faq.locator("dd").count() == 0
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_moving_between_template_pages_keeps_the_layouts_nodes(serve, page):
+
+	page.goto(serve("templating"))
+	# A property of the layout's <nav> node: a page load, or a rebuilt <nav>, would lose it
+	page.evaluate("document.querySelector('nav').domino_kept = 'yes'")
+
+	page.locator("nav").get_by_text("About").click()
+	page.wait_for_function("document.querySelector('h1').textContent === 'About'")
+	assert page.evaluate("document.querySelector('nav').domino_kept") == "yes"
+	assert page.evaluate("location.pathname") == "/about"
+
+	# The page's components work at once
+	page.locator(".Counter").get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '1'")
+
+	page.go_back()
+	page.wait_for_function("document.querySelector('h1').textContent === 'Templates'")
+	assert page.evaluate("document.querySelector('nav').domino_kept") == "yes"
+	assert page.errors == []
+
+
+def test_counter_in_a_jinja_page(serve, page):
+
+	page.goto(serve("templating") + "jinja")
+	page.evaluate("Domino.enableLatencySim(1000)")
+	counter = page.locator(".Counter")
+
+	counter.get_by_role("button", name="+1").click()
 	# Predicted from the paired template, before the server answers
 	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '1'", timeout=500)
-	counter.get_by_text("+1").click()
+	counter.get_by_role("button", name="+1").click()
 	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '2'", timeout=5000)
 	page.wait_for_function("!document.querySelector('.Counter').hasAttribute('data-predicted')", timeout=5000)
 
-	counter.get_by_text("Reset").click()
+	counter.get_by_role("button", name="Reset").click()
 	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '0'", timeout=5000)
-	assert counter.get_by_text("Reset").is_disabled()
+	assert counter.get_by_role("button", name="Reset").is_disabled()
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []
 
@@ -767,7 +1038,7 @@ def test_counter_paired_with_a_jinja_template_in_a_jinja_page(serve, page):
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="template strings need Python 3.14")
 def test_template_string_todo(serve, page):
 
-	page.goto(serve("templating"))
+	page.goto(serve("templating") + "jinja")
 	todo = page.locator(".Todo")
 
 	for number, text in enumerate(["one", "two"], 1):
@@ -1409,3 +1680,460 @@ def test_uploads_through_serve_workers_reach_the_page_worker(serve_workers, brow
 		tab.wait_for_function("document.querySelectorAll('ul img').length === 1", timeout=5000)
 		assert tab.errors == []
 		tab.close()
+
+
+# Patches (a component sent as what changed) and hidden tabs (see domino/patches.py)
+
+
+@pytest.fixture(params=["wsgi", "asgi"])
+def serve_app(request, asgi_server):
+	"""Serves an app made in the test on both transports."""
+
+	servers = []
+
+	def start(app):
+		if request.param == "asgi":
+			return asgi_server(app).url
+		server = make_server("127.0.0.1", 0, app, threaded=True)
+		threading.Thread(target=server.serve_forever, daemon=True).start()
+		servers.append(server)
+		return f"http://127.0.0.1:{server.server_port}/"
+
+	start.transport = request.param
+	yield start
+
+	for server in servers:
+		server.shutdown()
+
+
+def received_frames(page):
+	"""Messages the page's WebSocket receives, parsed."""
+
+	frames = []
+	page.on("websocket", lambda ws: ws.on("framereceived", lambda payload: frames.append(json.loads(payload))))
+
+	return frames
+
+
+# The DOM of an element as a page load would build it: tags, sorted attributes, checked, and
+# text without the whitespace around it (updates are indented differently from the page)
+CANONICAL_DOM = """(selector) => {
+    const walk = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) return node.nodeValue.trim();
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        const attributes = Array.from(node.attributes).map((a) => a.name + '=' + a.value).sort().join(' ');
+        const children = Array.from(node.childNodes).map(walk).filter(Boolean).join('');
+        return '<' + node.tagName + ' ' + attributes + ' checked:' + !!node.checked + '>' + children + '</' + node.tagName + '>';
+    };
+    return walk(document.querySelector(selector));
+}"""
+
+
+def test_a_long_list_edited_many_times_ends_like_a_fresh_load(serve_app, browser):
+
+	import random
+
+	import domino.tags as t
+	from domino import Collection, Domino
+	from domino.components import Document
+
+	items = Collection()
+	for number in range(100):
+		items.insert({"_id": f"i{number:03}", "text": f"Item {number}, something to do", "done": False, "order": number})
+
+	class Todos(t.div):
+
+		def render(self):
+			documents = items.find(sort="order").fetch()
+			return [
+				t.button(id="add", on_click=self.add) ["Add"],
+				t.ul()([
+					t.li(id=item["_id"], class_="done" if item["done"] else None) [
+						t.input(type="checkbox", checked=item["done"], on_change=lambda event, key=item["_id"]: self.toggle(key)),
+						t.span() [item["text"]],
+						t.button(class_="rename", on_click=lambda event, key=item["_id"]: self.rename(key)) ["Rename"],
+						t.button(class_="remove", on_click=lambda event, key=item["_id"]: self.remove(key)) ["Remove"],
+					]
+					for item in documents
+				]),
+				t.p(id="count") [f"{len(documents)} items, {sum(item['done'] for item in documents)} done"]
+			]
+
+		def add(self):
+			first = items.find(sort="order", limit=1).fetch()
+			items.insert({"text": "Added at the top", "done": False, "order": first[0]["order"] - 1 if first else 0})
+
+		def toggle(self, key):
+			item = items.find_one({"_id": key})
+			items.update({"_id": key}, {"$set": {"done": not item["done"]}})
+
+		def rename(self, key):
+			items.update({"_id": key}, {"$set": {"text": items.find_one({"_id": key})["text"] + " (renamed é 😀)"}})
+
+		def remove(self, key):
+			items.remove({"_id": key})
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Todos(id="todos")]
+
+	url = serve_app(app)
+	page = browser.new_page()
+	frames = received_frames(page)
+	errors = []
+	page.on("pageerror", lambda error: errors.append(str(error)))
+	try:
+		page.goto(url)
+		rng = random.Random(7)
+		for _ in range(40):
+			action = rng.choice(["toggle", "rename", "rename", "remove", "add"])
+			length = page.evaluate("document.querySelector('#todos').outerHTML.length")
+			if action == "add":
+				page.click("#add")
+			else:
+				row = page.locator("li").nth(rng.randrange(page.locator("li").count()))
+				row.locator({"toggle": "input", "rename": ".rename", "remove": ".remove"}[action]).click()
+			# Each action changes the HTML; wait for it before the next
+			page.wait_for_function(f"document.querySelector('#todos').outerHTML.length !== {length}", timeout=5000)
+
+		page.wait_for_function("!document.documentElement.hasAttribute('data-domino-loading')")
+		edited = page.evaluate(CANONICAL_DOM, "#todos")
+
+		fresh = browser.new_page()
+		fresh.goto(url)
+		assert fresh.evaluate(CANONICAL_DOM, "#todos") == edited
+		fresh.close()
+
+		if serve_app.transport == "asgi":
+			assert sum("patch" in frame for frame in frames) >= 30
+		assert errors == []
+	finally:
+		page.close()
+
+
+def chat_app():
+
+	import domino.tags as t
+	from domino import Collection, Domino
+	from domino.components import Document
+
+	messages = Collection()
+	for number in range(200):
+		messages.insert({"text": f"Message {number}", "sent": number})
+
+	class Chat(t.div):
+
+		def render(self):
+			return [
+				t.ul()([t.li() [message["text"]] for message in messages.find(sort="sent")]),
+				t.form(on_submit=self.send) [
+					t.input(name="text"),
+					t.button(type="submit") ["Send"]
+				]
+			]
+
+		def send(self, event):
+			messages.insert({"text": event.form["text"], "sent": len(messages.find().fetch())})
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Chat()]
+
+	return app
+
+
+def send_message(page, text):
+
+	page.fill("input[name=text]", text)
+	page.press("input[name=text]", "Enter")
+
+
+def test_typing_after_a_submit_isnt_cleared_by_its_answer(serve_app, browser):
+
+	import time
+
+	import domino.tags as t
+	from domino import Collection, Domino
+	from domino.components import Document
+
+	messages = Collection()
+
+	class Chat(t.div):
+
+		def render(self):
+			return [
+				t.ul()([t.li() [message["text"]] for message in messages.find()]),
+				t.form(on_submit=self.send) [t.input(name="text")],
+			]
+
+		def send(self, event):
+			time.sleep(0.5)
+			messages.insert({"text": event.form["text"]})
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Chat()]
+
+	page = browser.new_page()
+	try:
+		page.goto(serve_app(app))
+		send_message(page, "first")
+		# The next message, typed while the first is on its way
+		page.fill("input[name=text]", "second")
+		page.wait_for_function("document.querySelector('li') && document.querySelector('li').textContent.trim() === 'first'")
+		assert page.input_value("input[name=text]") == "second"
+	finally:
+		page.close()
+
+
+def test_chat_appends_reach_other_windows(serve_app, browser):
+
+	url = serve_app(chat_app())
+	reader, writer = browser.new_page(), browser.new_page()
+	frames = received_frames(reader)
+	try:
+		reader.goto(url)
+		writer.goto(url)
+		for number in range(1, 6):
+			send_message(writer, f"Hello {number}")
+			try:
+				reader.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=15000)
+			except playwright.TimeoutError:
+				last = "Array.from(document.querySelectorAll('li')).slice(-6).map((li) => li.textContent)"
+				raise AssertionError(
+					f"Hello {number} didn't arrive; the reader's last items: {reader.evaluate(last)}, the writer's: {writer.evaluate(last)}"
+				) from None
+
+		reader.wait_for_function("document.querySelector('li:last-child').textContent.trim() === 'Hello 5'", timeout=15000)
+		assert reader.locator("li").first.inner_text() == "Message 0"
+		if serve_app.transport == "asgi":
+			updates = [frame for frame in frames if frame.get("type") == "update"]
+			# The first is whole; after it, a line or two each
+			assert all("patch" in update for update in updates[1:])
+			assert all(len(json.dumps(update)) < 300 for update in updates[1:])
+	finally:
+		reader.close()
+		writer.close()
+
+
+HIDE = """(hidden) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+}"""
+
+
+def test_a_hidden_tab_gets_one_update_when_shown(serve_app, browser):
+
+	url = serve_app(chat_app())
+	hidden, writer = browser.new_page(), browser.new_page()
+	frames = received_frames(hidden)
+	try:
+		hidden.goto(url)
+		writer.goto(url)
+		hidden.wait_for_function("!document.documentElement.hasAttribute('data-domino-loading')")
+		hidden.evaluate(HIDE, True)
+		time.sleep(0.3)
+
+		for number in range(1, 4):
+			send_message(writer, f"While hidden {number}")
+			writer.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=5000)
+		time.sleep(0.5)
+
+		if serve_app.transport == "asgi":
+			# Paused: the server sent it nothing, and its page still shows what it had
+			assert [frame for frame in frames if frame.get("type") == "update"] == []
+			assert hidden.locator("li").count() == 200
+
+		hidden.evaluate(HIDE, False)
+		hidden.wait_for_function("document.querySelectorAll('li').length === 203", timeout=5000)
+		assert hidden.locator("li").last.inner_text() == "While hidden 3"
+
+		if serve_app.transport == "asgi":
+			time.sleep(0.3)
+			assert len([frame for frame in frames if frame.get("type") == "update"]) == 1
+
+		# And it's live again
+		send_message(writer, "Shown")
+		hidden.wait_for_function("document.querySelectorAll('li').length === 204", timeout=5000)
+	finally:
+		hidden.close()
+		writer.close()
+
+
+def test_large_predicted_states_arrive_as_patches_and_show_at_once(serve_app, page):
+
+	import domino.tags as t
+	from domino import Domino, State
+	from domino.components import Document
+
+	class Picker(t.div):
+
+		picked = State(0)
+
+		def render(self):
+			return [
+				t.ul()([
+					t.li(class_="picked" if number == self.picked else None) [
+						t.button(on_click=lambda event, number=number: self.pick(number)) [
+							f"Option {number}, with a description long enough to matter"
+						]
+					]
+					for number in range(30)
+				])
+			]
+
+		def pick(self, number):
+			self.picked = number
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Picker()]
+
+	page.goto(serve_app(app))
+	assert '"base":' in page.content()
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	for number in (3, 5):
+		page.get_by_text(f"Option {number},").click()
+		# Well before the 1.5 s round trip: shown from a predicted state sent as a patch
+		page.wait_for_function(f"document.querySelector('li.picked').textContent.includes('Option {number},')", timeout=700)
+		page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=8000)
+
+	assert page.locator("li.picked").count() == 1
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+@pytest.mark.parametrize("transport", ["wsgi", "asgi"])
+def test_tailwind_rebuilds_are_swapped_in_without_reloading(transport, page, tmp_path, monkeypatch, asgi_server):
+
+	import domino.tags as t
+	from domino import Domino, tailwind
+	from domino.components import Document
+	from test_tailwind import write_fake_cli
+
+	monkeypatch.setenv("DOMINO_HOME", str(tmp_path / "home"))
+	monkeypatch.setenv(tailwind.ENV_BIN, str(write_fake_cli(tmp_path)))
+	folder = tmp_path / "app"
+	folder.mkdir()
+	(folder / "settings.json").write_text('{"tailwind": true}')
+	(folder / "page.py").write_text('shown = "tw-red"')
+
+	app = Domino(__name__, root_path=str(folder), pages=False)
+	app.debug = True
+
+	@app.route("/")
+	def index():
+
+		# The second class isn't written out anywhere yet, so the CLI doesn't build it
+		return Document() [
+			t.p(id="a", class_="tw-red") ["built"],
+			t.p(id="b", class_="tw-" + "later") ["not yet"]
+		]
+
+	tailwind.watch(folder, app.tailwind)
+	opened = []
+	page.on("websocket", lambda ws: "/_domino/tailwind/watch" in ws.url and opened.append("websocket"))
+	page.on("request", lambda request: "/_domino/tailwind/watch" in request.url and opened.append("stream"))
+
+	if transport == "wsgi":
+		server = make_server("127.0.0.1", 0, app, threaded=True)
+		threading.Thread(target=server.serve_forever, daemon=True).start()
+		url = f"http://127.0.0.1:{server.server_port}/"
+	else:
+		url = asgi_server(app).url
+
+	color = "(selector) => getComputedStyle(document.querySelector(selector)).color"
+	try:
+		page.goto(url)
+		page.evaluate("window.notReloaded = true")
+		assert page.evaluate(color, "#a") == "rgb(255, 0, 0)"
+		assert page.evaluate(color, "#b") != "rgb(255, 0, 0)"
+		before = page.get_attribute("link[data-domino-tailwind]", "href")
+
+		# The page listens for rebuilds once its channel is open; a rebuild before that isn't swapped in
+		for _ in range(100):
+			if opened:
+				break
+			page.wait_for_timeout(50)
+		# Writing the class out somewhere (here a template) rebuilds the CSS, and the page swaps it in
+		(folder / "later.html").write_text('<p class="tw-later"></p>')
+		page.wait_for_function("getComputedStyle(document.querySelector('#b')).color === 'rgb(255, 0, 0)'", timeout=10000)
+
+		assert page.evaluate("window.notReloaded") is True
+		assert page.locator("link[data-domino-tailwind]").count() == 1
+		assert page.get_attribute("link[data-domino-tailwind]", "href") != before
+		# Its own socket over ASGI (the server closes it at once when restarting), else a stream
+		assert opened[0] == ("websocket" if transport == "asgi" else "stream")
+		assert page.errors == []
+	finally:
+		page.close()
+		if transport == "wsgi":
+			server.shutdown()
+		tailwind.stop_all()
+
+
+def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser, tmp_path):
+	"""A layout is the whole document; when it renders again (its own handler, here), the page's
+	<html> keeps Domino's marks, the head keeps its script and styles, and events keep working."""
+
+	from domino import Domino
+
+	files = {
+		"layouts/main.html": """<layout name="Main">
+	<html lang="en">
+		<head><title>{{ title }} · Site</title></head>
+		<body>
+			<nav><button class="menu" on-click="toggle">Menu</button> {{ if open }}<span>open</span>{{ /if }}</nav>
+			<main><slot /></main>
+		</body>
+	</html>
+</layout>
+""",
+		"layouts/main.py": "import domino.tags as t\nfrom domino import State\n\n\nclass Main(t.div):\n\n\ttitle = ''\n\topen = State(False)\n\n\tdef toggle(self):\n\t\tself.open = not self.open\n",
+		"components/counter.py": "import domino.tags as t\nfrom domino import State\n\n\nclass Counter(t.div):\n\n\tcss = {'color': 'rgb(0, 128, 0)'}\n\tcount = State(0)\n\n\tdef add(self):\n\t\tself.count += 1\n",
+		"components/counter.html": '<component name="Counter"><p class="count">{{ count }}</p><button class="add" on-click="add">+</button></component>',
+		"pages/index.html": '<page layout="Main" title="Home"><Counter /></page>',
+	}
+	for path, text in files.items():
+		(tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+		(tmp_path / path).write_text(text, encoding="utf-8")
+
+	sys.path.insert(0, str(tmp_path))
+	page = browser.new_page()
+	errors = []
+	page.on("pageerror", lambda error: errors.append(str(error)))
+	try:
+		app = Domino("layout_app", root_path=str(tmp_path))
+		page.goto(serve_app(app))
+		page.click("button.add")
+		page.wait_for_function("document.querySelector('p.count').textContent === '1'")
+
+		# The layout's own handler renders the whole document again
+		page.click("button.menu")
+		page.wait_for_function("document.querySelector('nav span') && document.querySelector('nav span').textContent === 'open'")
+
+		assert page.evaluate("document.documentElement.dataset.dominoPage") is not None
+		assert page.evaluate("document.documentElement.lang") == "en"
+		assert page.title() == "Home · Site"
+		assert page.evaluate("getComputedStyle(document.querySelector('.Counter')).color") == "rgb(0, 128, 0)"
+
+		# Events still work after it
+		page.click("button.add")
+		page.wait_for_function("document.querySelector('p.count').textContent === '2'")
+		page.click("button.menu")
+		page.wait_for_function("!document.querySelector('nav span')")
+		assert errors == []
+	finally:
+		page.close()
+		sys.path.remove(str(tmp_path))
+		for name in [name for name in sys.modules if name.split(".")[0] in ("layouts", "components")]:
+			del sys.modules[name]

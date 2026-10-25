@@ -266,7 +266,7 @@ def fetch_index():
 
 def binary_name():
 
-	if os.name == "nt":
+	if platform.system() == "Windows":
 		return "mongod.exe"
 
 	return "mongod"
@@ -356,7 +356,7 @@ def download_archive(download, folder):
 	return archive
 
 
-def copy_with_progress(source, out, total, algorithm):
+def copy_with_progress(source, out, total, algorithm, name="MongoDB"):
 
 	digest = hashlib.new(algorithm)
 	done = 0
@@ -374,7 +374,7 @@ def copy_with_progress(source, out, total, algorithm):
 			percent = done * 100 // total
 			if percent != shown:
 				shown = percent
-				print(f"\rdomino: downloading MongoDB... {percent}%", end="", file=sys.stderr, flush=True)
+				print(f"\rdomino: downloading {name}... {percent}%", end="", file=sys.stderr, flush=True)
 
 	if total:
 		print(file=sys.stderr, flush=True)

@@ -155,3 +155,31 @@ def test_pages_stay_live_after_the_collection_is_dropped_and_recreated():
 	mongo.database()[name].insert_one({"_id": "again", "text": "recreated", "n": 1})
 
 	assert wait_for(lambda: any("recreated" in update["html"] for update in page.updates.values()))
+
+
+@pytest.mark.mongo
+def test_raw_collection_is_the_pymongo_collection_and_its_writes_update_pages():
+
+	name = unique_name()
+	items = Collection(name)
+	renders = []
+	page = subscribed_page(items, renders)
+
+	raw = items.raw_collection()
+	assert raw.name == name and raw.database == items.raw_database() == mongo.database()
+
+	# What Collection doesn't do: indexes and aggregation
+	raw.create_index("n")
+	items.insert({"text": "a", "n": 1})
+	items.insert({"text": "b", "n": 2})
+	assert list(raw.aggregate([{"$group": {"_id": None, "total": {"$sum": "$n"}}}]))[0]["total"] == 3
+
+	# A write through it still reaches open pages
+	raw.insert_one({"_id": "raw", "text": "written raw", "n": 3})
+	assert wait_for(lambda: any("written raw" in update["html"] for update in page.updates.values()))
+
+
+def test_an_unnamed_collection_has_no_raw_collection():
+
+	with pytest.raises(TypeError, match="lives in memory"):
+		Collection().raw_collection()

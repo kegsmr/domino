@@ -13,6 +13,9 @@ Like `meteor test`, these tests get MongoDB for named Collections without any se
 uses a database of its own, dropped after it, on DOMINO_TEST_MONGO_URL, the app's mongo.url, or
 else a mongod started (once, the first time a test connects) in a temporary folder and stopped
 at the end of the session. `domino_db` gives the same to tests that use collections directly.
+
+Emails are never sent in tests (domino.mail keeps them in memory); `mail_outbox` lists the ones
+sent during the test.
 """
 
 import importlib.util
@@ -355,10 +358,17 @@ def open_page(request, _domino_database):
 	app = load_app(folder)
 	_domino_database.app = app
 
+	# Each test starts with no failed logins or emails counted, like its empty database
+	accounts = sys.modules.get("domino.accounts")
+	if accounts is not None:
+		accounts._failures.clear()
+		accounts._mailed.clear()
+
 	def open_(path=None, **params):
 
 		if path is None:
-			if not page_file.is_file():
+			# The page may be a template: pages/index.html
+			if not page_file.is_file() and not page_file.with_suffix(".html").is_file():
 				raise pytest.UsageError(f"{request.path.name} tests {page_file.name}, which doesn't exist; pass a path to open_page()")
 			path = page_url(pages, page_file, params)
 
@@ -372,6 +382,20 @@ def page(open_page):
 	"""The page this test file is next to, open in a simulated browser."""
 
 	return open_page()
+
+
+@pytest.fixture
+def mail_outbox():
+	"""The emails sent during this test (domino.mail.Message: .to, .subject, .text, .html,
+	.links). Under pytest mail.send() keeps emails in memory instead of sending them."""
+
+	from . import mail
+
+	mail.outbox.clear()
+
+	yield mail.outbox
+
+	mail.outbox.clear()
 
 
 def page_url(pages, page_file, params):

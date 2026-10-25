@@ -1,0 +1,6 @@
+{
+    "accounts": {
+        "forgot_url": "/forgot-password",
+        "verify_email": true
+    }
+}
