@@ -76,7 +76,8 @@ def test_todo_submit_clears_input_and_removal_keeps_checkboxes_right(serve, page
 
 	assert page.input_value("input[name=text]") == ""
 
-	page.locator("li input[type=checkbox]").nth(1).check()
+	# click, not check(): the box is reset as soon as the item is removed
+	page.locator("li input[type=checkbox]").nth(1).click()
 	page.wait_for_function("document.querySelectorAll('li').length === 2")
 
 	assert [text.strip() for text in page.locator("li").all_inner_texts()] == ["one", "three"]
@@ -133,4 +134,33 @@ def test_server_push_updates_the_clock_without_user_action(serve, page):
 
 	page.wait_for_function(f"document.querySelector('p').textContent.trim() !== {first!r}", timeout=5000)
 	assert page.errors == []
+
+
+def test_reactive_chat_updates_other_windows_and_keeps_their_typing(serve, browser):
+
+	url = serve("chat")
+	windows = [browser.new_page(), browser.new_page()]
+	errors = []
+	for window in windows:
+		window.on("pageerror", lambda error: errors.append(str(error)))
+		window.goto(url)
+	first, second = windows
+
+	first.fill("input[name=name]", "Ada")
+	first.fill("input[name=text]", "Hi")
+	first.press("input[name=text]", "Enter")
+	second.wait_for_function("document.querySelectorAll('.messages li').length === 1", timeout=5000)
+
+	second.fill("input[name=text]", "half-typed")
+	first.fill("input[name=text]", "Again")
+	first.press("input[name=text]", "Enter")
+	second.wait_for_function("document.querySelectorAll('.messages li').length === 2", timeout=5000)
+
+	assert second.input_value("input[name=text]") == "half-typed"
+	assert first.input_value("input[name=name]") == "Ada"
+	assert first.input_value("input[name=text]") == ""
+	assert errors == []
+
+	for window in windows:
+		window.close()
 

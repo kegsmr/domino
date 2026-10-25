@@ -1,20 +1,29 @@
 import inspect
 
 
+# Class attributes per class, computed once: walking the hierarchy for every element on
+# every render was the biggest cost of rendering
+_class_attributes = {}
+
+
 def get_class_attributes(obj):
     """Returns a dictionary of all class attributes, including inherited ones, 
     excluding methods, instance attributes, and dunder attributes."""
     
     cls = obj if isinstance(obj, type) else obj.__class__
-    
-    # Retrieve all attributes in the class hierarchy (including inherited ones)
-    attributes = {}
-    for base in reversed(cls.__mro__):  # Iterate over base classes (from top to bottom)
-        for k, v in base.__dict__.items():
-            if not k.startswith("__") and not callable(v):  # Exclude dunder & methods
-                attributes[k] = v  # Overwrite if a subclass redefines the attribute
 
-    return attributes
+    cached = _class_attributes.get(cls)
+    if cached is None:
+        # Retrieve all attributes in the class hierarchy (including inherited ones)
+        cached = {}
+        for base in reversed(cls.__mro__):  # Iterate over base classes (from top to bottom)
+            for k, v in base.__dict__.items():
+                if not k.startswith("__") and not callable(v):  # Exclude dunder & methods
+                    cached[k] = v  # Overwrite if a subclass redefines the attribute
+        _class_attributes[cls] = cached
+
+    # Callers change the result, so hand out a copy
+    return dict(cached)
 
 
 def accepts_argument(func):

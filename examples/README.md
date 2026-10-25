@@ -16,6 +16,7 @@ python examples/counter.py
 | `todo.py` | Form submits handled in Python with `event.form`, without reloading the page |
 | `forms.py` | Form controls (`select`, range, checkbox), `event.value`, and re-rendering only part of a component |
 | `search.py` | Search as you type: `bind("input", ..., debounce=250)`, with the input keeping focus and caret while results update |
+| `chat.py` | Meteor-style reactivity: a shared `Collection`; every open window re-renders live when a message is inserted |
 | `attributes.py` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
 | `bootstrap.py` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
 | `showcase.py` | A full landing page using the imperative style (`t.h1(parent, "text")`) and a contact form event |

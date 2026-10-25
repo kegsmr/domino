@@ -48,6 +48,32 @@ Updates are patched into the page in place rather than replacing the component's
 
 `component.refresh()` re-renders a component and sends it to every open page showing it, without waiting for a browser event. It can be called from anywhere, including a background thread. Mark components that will be refreshed with the class attribute `live = True`: pages showing one receive updates over Server-Sent Events from `/_domino/stream`, which keeps one connection (and, on a threaded server, one thread) open per tab, so other pages don't open a stream at all. A component shown on several pages is rendered once per refresh. See `examples/clock.py`.
 
+### Reactive data
+
+Like Meteor, Domino components re-render themselves when the data they show changes. Reading a `State` or querying a `Collection` inside `render()` subscribes the component; changing it re-renders every subscribed component on every open page and pushes the result (no `live = True` needed):
+
+```python
+from domino import Collection, State
+
+messages = Collection("messages")   # shared by everyone
+online = State(0)
+
+class Chat(t.div):
+
+	def render(self):
+		self([t.li() [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)])
+
+	def send(self, event):
+		messages.insert({"text": event.form["text"], "sent": time.time()})  # every Chat updates
+		return self
+```
+
+- `State(value)`: `.value` reads (and subscribes), `.value = x` changes it.
+- `Collection(name)`: `insert(doc)` (returns the `_id`), `find(query, sort=..., limit=...)` (a cursor you iterate or `.fetch()`), `find_one`, `count`, `update(query, {"$set": ...}, multi=False)` and `remove(query)`, with MongoDB-style queries (`$gt`, `$in`, `$or`, dotted paths, ...). Documents come back as copies.
+- Changes made while handling an event re-render each subscriber once, in the background, so the user who made the change gets their response straight away. Use `with batch():` to group changes made elsewhere, and `domino.wait()` in tests to let background updates finish.
+
+See `examples/chat.py`.
+
 ## Deployment
 
 Components and their event handlers live in the memory of the server process that rendered the page. Each page load gets its own state, which expires after `DOMINO_PAGE_TTL` seconds of inactivity (default 1800). At most `DOMINO_MAX_PAGES` pages are kept (default 1000); when a page has expired, the browser reloads it.

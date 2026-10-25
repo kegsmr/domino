@@ -108,7 +108,7 @@ def test_refresh_without_a_live_page_does_nothing():
 	counter._render()  # outside a request: not on any page
 	counter.refresh()
 
-	assert len(counter.__pages__) == 0
+	assert not counter.__pages__
 
 
 def test_binds_during_refresh_land_on_the_page_with_stable_ids():

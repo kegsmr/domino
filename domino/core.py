@@ -11,6 +11,7 @@ from flask import *
 from markupsafe import Markup, escape
 
 from .util import *
+from . import reactive
 
 
 VOID_TAGS = [
@@ -48,6 +49,7 @@ class Page:
 		self.lock = threading.RLock()  # serializes events for this page
 		self.version = 0  # bumped per update, so the browser can drop stale responses
 		self.live = False  # shows a live component, so the browser opens a stream
+		self.components = set()  # live components shown here, kept alive as long as the page
 		self.updates = {}  # element id -> html not yet sent to the browser
 		self.updates_ready = threading.Condition()
 		self.stream = None  # the newest stream; older ones stop
@@ -283,7 +285,9 @@ class Domino(Flask):
 			page = self._get_page(data.get("page_id")) or DEFAULT_PAGE
 			event_id = data.get("event_id")
 
-			with page.lock:
+			# Reactive changes the callback makes re-render their subscribers once the page
+			# lock is released (updating other pages while holding it could deadlock)
+			with reactive.batch(background=True) as changes, page.lock:
 
 				event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
 				if event is None:
@@ -303,6 +307,9 @@ class Domino(Flask):
 
 				page.unregister_subtree(result)
 				page.version += 1
+
+				# The response carries this render, so it isn't pushed to this page again
+				changes.skip(page, result)
 
 				return jsonify({
 					"id": result.id(),
@@ -444,9 +451,10 @@ class Element:
 		self.__attributes__ = {}
 		self.__states__ = {}
 		self.__styles__ = {}
-		self.__id__ = uuid.uuid4()
+		self.__id__ = None  # a random id, made only if something asks for it
 		self.__id_used__ = False
-		self.__pages__ = weakref.WeakSet()  # live pages this component was rendered on
+		self.__pages__ = None  # live pages this component was rendered on (components only)
+		self.__dependencies__ = set()  # reactive data its last render read
 
 		self.tag(tag)
 		self.parent(parent)
@@ -526,7 +534,11 @@ class Element:
 		if id_ is None:
 			# Anything that asks for the id may rely on it being in the page
 			self.__id_used__ = True
-			return str(self.__attributes__.get('id') or self.__id__)
+			if self.__attributes__.get('id'):
+				return str(self.__attributes__['id'])
+			if self.__id__ is None:
+				self.__id__ = uuid.uuid4()
+			return str(self.__id__)
 		self.__attributes__['id'] = id_
 		return self
 
@@ -583,14 +595,14 @@ class Element:
 	def is_live(self):
 		"""Whether pages showing this component need a stream for refresh()."""
 
-		return getattr(type(self), "live", False) is True
+		return getattr(type(self), "live", False) is True or bool(self.__dependencies__)
 
 
-	def refresh(self):
-		"""Re-render this component and push it to every live page showing it."""
+	def refresh(self, skip=None):
+		"""Re-render this component and push it to every live page showing it (except `skip`)."""
 
 		with _pages_lock:
-			pages = list(self.__pages__)
+			pages = [page for page in self.__pages__ or () if page is not skip]
 
 		if not pages:
 			return self
@@ -625,15 +637,21 @@ class Element:
 			page = Page.current()
 			if page is not DEFAULT_PAGE:
 				with _pages_lock:
+					if self.__pages__ is None:
+						self.__pages__ = weakref.WeakSet()
 					self.__pages__.add(page)
-				if self.is_live():
-					page.live = True
 
+			# Subscriptions are rebuilt by whatever this render reads
+			reactive.forget(self)
 			render_stack().append([self, 0])
 			try:
 				self.render()
 			finally:
 				render_stack().pop()
+
+			if page is not DEFAULT_PAGE and self.is_live():
+				page.live = True
+				page.components.add(self)
 
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):
