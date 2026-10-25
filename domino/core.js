@@ -267,7 +267,10 @@ window.Domino = (() => {
         // The handler changed the session (e.g. logged in) while running over the WebSocket,
         // which can't set cookies: fetch the new cookie before going on
         if (data.session) {
-            await fetch('/_domino/session/' + encodeURIComponent(data.session), { method: 'POST', credentials: 'same-origin' });
+            // The header shows it's this page asking, not another site's form
+            await fetch('/_domino/session/' + encodeURIComponent(data.session), {
+                method: 'POST', credentials: 'same-origin', headers: { 'X-Domino-Page': pageId() || '' }
+            });
         }
         // The handler called domino.redirect(); the server only allows paths on this site
         if (data.redirect && data.redirect.startsWith('/') && !data.redirect.startsWith('//')) {

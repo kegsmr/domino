@@ -7,8 +7,11 @@ import threading
 import types
 
 import pytest
+from flask import session
 
 import domino.workers as workers
+from domino import Domino
+from domino.core import Page
 
 from conftest import ASGIServer
 
@@ -142,3 +145,86 @@ def test_trusted_proxies_can_be_networks(monkeypatch):
 	lines = [b"GET / HTTP/1.1", b"X-Forwarded-For: 203.0.113.9"]
 	assert b"203.0.113.9, 10.1.2.3" in workers.forward_head(lines, "10.1.2.3", trusted)
 	assert b"203.0.113.9" not in workers.forward_head(lines, "198.51.100.7", trusted)
+
+
+# The session hand-off (/_domino/session/<token>) ---------------------------------------------
+
+
+def handoff_token(app, page=None):
+	"""A token for a session changed by an event, as a WebSocket event would get one."""
+
+	with app.test_request_context():
+		session["user"] = "attacker"
+		token, cookies = app.session_handoff(session, page)
+
+	assert token and cookies
+	return token
+
+
+def test_another_site_cant_plant_a_session_with_a_hand_off_token():
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+	page = Page()
+	client = app.test_client()
+
+	# What a cross-site <form method=post action=".../_domino/session/<token>"> sends: no custom
+	# header. The token (of the attacker's own login, say) isn't used up
+	token = handoff_token(app, page)
+	response = client.post(f"/_domino/session/{token}", content_type="application/x-www-form-urlencoded")
+	assert response.status_code == 403
+	assert "Set-Cookie" not in response.headers
+
+	# Nor by another page
+	response = client.post(f"/_domino/session/{token}", headers={"X-Domino-Page": "another-page"})
+	assert response.status_code == 403
+	assert "Set-Cookie" not in response.headers
+
+	# The page whose event changed the session gets the cookie, once
+	response = client.post(f"/_domino/session/{token}", headers={"X-Domino-Page": page.id})
+	assert response.status_code == 204
+	assert response.headers["Set-Cookie"].startswith("session=")
+	assert client.post(f"/_domino/session/{token}", headers={"X-Domino-Page": page.id}).status_code == 404
+
+
+def test_core_js_claims_the_hand_off_with_its_page(asgi_server, monkeypatch):
+
+	sync_api = pytest.importorskip("playwright.sync_api")
+
+	import domino.tags as t
+	from domino import Collection, accounts
+	from domino.components import Document
+
+	monkeypatch.setattr(accounts, "users", Collection())
+	accounts._failures.clear()
+	accounts.create_user("ada@example.com", "correct horse")
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+	app.config["DOMINO_SECURE_COOKIES"] = False  # plain http://127.0.0.1
+
+	@app.route("/")
+	def index():
+		return Document() [t.main() [accounts.UserMenu(), accounts.LoginForm()]]
+
+	server = asgi_server(app)
+
+	with sync_api.sync_playwright() as playwright:
+		browser = playwright.chromium.launch()
+		try:
+			page = browser.new_page()
+			claims = []
+			page.on("response", lambda response: "/_domino/session/" in response.url and claims.append(response.status))
+			page.goto(server.url)
+			page.fill("input[name=email]", "ada@example.com")
+			page.fill("input[name=password]", "correct horse")
+			page.get_by_role("button", name="Log in").click()
+			page.locator(".UserMenu").get_by_text("Signed in as").wait_for()
+			page.wait_for_timeout(200)
+
+			# Logged in over the WebSocket, so the cookie came through the hand-off
+			assert claims == [204]
+			page.reload()
+			assert "Signed in as" in page.locator(".UserMenu").inner_text()
+		finally:
+			browser.close()
