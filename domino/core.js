@@ -62,7 +62,12 @@ window.Domino = (() => {
         const field = FIELDS.includes(from.tagName);
         const serverChanged = field && serverValue(from) !== serverValue(to);
 
+        // Keep the marks of an element that's still waiting for another response
+        const pending = busy.get(from);
+        // If the server disables it too, it must stay disabled once the requests end
+        if (pending && to.hasAttribute('disabled')) pending.disabled = false;
         for (const { name } of Array.from(from.attributes)) {
+            if (pending && (name === 'aria-busy' || name === 'data-loading' || (name === 'disabled' && pending.disabled))) continue;
             if (!to.hasAttribute(name)) from.removeAttribute(name);
         }
         for (const { name, value } of Array.from(to.attributes)) {
@@ -72,7 +77,7 @@ window.Domino = (() => {
         morphChildren(from, to, reset);
 
         const focused = from === document.activeElement;
-        const typing = focused && (from.tagName === 'TEXTAREA' || (from.tagName === 'INPUT' && !TOGGLES.includes(from.type)));
+        const typing = isTyping(from);
         const resetting = reset && reset.root.contains(from) && (reset.submit || !typing);
         if (field && (resetting || (serverChanged && !focused))) {
             if (from.type === 'checkbox' || from.type === 'radio') {
@@ -84,6 +89,15 @@ window.Domino = (() => {
                 from.value = from.tagName === 'TEXTAREA' ? to.textContent : (to.getAttribute('value') || '');
             }
         }
+    }
+
+    function isTextField(el) {
+        return el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !TOGGLES.includes(el.type));
+    }
+
+    // A focused text field: the user may be typing in it
+    function isTyping(el) {
+        return el === document.activeElement && isTextField(el);
     }
 
     // The value the server rendered into a field (not what the user has typed since)
@@ -194,7 +208,105 @@ window.Domino = (() => {
         stream.onmessage = (e) => apply(JSON.parse(e.data), null);
     }
 
-    async function triggerEvent(eventId, payload = {}, reset = null) {
+    // Requests in flight, so overlapping ones keep <html data-domino-loading> until the last ends
+    let inFlight = 0;
+
+    // Requests in flight per marked element, and whether we disabled it, so overlapping
+    // requests from one element (e.g. debounced typing) unmark it only when the last ends
+    const busy = new WeakMap();
+
+    // Mark the element that fired; the component the response updates isn't known yet.
+    // Returns a function that undoes it, once.
+    function markBusy(el, submit) {
+        const marked = [el];
+        // Enter in a field submits too, so mark the form's submit buttons as well
+        if (submit) marked.push(...el.querySelectorAll('button:not([type]), button[type=submit], input[type=submit]'));
+
+        for (const node of marked) {
+            const state = busy.get(node) || { count: 0, disabled: false, focused: false };
+            busy.set(node, state);
+            if (state.count++ > 0) continue;
+            node.setAttribute('aria-busy', 'true');
+            node.setAttribute('data-loading', '');
+            if (canDisable(node, submit)) {
+                // Disabling the focused element blurs it, so focus it again afterwards
+                state.focused = node === document.activeElement;
+                state.disabled = true;
+                node.disabled = true;
+            }
+        }
+
+        let undone = false;
+        return () => {
+            if (undone) return;
+            undone = true;
+            for (const node of marked) {
+                const state = busy.get(node);
+                if (--state.count > 0) continue;
+                busy.delete(node);
+                node.removeAttribute('aria-busy');
+                node.removeAttribute('data-loading');
+                if (!state.disabled) continue;
+                node.disabled = false;
+                if (state.focused && node.isConnected && document.activeElement === document.body) node.focus();
+            }
+        };
+    }
+
+    function canDisable(el, submit) {
+        // Only a submitting form's buttons, so a form isn't sent twice; other clicks all
+        // count (ten clicks on a counter add ten). Leave alone what's already disabled (it
+        // stays that way) and text fields, which the user may still be typing in.
+        if (!submit || !['BUTTON', 'FIELDSET', 'INPUT', 'SELECT'].includes(el.tagName)) return false;
+        return !el.disabled && !isTextField(el);
+    }
+
+    // Tell the page about a failed event, and show it unless a listener cancelled that
+    function reportError(el, eventId, data) {
+        const detail = { error: data.error, traceback: data.traceback || null, eventId };
+        // A replaced element is detached, and events on it wouldn't reach the document
+        const target = el && el.isConnected ? el : document;
+        const event = new CustomEvent('domino:error', { bubbles: true, cancelable: true, detail });
+        if (!target.dispatchEvent(event)) return;
+
+        console.error('Domino event error:', data.traceback || data.error);
+        if (data.debug) showOverlay(detail);
+    }
+
+    // Only shown in debug mode. Server text goes in as textContent, never as HTML.
+    function showOverlay(detail) {
+        const old = document.getElementById('domino-error');
+        if (old) old.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'domino-error';
+        overlay.setAttribute('role', 'alert');
+        overlay.style.cssText = 'position:fixed;left:1rem;right:1rem;bottom:1rem;z-index:2147483647;max-height:60vh;overflow:auto;'
+            + 'background:#fff;color:#111;border:2px solid #c00;border-radius:6px;padding:1rem;'
+            + 'box-shadow:0 4px 24px rgba(0,0,0,.3);font:14px system-ui,sans-serif';
+
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.textContent = '×';
+        close.setAttribute('aria-label', 'Close');
+        close.style.cssText = 'float:right;font-size:1.25rem;border:0;background:none;cursor:pointer';
+        close.addEventListener('click', () => overlay.remove());
+
+        const title = document.createElement('strong');
+        title.style.color = '#c00';
+        title.textContent = detail.error;
+
+        const trace = document.createElement('pre');
+        trace.style.cssText = 'font:12px ui-monospace,monospace;white-space:pre-wrap;margin:.75rem 0 0';
+        trace.textContent = detail.traceback || '';
+
+        overlay.append(close, title, trace);
+        document.body.appendChild(overlay);
+    }
+
+    async function triggerEvent(eventId, payload = {}, reset = null, el = null) {
+        const unmark = el ? markBusy(el, reset && reset.submit) : null;
+        if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
             const response = await fetch('/_domino/events', {
                 method: 'POST',
@@ -206,15 +318,25 @@ window.Domino = (() => {
                 window.location.reload();
                 return;
             }
-            apply(await response.json(), reset);
+            const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+            if (!response.ok) {
+                reportError(el, eventId, data);
+                return;
+            }
+            // Unmark first, so the server's HTML decides whether the element ends up disabled
+            if (unmark) unmark();
+            apply(data, reset);
         } catch (err) {
-            console.error('Domino event error:', err);
+            reportError(el, eventId, { error: String(err) });
+        } finally {
+            if (unmark) unmark();
+            if (--inFlight === 0) document.documentElement.removeAttribute('data-domino-loading');
         }
     }
 
     function fire(el, eventId) {
         const submit = el.tagName === 'FORM' && eventId.endsWith('-submit');
-        triggerEvent(eventId, eventData(el), { root: el, submit });
+        triggerEvent(eventId, eventData(el), { root: el, submit }, el);
     }
 
     function handle(el, eventId, e) {

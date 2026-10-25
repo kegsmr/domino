@@ -183,3 +183,150 @@ def test_public_settings_reach_the_browser(serve, page):
 	assert page.locator("h1").inner_text() == "Settings example"
 	assert page.errors == []
 
+
+def test_button_is_busy_while_its_event_is_in_flight(serve, page):
+
+	page.goto(serve("loading"))
+	save = page.locator("button.save")
+
+	save.click()
+	page.wait_for_selector("html[data-domino-loading]")
+	assert save.get_attribute("aria-busy") == "true"
+	assert save.get_attribute("data-loading") == ""
+	# Only form submits disable their buttons; other clicks all count
+	assert save.is_enabled()
+
+	page.wait_for_function("document.querySelector('p').textContent.includes('Saved 1')", timeout=5000)
+	assert save.get_attribute("aria-busy") is None
+	assert save.get_attribute("data-loading") is None
+	assert save.is_enabled()
+	assert page.evaluate("document.documentElement.hasAttribute('data-domino-loading')") is False
+	assert page.errors == []
+
+
+def test_already_disabled_buttons_stay_disabled(serve, page):
+
+	# A response that updates nothing, so only the busy marks touch the button
+	page.goto(serve("counter"))
+	page.route("**/_domino/events", lambda route: route.fulfill(json={"id": None, "html": None}))
+	page.evaluate("""() => {
+		const button = document.querySelector('button');
+		button.disabled = true;
+		window.done = Domino.triggerEvent(button.dataset.eventId, {}, null, button);
+	}""")
+
+	page.evaluate("window.done")
+	assert page.evaluate("document.querySelector('button').disabled") is True
+	assert page.locator("button[data-loading]").count() == 0
+	assert page.errors == []
+
+
+def test_debounced_input_is_marked_but_not_disabled(serve, page):
+
+	def slow(module):
+		search = module.Search.search
+
+		def delayed(self, event):
+			time.sleep(0.5)
+			return search(self, event)
+
+		module.Search.search = delayed
+
+	page.goto(serve("search", slow))
+	box = page.locator("input[type=search]")
+
+	box.click()
+	box.press_sequentially("ru", delay=30)
+	page.wait_for_selector("input[data-loading][aria-busy=true]", timeout=2000)
+	assert box.is_enabled()
+	assert page.evaluate("document.activeElement.type") == "search"
+
+	page.wait_for_function("!document.documentElement.hasAttribute('data-domino-loading')", timeout=5000)
+	assert box.get_attribute("data-loading") is None
+	assert page.errors == []
+
+
+def unexpected(errors):
+
+	# The intentional 500 shows up as a failed resource load and as our console.error
+	return [error for error in errors if "500" not in error and "Domino event error" not in error]
+
+
+def debug(module):
+
+	module.app.debug = True
+
+
+def test_debug_error_shows_overlay(serve, page):
+
+	page.goto(serve("loading", debug))
+
+	page.get_by_text("Raise an exception").click()
+	overlay = page.locator("#domino-error")
+	overlay.wait_for(timeout=5000)
+
+	assert "RuntimeError: Something went wrong while saving" in overlay.inner_text()
+	assert "Traceback" in overlay.locator("pre").inner_text()
+	assert any("Domino event error" in error for error in page.errors)
+	assert unexpected(page.errors) == []
+
+	# The button works again, and the overlay can be closed
+	assert page.get_by_text("Raise an exception").is_enabled()
+	overlay.get_by_role("button", name="Close").click()
+	assert page.locator("#domino-error").count() == 0
+
+
+def test_production_error_logs_only(serve, page):
+
+	page.goto(serve("loading"))
+
+	page.get_by_text("Raise an exception").click()
+	page.wait_for_function("!document.documentElement.hasAttribute('data-domino-loading')", timeout=5000)
+
+	assert page.locator("#domino-error").count() == 0
+	assert any("Domino event error" in error for error in page.errors)
+	assert not any("Something went wrong" in error for error in page.errors)
+	assert unexpected(page.errors) == []
+
+
+def test_cancelled_error_event_shows_nothing(serve, page):
+
+	page.goto(serve("loading", debug))
+	page.evaluate("""() => document.addEventListener('domino:error', (e) => {
+		window.caught = e.detail;
+		e.preventDefault();
+	})""")
+
+	page.get_by_text("Raise an exception").click()
+	page.wait_for_function("window.caught", timeout=5000)
+
+	assert "Something went wrong" in page.evaluate("window.caught.error")
+	assert page.evaluate("window.caught.eventId").endswith("-click")
+	assert page.locator("#domino-error").count() == 0
+	assert unexpected(page.errors) == []
+
+
+def test_submit_marks_the_form_and_its_submit_button(serve, page):
+
+	def slow(module):
+		add = module.TodoList.add
+
+		def delayed(self, event):
+			time.sleep(0.5)
+			return add(self, event)
+
+		module.TodoList.add = delayed
+
+	page.goto(serve("todo", slow))
+	page.fill("input[name=text]", "one")
+	page.press("input[name=text]", "Enter")
+
+	page.wait_for_selector("form[data-loading][aria-busy=true]", timeout=2000)
+	assert page.locator("button[type=submit]").is_disabled()
+	assert page.locator("button[type=submit]").get_attribute("data-loading") == ""
+	assert page.locator("input[name=text]").is_enabled()
+
+	page.wait_for_function("document.querySelectorAll('li').length === 1", timeout=5000)
+	assert page.locator("[data-loading]").count() == 0
+	assert page.locator("button[type=submit]").is_enabled()
+	assert page.errors == []

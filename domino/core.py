@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import traceback
 import uuid
 import weakref
 from collections import OrderedDict
@@ -316,15 +317,29 @@ class Domino(Flask):
 
 				_, callback = event
 
-				if accepts_argument(callback):
-					result = callback(Event.from_request(event_id, data.get("data")))
-				else:
-					result = callback()
+				try:
+					if accepts_argument(callback):
+						result = callback(Event.from_request(event_id, data.get("data")))
+					else:
+						result = callback()
 
-				if not isinstance(result, Element):
-					return jsonify({"id": None, "html": None})
+					if not isinstance(result, Element):
+						return jsonify({"id": None, "html": None})
 
-				page.unregister_subtree(result)
+					# Old binds must go before rendering so the new ones register fresh.
+					# If rendering fails the browser still shows the old HTML, so put
+					# the old events back and drop any the failed render added
+					events = dict(page.events)
+					page.unregister_subtree(result)
+					try:
+						html = result._render()
+					except Exception:
+						page.events.clear()
+						page.events.update(events)
+						raise
+				except Exception as error:
+					return self._event_error(event_id, error)
+
 				page.version += 1
 
 				# The response carries this render, so it isn't pushed to this page again
@@ -332,11 +347,26 @@ class Domino(Flask):
 
 				return jsonify({
 					"id": result.id(),
-					"html": result._render(),
+					"html": html,
 					"version": page.version
 				})
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
+
+
+	def _event_error(self, event_id, error):
+
+		self.logger.exception("Domino event %s failed", event_id)
+
+		# Tracebacks can reveal code and data, so only send them while debugging
+		if not self.debug:
+			return jsonify({"error": "Internal Server Error"}), 500
+
+		return jsonify({
+			"error": f"{type(error).__name__}: {error}",
+			"traceback": traceback.format_exc(),
+			"debug": True
+		}), 500
 
 
 	def _add_stream(self, route):
