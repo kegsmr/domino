@@ -135,8 +135,9 @@ def test_partial_update_keeps_other_fields(serve, page):
 
 def test_form_checks_in_the_browser_then_on_the_server(serve, page):
 
-	page.goto(serve("forms"))
+	# Listening before the page opens its WebSocket, so its frames are all seen
 	sent = sent_events(page)
+	page.goto(serve("forms"))
 
 	# The browser's own check stops an empty required field; nothing is sent
 	page.click("button[type=submit]")
