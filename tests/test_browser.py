@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import struct
 import sys
 import threading
@@ -351,12 +352,13 @@ def test_debug_error_shows_overlay(serve, page):
 	overlay.wait_for(timeout=5000)
 
 	assert "RuntimeError: Something went wrong while saving" in overlay.inner_text()
-	assert "Traceback" in overlay.locator("pre").inner_text()
+	# Folded under the frames debug.js shows (see test_overlay_shows_frames_for_a_failing_handler)
+	assert "Traceback" in overlay.locator("pre").text_content()
 	assert any("Domino event error" in error for error in page.errors)
 	assert unexpected(page.errors) == []
 
 	# The button works again, and the overlay can be closed
-	assert page.get_by_text("Raise an exception").is_enabled()
+	assert page.get_by_role("button", name="Raise an exception").is_enabled()
 	overlay.get_by_role("button", name="Close").click()
 	assert page.locator("#domino-error").count() == 0
 
@@ -389,6 +391,123 @@ def test_cancelled_error_event_shows_nothing(serve, page):
 	assert page.evaluate("window.caught.eventId").endswith("-click")
 	assert page.locator("#domino-error").count() == 0
 	assert unexpected(page.errors) == []
+
+
+def test_overlay_shows_frames_for_a_failing_handler(serve, page):
+
+	page.goto(serve("devtools", debug))
+
+	page.get_by_text("Raise an exception").click()
+	overlay = page.locator("#domino-error")
+	overlay.wait_for(timeout=5000)
+	text = overlay.inner_text()
+
+	# The error, which element fired which handler, and a hint
+	assert "KeyError: 'name'" in text
+	assert 'click on button.crash "Raise an exception" → Crash.save' in text
+	assert "event.form.get(" in text
+
+	# The app's own frame open, with its source and the line that raised; Domino's folded
+	frame = overlay.locator(".dt-frame[data-app=true]")
+	assert frame.count() == 1
+	assert re.search(r"Crash\.save\s+components/crash\.py:\d+", frame.inner_text())
+	assert frame.locator(".dt-current").inner_text().strip().endswith('name = event.form["name"]')
+	assert overlay.locator("details.dt-library .dt-frame[data-app=false]").count() >= 1
+
+	# Still dismissable, with Esc too
+	page.keyboard.press("Escape")
+	assert page.locator("#domino-error").count() == 0
+	assert unexpected(page.errors) == []
+
+
+def test_inspector_picks_a_component_and_follows_its_state(serve, page):
+
+	page.goto(serve("devtools", debug))
+	counter = page.locator("section.Counter")
+
+	page.keyboard.press("Alt+Shift+D")
+	panel = page.locator("#domino-inspector")
+	panel.wait_for(timeout=5000)
+	assert page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	page.wait_for_function("Domino.devtools.inspector.components.size > 0", timeout=5000)
+
+	# Hovering outlines the component under the cursor, with its class name
+	counter.locator("h2").hover()
+	highlight = page.locator("#domino-highlight")
+	page.wait_for_function("getComputedStyle(document.getElementById('domino-highlight')).display === 'block'", timeout=5000)
+	assert highlight.inner_text().startswith("Counter")
+	outlined, actual = highlight.bounding_box(), counter.bounding_box()
+	assert all(abs(outlined[key] - actual[key]) < 1 for key in ("x", "y", "width", "height"))
+
+	# Clicking pins the panel, and doesn't reach the page's own events
+	counter.get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('#domino-inspector .dt-name') !== null", timeout=5000)
+	assert panel.locator(".dt-name").inner_text().startswith("Counter")
+	assert counter.locator("p").inner_text() == "Count: 0"
+	assert not page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	assert panel.locator("td.dt-key").all_inner_texts() == ["count", "step"]
+	assert panel.locator("td.dt-value").all_inner_texts() == ["0", "1"]
+	assert "Counter.increment" in panel.inner_text() and "instant" in panel.inner_text()
+
+	# The State follows the component as it's clicked
+	counter.get_by_role("button", name="+1").click()
+	counter.get_by_role("button", name="Bigger steps").click()
+	page.wait_for_function("Array.from(document.querySelectorAll('#domino-inspector td.dt-value')).map((td) => td.textContent).join() === '1,10'", timeout=5000)
+
+	# Its parent, by its breadcrumb
+	panel.locator(".dt-crumb", has_text="Layout").click()
+	page.wait_for_function("document.querySelector('#domino-inspector .dt-name').textContent.startsWith('Layout')", timeout=5000)
+
+	# The shortcut toggles picking
+	page.keyboard.press("Alt+Shift+D")
+	assert page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	page.keyboard.press("Alt+Shift+D")
+	assert not page.evaluate("document.documentElement.hasAttribute('data-domino-inspecting')")
+	assert page.errors == []
+
+
+def test_event_log_lists_events_with_timings(serve, page):
+
+	page.goto(serve("devtools", debug))
+
+	page.get_by_role("button", name="+1").click()
+	page.wait_for_function("document.querySelector('section.Counter p').textContent.trim() === 'Count: 1'", timeout=5000)
+	page.fill("input[name=text]", "Write tests")
+	page.press("input[name=text]", "Enter")
+	page.wait_for_function("document.querySelectorAll('li.TodoItem').length === 2", timeout=5000)
+	page.wait_for_function("Domino.devtools.log.every((entry) => entry.status !== null)", timeout=5000)
+
+	page.evaluate("Domino.inspect()")
+	page.keyboard.press("Escape")
+	panel = page.locator("#domino-inspector")
+	panel.locator(".dt-tab", has_text="Events").click()
+
+	rows = panel.locator(".dt-log tbody tr")
+	assert rows.count() == 2
+	assert "submit" in rows.nth(0).inner_text() and "TodoList.add" in rows.nth(0).inner_text()
+	assert "click" in rows.nth(1).inner_text() and "Counter.increment" in rows.nth(1).inner_text()
+	assert "✓ matched" in rows.nth(1).inner_text()
+	assert re.search(r"\d+(\.\d+)? ms", rows.nth(0).locator(".dt-server").inner_text())
+	assert re.search(r"\d+ ms", rows.nth(0).locator(".dt-rtt").inner_text())
+
+	submit, click = page.evaluate("Domino.devtools.log")
+	assert submit["event"] == "submit" and submit["predicted"] is False and submit["status"] == 200
+	assert click["event"] == "click" and click["predicted"] is True and click["matched"] is True
+	for entry in (submit, click):
+		assert entry["serverMs"] >= 0 and entry["roundTrip"] >= 0
+		assert entry["sent"] > 0 and entry["received"] > 0
+	assert submit["sent"] > click["sent"]  # the form's fields
+	assert page.errors == []
+
+
+def test_no_devtools_outside_debug(serve, page):
+
+	page.goto(serve("devtools"))
+	page.keyboard.press("Alt+Shift+D")
+
+	assert page.evaluate("typeof Domino.inspect === 'undefined' && Domino.devtools === undefined")
+	assert page.locator("#domino-inspector").count() == 0
+	assert page.errors == []
 
 
 def test_submit_marks_the_form_and_its_submit_button(serve, page):

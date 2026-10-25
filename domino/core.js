@@ -556,7 +556,10 @@ window.Domino = (() => {
         if (!target.dispatchEvent(event)) return;
 
         console.error('Domino event error:', data.traceback || data.error);
-        if (data.debug) showOverlay(detail);
+        if (!data.debug) return;
+        // debug.js, on pages served in debug mode, shows the frames' source and the component too
+        const devtools = window.Domino.devtools;
+        if (devtools) devtools.showError(el, detail, data); else showOverlay(detail);
     }
 
     // Only shown in debug mode. Server text goes in as textContent, never as HTML.
@@ -696,11 +699,15 @@ window.Domino = (() => {
         const unmark = el ? markBusy(el, reset && reset.submit) : null;
         const page = pageId();
         let answered = false;
+        // debug.js's event log, on pages served in debug mode: told now (with the predicted state) and when answered
+        const devtools = window.Domino.devtools;
+        const watched = devtools ? devtools.event(eventId, el, payload, owner ? graphs.get(owner) : null) : null;
         if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
             if (files.length) {
                 const uploaded = await upload(el, files);
                 if (uploaded.status !== 200) {
+                    if (watched) watched(uploaded.status, uploaded.data);
                     // Shown like a failed event (and an expired page reloads)
                     await handleMessage(uploaded.data, uploaded.status, { el, eventId, reset, unmark });
                     return;
@@ -710,6 +717,7 @@ window.Domino = (() => {
             await wait(latency / 2);
             const { status, data } = await sendEvent(eventId, payload);
             await wait(latency / 2);
+            if (watched) watched(status, data);
             // Before handling, so the answer to the last event in flight is shown
             if (owner) {
                 release(owner);
@@ -719,6 +727,7 @@ window.Domino = (() => {
             if (pageId() !== page) return;
             await handleMessage(data, status, { el, eventId, reset, unmark });
         } catch (err) {
+            if (watched) watched(0, { error: String(err) });
             reportError(el, eventId, { error: String(err) });
         } finally {
             if (owner) {

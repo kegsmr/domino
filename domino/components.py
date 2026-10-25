@@ -13,6 +13,17 @@ class Core(t.script):
 		super().__init__(src='/_domino/core')
 
 
+	def _render(self, level=0, indent=4):
+
+		html = super()._render(level, indent)
+
+		# The developer tools (error overlay, inspector, event log), only on pages served in debug mode
+		if has_app_context() and current_app.debug:
+			html += t.script(src='/_domino/debug.js', defer=True)._render(level, indent)
+
+		return html
+
+
 class PublicSettings(t.script):
 	"""The app's "public" settings, read by core.js into Domino.settings. Renders nothing when empty."""
 

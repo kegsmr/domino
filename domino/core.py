@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 import threading
 import time
 import traceback
@@ -69,6 +70,19 @@ def render_stack():
 		_render_state.stack = []
 
 	return _render_state.stack
+
+
+def note_render_error(error, element):
+	"""Remember the components a render error passed through, innermost first, for the debug
+	error page's component stack (see domino.devtools)."""
+
+	try:
+		components = error.__dict__.setdefault("domino_components", [])
+	except AttributeError:
+		return
+
+	if not any(component is element for component in components):
+		components.append(element)
 
 
 # CSS of each component class (its own `css`, scoped to its class name), made once
@@ -532,6 +546,10 @@ class Domino(Flask):
 		self._add_session_handoff('/_domino/session/<token>')
 		self._add_health_check('/_domino/health')
 
+		# The inspector's script and data; they answer 404 unless the app is in debug mode
+		from .devtools import add_routes
+		add_routes(self)
+
 		# File-based routing, found once here rather than per request
 		self._add_pages(pages)
 
@@ -743,6 +761,13 @@ class Domino(Flask):
 		if g.get("domino_redirect"):
 			response["redirect"] = g.domino_redirect
 
+		# For the inspector's event log (see handle_event)
+		debug = g.get("domino_debug")
+		if debug:
+			from .devtools import describe_callback
+			response["debug_ms"] = round((time.perf_counter() - debug[0]) * 1000, 1)
+			response["debug_handler"] = describe_callback(debug[1])
+
 		return response
 
 
@@ -766,6 +791,10 @@ class Domino(Flask):
 			g.domino_redirect = None  # set by redirect()
 
 			_, callback = event
+
+			# Only while debugging: the handler and the time it took, for the inspector's event log
+			if self.debug:
+				g.domino_debug = (time.perf_counter(), callback)
 
 			try:
 				if accepts_argument(callback):
@@ -823,11 +852,21 @@ class Domino(Flask):
 		if not (self.debug or self.testing):
 			return {"error": "Internal Server Error"}, 500
 
-		return {
+		payload = {
 			"error": f"{type(error).__name__}: {error}",
 			"traceback": traceback.format_exc(),
 			"debug": True
-		}, 500
+		}
+
+		# The frames with their source, the component stack and hints, for debug.js's overlay
+		if self.debug:
+			from .devtools import error_details
+			debug = g.get("domino_debug")
+			payload.update(error_details(self, error, debug[1] if debug else None))
+			if debug:
+				payload["debug_ms"] = round((time.perf_counter() - debug[0]) * 1000, 1)
+
+		return payload, 500
 
 
 	def _add_stream(self, route):
@@ -1030,8 +1069,12 @@ class Domino(Flask):
 		else:
 			html = result
 
+		# While debugging, the inspector finds the page's components from its root, and can
+		# inspect pages without events too
+		if self.debug:
+			page.root = result
 		# Don't keep pages that have nothing to handle or refresh
-		if not page.events and not page.live:
+		elif not page.events and not page.live:
 			self._drop_page(page)
 
 		return html
@@ -1050,6 +1093,22 @@ class Domino(Flask):
 			page.cookie = with_cookies(request.headers.get("Cookie", ""), response.headers.getlist("Set-Cookie"))
 
 		return response
+
+
+	def handle_exception(self, e):
+
+		# While debugging, a page that fails shows what went wrong (the frames with their source,
+		# the component whose render() failed, hints) instead of a bare 500. Not in tests, which
+		# want the exception, nor under Werkzeug's interactive debugger, which shows its own
+		if not self.debug or self.testing or request.environ.get("werkzeug.debug.preserve_context"):
+			return super().handle_exception(e)
+
+		from .devtools import error_page
+
+		self.log_exception(sys.exc_info())
+		response = self.response_class(error_page(self, e), status=500, mimetype="text/html")
+
+		return self.finalize_request(response, from_error_handler=True)
 
 
 	def style(self, href="", external=False):
@@ -1361,6 +1420,9 @@ class Element:
 			render_stack().append(frame)
 			try:
 				children = render()
+			except Exception as error:
+				note_render_error(error, self)
+				raise
 			finally:
 				render_stack().pop()
 			self.__bound__ = frame[2]
@@ -1509,7 +1571,12 @@ class Element:
 			if isinstance(child, Element):
 				if head and child.__tag__ in ("style", "link"):
 					inner += styles.place(level + 1, indent)
-				inner += child._render(level + 1, indent)
+				try:
+					inner += child._render(level + 1, indent)
+				except Exception as error:
+					note_render_error(error, child)
+					note_render_error(error, self)
+					raise
 			elif isinstance(child, str):
 				inner += f"{indentation}{indent}{text(child)}{end}"
 			else:

@@ -519,6 +519,115 @@ class Graph:
 		return {"states": self.states, "edges": self.edges}
 
 
+def explain(component, callback):
+	"""Why `callback`, bound in `component`'s render, isn't run ahead of time, or None if it is.
+	Only for the inspector in debug mode (see domino.devtools), so it can take its time."""
+
+	cls = type(component)
+	if getattr(cls, "optimistic", True) is False:
+		return f"{cls.__name__} sets optimistic = False"
+	if predictable_callback(component, callback):
+		return None
+
+	states = state_names(cls)
+	nothing = f"{cls.__name__} has no State attributes, so there's nothing to predict"
+
+	owner = getattr(callback, "__self__", None)
+	if owner is not None:
+		if owner is not component and type(owner) is cls:
+			return f"it's a method of another {cls.__name__}, not of this one"
+		if owner is not component:
+			return f"it's a method of {type(owner).__name__}, not of {cls.__name__}"
+		return method_reason(callback.__func__, states) if states else nothing
+
+	if not isinstance(callback, types.FunctionType) or callback.__name__ != "<lambda>":
+		return "only the component's own methods, and lambdas that call one, are predicted"
+
+	calls = lambda_calls(callback.__code__)
+	if not calls:
+		return "the lambda does more than call a method of the component with plain values (its defaults or variables)"
+
+	methods = callable_methods(cls)
+	for target, method, count in calls:
+		other = lambda_value(callback, target)
+		if other is not component:
+			# Lambdas are found by their line, so with several on it this can't tell which it is
+			called = " or ".join(sorted({f"{name}.{function}()" for name, function, _ in calls}))
+			whose = f" of {type(other).__name__}" if other is not None else ""
+			return f"the lambda calls {called}{whose}, not a method of this {cls.__name__}"
+		if not states:
+			return nothing
+		if methods.get(method) != count:
+			function = getattr(cls, method, None)
+			if not isinstance(function, types.FunctionType):
+				return f"the lambda calls {method}(), which isn't a plain method of {cls.__name__}"
+			return f"the lambda calls {method}(), and " + method_reason(function, states, read_parameters=True)
+
+	return "it isn't a predictable method of the component"
+
+
+def method_reason(function, states, read_parameters=False):
+	"""What keeps a method from being predicted: its first statement that isn't a plain change of
+	the component's own State."""
+
+	name = getattr(function, "__name__", "it")
+	definition = parse_function(function)
+	if definition is None:
+		return f"{name}() can't be read: its source is missing, or it has decorators, *args, **kwargs or keyword-only parameters"
+
+	arguments = definition.args
+	self_name = arguments.args[0].arg
+	if read_parameters:
+		if arguments.defaults:
+			return f"{name}() has parameters with defaults"
+		unused = set()
+		checker = Checker(self_name, states, unused, {argument.arg for argument in arguments.args[1:]})
+	else:
+		unused = {argument.arg for argument in arguments.args[1:]}
+		if len(unused) > 1:
+			return f"{name}() takes more than the event"
+		checker = Checker(self_name, states, unused)
+
+	for statement in definition.body:
+		if checker.statement(statement):
+			continue
+		line = function.__code__.co_firstlineno + statement.lineno - 1
+		try:
+			code = ast.unparse(statement).split("\n")[0]
+		except Exception:
+			code = type(statement).__name__
+		if len(code) > 60:
+			code = code[:57] + "..."
+		return f"{name}() line {line}, `{code}`: {statement_reason(statement, checker, unused)}"
+
+	return f"{name}() isn't predictable"
+
+
+def statement_reason(statement, checker, unused):
+
+	names = {node.id for node in ast.walk(statement) if isinstance(node, ast.Name)}
+	if names & unused:
+		return "it reads the event, which isn't known before the click"
+	for node in ast.walk(statement):
+		if isinstance(node, ast.Call) and not (isinstance(node.func, ast.Name) and node.func.id in SAFE_CALLS):
+			try:
+				called = ast.unparse(node.func)
+			except Exception:
+				called = "a function"
+			return f"it calls {called}(), which could change things outside the component"
+	if isinstance(statement, (ast.Assign, ast.AugAssign)):
+		targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+		if not all(checker.state_attribute(target) for target in targets):
+			return "it changes something other than the component's own State"
+		return "it reads something other than the component's State, constants and plain expressions"
+	if isinstance(statement, ast.Return):
+		return "it returns a value (the component it re-renders is up to the server)"
+	if isinstance(statement, (ast.For, ast.While, ast.With, ast.Try)):
+		return "only assignments to State and if/else are followed, not loops, with or try"
+
+	return "it reads something other than the component's State, constants and plain expressions"
+
+
 def script_json(graph):
 	"""The graph as JSON that's safe inside a <script> element. HTML is mostly tags, so rather
 	than escape every <, escape only what could end the script ("</") or open a comment."""

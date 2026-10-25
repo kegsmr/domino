@@ -50,6 +50,11 @@ class ASGIApp:
 		# one. A pool of its own, so slow page loads can't hold up events (or the other way)
 		self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="domino-event")
 
+		# Made once in the process that serves, so a debug server warns here, once
+		if app.debug:
+			from .devtools import startup_warnings
+			startup_warnings(app)
+
 
 	async def __call__(self, scope, receive, send):
 

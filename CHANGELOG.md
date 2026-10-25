@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Developer tools (debug mode only)
+- An error page for pages that fail to render: source around each frame, the component stack, the request and hints for common mistakes.
+- The event error overlay shows the frames' source, the component stack, hints, and which element and handler fired.
+- A component inspector (Alt+Shift+D or `Domino.inspect()`): State kept up to date, events and why a handler isn't instant, subscriptions, parents and children; and an event log with server time, round trip, sizes and whether predictions matched.
+- Startup warnings about in-memory `Collection()`s. Production pages are unchanged, byte for byte.
+
 ## 0.2.0
 
 The first big release: Domino becomes a full framework, Meteor-style but all Python.
