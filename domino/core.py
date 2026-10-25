@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import sys
 import threading
@@ -37,6 +38,15 @@ RAW_TEXT_TAGS = ["script", "style"]
 
 # Elements whose whitespace is content, so rendering adds no indentation inside them
 PREFORMATTED_TAGS = ["pre", "textarea"]
+
+# Characters an HTML attribute name can't have (whitespace, quotes, =, /, <, >, controls)
+INVALID_ATTRIBUTE_NAME = re.compile(r"[\s\"'<>/=\x00-\x1f\x7f]")
+
+# Attribute names already found valid, so rendering checks each name once
+_attribute_names = set()
+
+# What would end a <script> or <style> element early, wherever it is in its text
+RAW_TEXT_END = {tag: re.compile(f"</(?={tag})", re.IGNORECASE) for tag in RAW_TEXT_TAGS}
 
 
 _render_state = threading.local()
@@ -1648,6 +1658,12 @@ class Element:
 			key = key.replace("_", "-")
 			if value is None or value is False:
 				continue
+			# Names aren't escaped, so one from data (t.div(**attrs), <div {attrs}> in a template)
+			# mustn't be able to end the tag or add another attribute
+			if key not in _attribute_names:
+				if INVALID_ATTRIBUTE_NAME.search(key) or not key:
+					raise ValueError(f"Invalid attribute name: {key!r}")
+				_attribute_names.add(key)
 			if key == "style" and isinstance(value, dict):
 				value = "; ".join(f"{name.replace('_', '-')}: {css}" for name, css in value.items())
 			if value is True:
@@ -1673,9 +1689,13 @@ class Element:
 			closing = f"</{tag}>{end}"
 			level, indent, indentation, end = 0, "", "", ""
 
-		# Escape text unless it's marked safe with Markup or inside <script>/<style>
+		# Escape text unless it's marked safe with Markup or inside <script>/<style>, where only
+		# "</script" ("</style") can do harm: "<\/script" means the same in JavaScript (and CSS)
 		raw = tag in RAW_TEXT_TAGS
-		text = (lambda value: str(value)) if raw else (lambda value: str(escape(value)))
+		if raw:
+			text = lambda value: RAW_TEXT_END[tag].sub("<\\\\/", str(value))
+		else:
+			text = lambda value: str(escape(value))
 
 		# Process inner content and children
 		if inner:
