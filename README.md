@@ -495,7 +495,8 @@ def index():
 
 @app.route("/login")
 def login():
-	return Document() [accounts.LoginForm()]       # also SignupForm(), LogoutButton(), OAuthButton("github")
+	return Document() [accounts.LoginForm()]       # also SignupForm(), LogoutButton(), OAuthButton("github"),
+	                                               # ForgotPasswordForm(), ChangePasswordForm(), ... (below)
 
 @app.route("/private")
 @accounts.login_required                           # under @app.route, or on a page's page()
@@ -509,6 +510,45 @@ def private():
 - The forms show errors inline, keep the typed email, and after logging in go to `?next=` if the page has one (only paths on this site are followed). `login_required` sends visitors who aren't signed in to the `accounts.login_url` setting (default `/login`) with `?next=` set to the page they asked for.
 - After 5 failed logins for an email within a minute, it's locked until that minute has passed; one IP address gets 20. Change these with the `accounts.max_attempts` and `accounts.lockout_seconds` settings. The counts are kept in the server process's memory, so each process (and a restart) counts on its own. Behind a proxy, every client shares the proxy's address unless you set up Werkzeug's `ProxyFix`.
 - `domino.redirect(url)` in any event handler sends the browser to `url` when the response arrives. It only accepts paths on this site (`/notes`, not `//evil.com` or `https://...`); outside event handlers it's Flask's `redirect()`.
+- The forms are [`domino.forms`](#forms) forms (`LoginForm`, `SignupForm` and the ones below), so they're laid out and styled like any other, and can be subclassed to change labels, messages or `submit_text`.
+
+### Password reset, email verification and changing the password
+
+These send email, so set up [Email](#email) first (in debug mode emails are printed in the terminal, links included). Put each component on a page of its own, like the login page:
+
+```python
+# pages/forgot-password.py
+def page():
+	return accounts.ForgotPasswordForm()          # email -> "If an account exists for that email, we've emailed a link ..."
+
+# pages/reset-password.py                        # the emailed link: /reset-password?token=...
+def page():
+	return accounts.ResetPasswordForm()           # new password + confirmation
+
+# pages/verify-email.py                          # the link emailed after signing up
+def page():
+	return accounts.VerifyEmail()
+
+# pages/check-email.py                           # "check your email", with a button to send the link again
+def page():
+	return accounts.CheckEmail()
+
+# pages/members.py
+@accounts.login_required(verified=True)          # unverified users go to /check-email?next=...
+def page():
+	...
+
+# pages/settings.py
+@accounts.login_required
+def page():
+	return accounts.ChangePasswordForm()          # current password + new password + confirmation
+```
+
+- **Forgot your password?** `ForgotPasswordForm` gives the same answer whether or not an account has that email, so it can't be used to find out who has one (emails go out in the background, so it doesn't take longer either). The email links to the `accounts.reset_url` page (default `/reset-password`) with a token that expires after `accounts.reset_link_seconds` (default 3600) and works once: it's bound to the user's current password hash, so it stops working as soon as the password is reset or changed. Resetting also marks the email verified (the link proved it's theirs) and ends a login lockout. With the `accounts.forgot_url` setting (e.g. `/forgot-password`), `LoginForm` shows a "Forgot your password?" link to it.
+- **Email verification.** With `{"accounts": {"verify_email": true}}` (off by default), `SignupForm` emails new users a link to the `accounts.verify_url` page (default `/verify-email`), valid for `accounts.verify_link_seconds` (default 3 days). `current_user()["verified"]` says whether they've opened it; users who signed in with GitHub or Google with a verified email are verified already. `@accounts.login_required(verified=True)` sends unverified users to the `accounts.check_email_url` page (default `/check-email`), whose button sends the link again. Your own code can call `accounts.send_verification_email(user)`, `accounts.send_reset_email(user)`, `accounts.verify_email(token)`, `accounts.reset_password(token, password)` and `accounts.set_password(user_id, password)`.
+- **Changing the password.** `ChangePasswordForm` asks for the current password; wrong guesses count as failed logins for that email, so they're locked out the same way. Other browsers signed in to the account stay signed in: sessions live in cookies, so there's no server-side list of them to end ("log out other sessions" isn't possible). Reset links sent before stop working.
+- **Rate limits.** Reset emails are limited per address (whether or not it has an account) and verification emails per user: `accounts.max_emails` (default 3) in `accounts.email_window_seconds` (default 900), and four times as many per IP address. Like the login lockout, the counts are kept in each server process's memory.
+- **Links** in emails are built on the `public_url` setting (`{"public_url": "https://example.com"}`), or else on the address the request came to. Set it in production: otherwise a request with a forged `Host` header could get a reset link to another site emailed to a user (a warning is logged once outside debug mode). Tokens are signed with the `secret_key` and a salt per purpose, so a verification token can't be used as a reset token, and changing the secret key invalidates them all.
 
 **Sessions.** The signed-in user's id is kept in Flask's signed session cookie, which needs the `secret_key` setting: put a long random string in `settings.local.json` or `DOMINO_SECRET_KEY`. In debug mode an app without one gets a random key per process, with a warning, so logins don't survive a restart; outside debug mode accounts refuse to work without it. Domino pages outlive their request (events and pushes from other users' changes run later), so each page remembers who was signed in when it was loaded, and login and logout update the page as well as the cookie. Other open tabs of the same browser notice on their next page load, not live. Logging in starts a fresh session (nothing from the old cookie is kept) and lasts 31 days (Flask's `PERMANENT_SESSION_LIFETIME`); logging out clears the cookie in that browser. Since the session lives in the cookie, there's no server-side list of sessions to revoke.
 
@@ -528,7 +568,33 @@ Add a provider's OAuth app credentials to the settings, for example in `settings
 
 The callback URL to register with the provider is `https://<your site>/_domino/accounts/github/callback` (or `google`). `LoginForm` and `SignupForm` then show a "Continue with GitHub" link, and `OAuthButton("github")` adds one anywhere; providers that aren't configured render nothing. Signing in uses the authorization-code flow with a random `state` kept in the session, so a callback this browser didn't start is refused. The user is found by their provider account id, or else linked to an existing user with the same email if the provider says it's verified, or else created; an unverified email never links to an existing account. Provider details are kept in `user["services"]["github"]`; access tokens aren't stored.
 
-See `examples/accounts.py`.
+See `examples/accounts/`.
+
+## Email
+
+`domino.mail.send(to, subject, text, html=None)` sends an email (`to` is an address or a list of them). Set up SMTP in the settings, with the password in `settings.local.json` or the environment (`DOMINO_MAIL__PASSWORD`):
+
+```json
+{"mail": {"backend": "smtp", "host": "smtp.example.com", "port": 587, "tls": true, "username": "apikey", "from": "My App <noreply@example.com>"}}
+```
+
+- `"tls": true` uses STARTTLS (port 587 by default), `"ssl": true` a TLS connection from the start (port 465); `timeout` is in seconds (default 10).
+- SMTP emails are sent by a background thread, so `send()` returns at once: event handlers don't wait seconds for a mail server, and a page doesn't answer slower when an email goes out. A failed delivery is logged, not raised, and emails still queued when the process exits get a few seconds to go out.
+- The `"console"` backend prints each email to the server's output instead (links on lines of their own, so terminals make them clickable); it's the default in debug mode. The `"memory"` backend keeps them in `domino.mail.outbox`.
+- In tests the memory backend is always used, whatever the settings, so tests never send real email. The `mail_outbox` fixture gives the emails sent during the test (each has `.to`, `.subject`, `.text`, `.html` and `.links`):
+
+```python
+# pages/forgot-password_test.py
+from domino import accounts
+
+def test_reset_email(page, mail_outbox):
+	accounts.create_user("ada@example.com", "correct horse")
+	page.fill("input[name=email]", "ada@example.com")
+	page.click("button", text="Email me a link")
+	assert mail_outbox[0].subject == "Reset your password"
+```
+
+- Outside debug mode and tests, sending without a backend raises `domino.mail.MailConfigError`.
 
 ## Settings
 

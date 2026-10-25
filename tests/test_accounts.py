@@ -25,6 +25,7 @@ def users(request, monkeypatch):
 
 	monkeypatch.setattr(accounts, "users", collection)
 	accounts._failures.clear()
+	accounts._mailed.clear()
 
 	return collection
 
@@ -256,7 +257,7 @@ def test_logging_in_re_renders_the_user_menu_on_that_page_only(users):
 	# The menu and the form both read current_user(); one comes back in the response and the
 	# other is pushed, rendered outside the request from the page's user
 	assert re.search(r'class="UserMenu".*?Signed in as\s*<strong>\s*Ada', html, re.S)
-	assert re.search(r'class="LoginForm".*?Signed in as', html, re.S)
+	assert re.search(r'class="LoginForm Form".*?Signed in as', html, re.S)
 	assert app.page_store.pages[other_page].updates == {}
 
 	# A new page load reads the user from the session cookie
@@ -619,3 +620,425 @@ def test_whole_flow_with_the_test_client(users):
 	page.click("button", text="Log out")
 	page.load("/private")
 	assert page.path == "/login"
+
+
+# Password reset, email verification and changing the password
+
+
+def make_full_app(**settings):
+
+	app = make_app(**settings)
+
+	@app.route("/forgot-password")
+	def forgot_password():
+		return Document() [accounts.ForgotPasswordForm()]
+
+	@app.route("/reset-password")
+	def reset_password():
+		return Document() [accounts.ResetPasswordForm()]
+
+	@app.route("/verify-email")
+	def verify_email():
+		return Document() [accounts.VerifyEmail()]
+
+	@app.route("/check-email")
+	def check_email():
+		return Document() [accounts.CheckEmail()]
+
+	@app.route("/account")
+	@accounts.login_required
+	def account():
+		return Document() [accounts.ChangePasswordForm()]
+
+	@app.route("/members")
+	@accounts.login_required(verified=True)
+	def members():
+		return Document() [t.p(class_="members") [f"Welcome {accounts.current_user()['email']}"]]
+
+	return app
+
+
+def link_path(message):
+	"""The path and query of the link in an email, to open with the test client."""
+
+	(link,) = message.links
+	parts = urlsplit(link)
+
+	return f"{parts.path}?{parts.query}"
+
+
+def ask_for_reset(app, email="ada@example.com"):
+
+	page = app.test_page("/forgot-password")
+	page.fill("input[name=email]", email)
+	page.submit()
+
+	return page
+
+
+def choose_password(page, password, confirm=None):
+
+	page.fill("input[name=password]", password)
+	page.fill("input[name=confirm]", password if confirm is None else confirm)
+	page.submit()
+
+	return page
+
+
+def can_log_in(app, password, email="ada@example.com"):
+
+	with app.test_request_context():
+		try:
+			accounts.login(email, password)
+		except accounts.AccountError:
+			return False
+
+	return True
+
+
+def log_in_page(app, path):
+
+	page = app.test_page("/")
+	page.fill("input[name=email]", "ada@example.com")
+	page.fill("input[name=password]", PASSWORD)
+	page.submit()
+
+	return page.load(path)
+
+
+def test_forgot_password_emails_a_link_that_resets_the_password_once(users, mail_outbox):
+
+	app = make_full_app()
+	accounts.create_user("ada@example.com", PASSWORD)
+
+	page = ask_for_reset(app, " ADA@example.com")
+	assert "If an account exists for that email, we've emailed a link" in page.text()
+
+	(message,) = mail_outbox
+	assert message.to == ["ada@example.com"] and message.subject == "Reset your password"
+	assert message.links[0].startswith("http://localhost/reset-password?token=")
+	assert "60 minutes" in message.text
+
+	reset = app.test_page(link_path(message))
+	assert reset.find("button").text == "Change password"
+	choose_password(reset, "new password!")
+	assert "Your password has been changed." in reset.text()
+	assert reset.find("a", text="Log in").attrs["href"] == "/login"
+
+	assert can_log_in(app, "new password!")
+	assert not can_log_in(app, PASSWORD)
+	# The email has been proven to be the user's
+	assert users.find_one()["verified"] is True
+
+	# The link only works once
+	again = app.test_page(link_path(message))
+	assert "This link is invalid or has expired." in again.text()
+	assert again.find("a", text="Get a new link").attrs["href"] == "/forgot-password"
+	assert again.find_all("input[name=password]") == []
+
+
+def test_forgot_password_says_the_same_for_unknown_emails(users, mail_outbox):
+
+	app = make_full_app()
+	accounts.create_user("ada@example.com", PASSWORD)
+
+	known = ask_for_reset(app, "ada@example.com").text()
+	unknown = ask_for_reset(app, "nobody@example.com").text()
+
+	assert known == unknown
+	assert [message.to for message in mail_outbox] == [["ada@example.com"]]
+
+
+def test_reset_link_expires(users, mail_outbox, monkeypatch):
+
+	app = make_full_app(reset_link_seconds=600)
+	accounts.create_user("ada@example.com", PASSWORD)
+	ask_for_reset(app)
+	path = link_path(mail_outbox[0])
+	assert "10 minutes" in mail_outbox[0].text
+
+	now = time.time()
+	monkeypatch.setattr(accounts, "_clock", lambda: now + 599)
+	page = app.test_page(path)
+	assert page.find_all("input[name=password]")
+
+	# Expired while the form was open: refused on submit
+	monkeypatch.setattr(accounts, "_clock", lambda: now + 601)
+	choose_password(page, "new password!")
+	assert "This link is invalid or has expired." in page.text()
+	assert "This link is invalid or has expired." in app.test_page(path).text()
+	assert can_log_in(app, PASSWORD)
+
+
+def test_reset_link_dies_when_the_password_changes_and_cant_be_forged(users, mail_outbox):
+
+	app = make_full_app()
+	user = accounts.create_user("ada@example.com", PASSWORD)
+	ask_for_reset(app)
+	path = link_path(mail_outbox[0])
+	token = path.split("token=")[1]
+
+	with app.test_request_context():
+		accounts.set_password(user["_id"], "changed meanwhile")
+		stamp = accounts._password_stamp(accounts.users.find_one())
+
+		# A token of another kind (verification) isn't a reset token, nor is an altered one
+		other_kind = accounts._serializer(accounts.VERIFY_SALT).dumps({"user": user["_id"], "stamp": stamp})
+		for bad in [other_kind, token[:-2] + "xx", token]:
+			with pytest.raises(accounts.AccountError, match="invalid or has expired"):
+				accounts.reset_password(bad, "attacker's choice")
+
+	assert "This link is invalid or has expired." in app.test_page(path).text()
+
+	# Nor is one signed with another key
+	other = make_full_app()
+	other.secret_key = "another secret"
+	with other.test_request_context():
+		forged = accounts._serializer(accounts.RESET_SALT).dumps({"user": user["_id"], "stamp": stamp})
+	assert "invalid or has expired" in app.test_page(f"/reset-password?token={forged}").text()
+	assert can_log_in(app, "changed meanwhile")
+
+
+def test_reset_form_checks_the_new_password(users, mail_outbox):
+
+	app = make_full_app()
+	accounts.create_user("ada@example.com", PASSWORD)
+	ask_for_reset(app)
+	page = app.test_page(link_path(mail_outbox[0]))
+
+	choose_password(page, "short")
+	assert "Use a password of at least 8 characters" in page.text()
+
+	choose_password(page, "new password!", "something else")
+	assert "The passwords don't match" in page.text()
+	assert can_log_in(app, PASSWORD)
+
+	choose_password(page, "new password!")
+	assert can_log_in(app, "new password!")
+
+
+def test_reset_emails_are_rate_limited_for_every_address(users, mail_outbox):
+
+	app = make_full_app(max_emails=2)
+	accounts.create_user("ada@example.com", PASSWORD)
+
+	for email in ["ada@example.com", "nobody@example.com"]:
+		for _ in range(2):
+			assert "we've emailed a link" in ask_for_reset(app, email).text()
+		# Known or not, the third gets the same answer
+		assert "Too many emails sent." in ask_for_reset(app, email).text()
+
+	assert len(mail_outbox) == 2
+
+
+def test_reset_emails_from_one_address_are_limited_across_emails(users, mail_outbox):
+
+	app = make_full_app(max_emails=1)
+
+	# One address gets four times as many
+	for number in range(4):
+		assert "we've emailed a link" in ask_for_reset(app, f"guess{number}@example.com").text()
+	assert "Too many emails sent." in ask_for_reset(app, "another@example.com").text()
+
+
+def test_links_in_emails_use_the_public_url_setting(users, mail_outbox):
+
+	app = make_full_app(reset_url="/account/reset?step=2")
+	app.settings["public_url"] = "https://example.com/"
+	accounts.create_user("ada@example.com", PASSWORD)
+
+	ask_for_reset(app)
+
+	assert mail_outbox[0].links[0].startswith("https://example.com/account/reset?step=2&token=")
+
+
+def test_links_outside_a_request_need_the_public_url_setting(users, mail_outbox):
+
+	app = make_full_app()
+	user = accounts.create_user("ada@example.com", PASSWORD)
+
+	with app.app_context():
+		with pytest.raises(accounts.AccountsConfigError, match="public_url"):
+			accounts.send_reset_email(user)
+		app.settings["public_url"] = "https://example.com"
+		accounts.send_verification_email(user)
+
+	assert mail_outbox[0].links[0].startswith("https://example.com/verify-email?token=")
+
+
+def test_login_form_links_to_forgot_password_when_configured(users):
+
+	assert "Forgot your password?" not in make_full_app().test_page("/").text()
+
+	page = make_full_app(forgot_url="/forgot").test_page("/")
+	assert page.find("a", text="Forgot your password?").attrs["href"] == "/forgot"
+
+
+def sign_up(app, email="ada@example.com", next_url="/"):
+
+	page = app.test_page(f"/signup?next={next_url}")
+	page.fill("input[name=email]", email)
+	page.fill("input[name=password]", PASSWORD)
+	page.submit()
+
+	return page
+
+
+def test_sign_up_sends_no_email_unless_verify_email_is_on(users, mail_outbox):
+
+	sign_up(make_full_app())
+
+	assert mail_outbox == []
+	assert users.find_one()["verified"] is False
+
+
+def test_verify_email_after_sign_up(users, mail_outbox):
+
+	app = make_full_app(verify_email=True)
+	page = sign_up(app, next_url="/members")
+
+	# Signed in but not verified: sent to the check-your-email page
+	assert page.path == "/check-email"
+	assert "We've emailed a link to ada@example.com" in page.text()
+	(message,) = mail_outbox
+	assert message.subject == "Verify your email"
+	assert message.links[0].startswith("http://localhost/verify-email?token=")
+	assert "next=%2Fmembers" in message.links[0]
+	assert users.find_one()["verified"] is False
+
+	verified = app.test_page(link_path(message))
+	assert "Your email is verified." in verified.text()
+	assert verified.find("a", text="Continue").attrs["href"] == "/members"
+
+	page.load("/members")
+	assert page.text("p.members") == "Welcome ada@example.com"
+	with app.test_request_context():
+		assert accounts.users.find_one()["verified"] is True
+
+	# Opening the link again does no harm
+	assert "Your email is verified." in app.test_page(link_path(message)).text()
+
+
+def test_login_required_verified_sends_visitors_to_log_in_first(users):
+
+	app = make_full_app()
+	client = app.test_client()
+	assert client.get("/members").headers["Location"] == "/login?next=%2Fmembers"
+
+	accounts.create_user("ada@example.com", PASSWORD)
+	log_in(client)
+	assert client.get("/members?tab=1").headers["Location"] == "/check-email?next=%2Fmembers%3Ftab%3D1"
+
+	app.settings["accounts"] = {"check_email_url": "/verify?step=1"}
+	assert client.get("/members").headers["Location"] == "/verify?step=1&next=%2Fmembers"
+
+
+def test_verification_links_expire_and_only_fit_their_email(users, mail_outbox, monkeypatch):
+
+	app = make_full_app(verify_email=True, verify_link_seconds=60)
+	sign_up(app)
+	path = link_path(mail_outbox[0])
+
+	now = time.time()
+	monkeypatch.setattr(accounts, "_clock", lambda: now + 61)
+	page = app.test_page(path)
+	assert "This link is invalid or has expired." in page.text()
+	assert page.find("a", text="Get a new link").attrs["href"].startswith("/check-email")
+	monkeypatch.setattr(accounts, "_clock", time.time)
+
+	# A link for an address the user no longer has doesn't verify them
+	users.update({}, {"$set": {"email": "new@example.com"}})
+	assert "invalid" in app.test_page(path).text()
+	assert users.find_one()["verified"] is False
+
+
+def test_check_email_page_resends_the_link_a_few_times(users, mail_outbox):
+
+	app = make_full_app(verify_email=True, max_emails=2)
+	page = sign_up(app, next_url="/members")
+	assert page.path == "/check-email" and len(mail_outbox) == 1
+
+	page.click("button", text="Send it again")
+	assert "Sent. Check your inbox." in page.text()
+	page.click("button", text="Send it again")
+	page.click("button", text="Send it again")
+	assert "Too many emails sent." in page.text()
+	assert len(mail_outbox) == 3
+
+	# Any of them works
+	app.test_page(link_path(mail_outbox[1]))
+	page.load("/members")
+	assert page.path == "/members"
+
+
+def test_oauth_users_with_a_verified_email_are_verified(users, monkeypatch):
+
+	monkeypatch.setattr(accounts, "_fetch_json", github_user())
+	client = make_app(**GITHUB).test_client()
+
+	_, query = start_oauth(client)
+	finish_oauth(client, query["state"])
+
+	assert users.find_one()["verified"] is True
+
+
+def change_password(page, current, new, confirm=None):
+
+	page.fill("input[name=current]", current)
+	page.fill("input[name=password]", new)
+	page.fill("input[name=confirm]", new if confirm is None else confirm)
+	page.submit()
+
+	return page
+
+
+def test_change_password(users, mail_outbox):
+
+	app = make_full_app()
+	accounts.create_user("ada@example.com", PASSWORD)
+	ask_for_reset(app)
+	reset_path = link_path(mail_outbox[0])
+	page = log_in_page(app, "/account")
+
+	change_password(page, "wrong password", "new password!")
+	assert "Wrong password" in page.text()
+
+	change_password(page, PASSWORD, "new password!", "typo")
+	assert "The passwords don't match" in page.text()
+	assert "has been changed" not in page.text()
+
+	change_password(page, PASSWORD, "new password!")
+	assert "Your password has been changed." in page.text()
+	assert page.value("input[name=current]") == ""
+
+	assert can_log_in(app, "new password!")
+	assert not can_log_in(app, PASSWORD)
+	# A reset link sent before doesn't work any more
+	assert "invalid or has expired" in app.test_page(reset_path).text()
+
+
+def test_wrong_current_passwords_count_as_failed_logins(users):
+
+	app = make_full_app(max_attempts=2)
+	accounts.create_user("ada@example.com", PASSWORD)
+	page = log_in_page(app, "/account")
+
+	for _ in range(2):
+		change_password(page, "wrong password", "new password!")
+	change_password(page, PASSWORD, "new password!")
+
+	assert "Too many failed attempts." in page.text()
+	assert not can_log_in(app, PASSWORD)
+	accounts._failures.clear()
+	assert can_log_in(app, PASSWORD)
+
+
+def test_change_password_form_asks_visitors_to_log_in(users):
+
+	app = make_full_app()
+
+	@app.route("/change")
+	def change():
+		return Document() [accounts.ChangePasswordForm()]
+
+	assert "Log in to change your password." in app.test_page("/change").text()

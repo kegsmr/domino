@@ -667,6 +667,62 @@ def test_accounts_sign_up_log_out_log_in_and_keep_private_notes(serve, page):
 	assert page.errors == []
 
 
+@pytest.mark.mongo
+def test_accounts_forgot_password_email_and_reset(serve, page, mail_outbox):
+
+	from domino import accounts
+
+	def configure(module):
+		module.app.secret_key = "test"
+
+	accounts._mailed.clear()
+	email = f"ada-{time.time_ns()}@example.com"
+	home = serve("accounts", configure)
+	menu = page.locator(".UserMenu")
+
+	page.goto(home + "signup")
+	page.fill("input[name=email]", email)
+	page.fill("input[name=password]", "correct horse")
+	page.get_by_role("button", name="Sign up").click()
+	menu.get_by_role("button", name="Log out").click()
+	menu.get_by_role("link", name="Log in").click()
+
+	page.get_by_role("link", name="Forgot your password?").click()
+	page.wait_for_url(home + "forgot-password")
+	page.fill("input[name=email]", email)
+	page.get_by_role("button", name="Email me a link").click()
+	assert "we've emailed a link" in page.get_by_role("status").inner_text()
+
+	# The server runs in this process, so its emails are in the outbox
+	(message,) = [message for message in mail_outbox if message.subject == "Reset your password"]
+	assert message.links[0].startswith(home + "reset-password?token=")
+	page.goto(message.links[0])
+	page.fill("input[name=password]", "a new password")
+	page.fill("input[name=confirm]", "a different one")
+	page.get_by_role("button", name="Change password").click()
+	page.get_by_role("alert").wait_for()
+	assert page.get_by_role("alert").inner_text() == "The passwords don't match"
+
+	page.fill("input[name=password]", "a new password")
+	page.fill("input[name=confirm]", "a new password")
+	page.get_by_role("button", name="Change password").click()
+	page.get_by_role("status").wait_for()
+	assert page.get_by_role("status").inner_text().strip() == "Your password has been changed."
+
+	page.locator("main").get_by_role("link", name="Log in").click()
+	page.wait_for_url(home + "login")
+	page.fill("input[name=email]", email)
+	page.fill("input[name=password]", "a new password")
+	page.get_by_role("button", name="Log in").click()
+	page.locator(".LoginForm").get_by_text("Signed in as").wait_for()
+	assert "Signed in as" in menu.inner_text()
+
+	# The link was used up
+	page.goto(message.links[0])
+	assert page.locator("main [role=alert]").inner_text() == "This link is invalid or has expired."
+	assert page.errors == []
+
+
 def test_file_routed_pages_share_a_layout(serve, page):
 
 	url = serve("functional")
