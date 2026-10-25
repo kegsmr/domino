@@ -71,8 +71,16 @@ def router():
 
 	yield send
 
-	server.close()
-	asyncio.run_coroutine_threadsafe(server.wait_closed(), loop).result(5)
+	async def stop():
+		server.close()
+		for task in list(routing.connections):
+			task.cancel()
+		try:
+			await asyncio.wait_for(server.wait_closed(), 2)
+		except asyncio.TimeoutError:
+			pass
+
+	asyncio.run_coroutine_threadsafe(stop(), loop).result(5)
 	loop.call_soon_threadsafe(loop.stop)
 	thread.join(5)
 	worker.stop()
@@ -293,6 +301,97 @@ def test_a_page_id_alone_doesnt_act_as_its_user(monkeypatch):
 
 	assert ada.post("/_domino/events", json={"page_id": page_id, "event_id": whoami}).status_code == 200
 	assert seen == ["ada@example.com"]
+
+
+# Accounts ------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def users(monkeypatch):
+
+	from domino import Collection, accounts
+
+	collection = Collection()
+	monkeypatch.setattr(accounts, "users", collection)
+	accounts._failures.clear()
+	accounts._mailed.clear()
+
+	return collection
+
+
+def test_reset_links_dont_follow_a_forged_host_header(users, monkeypatch):
+
+	from domino import accounts, mail
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+	user = accounts.create_user("victim@example.com", "correct horse")
+
+	# Emails that really go out (SMTP) with no public_url: the link would be built on the Host
+	# header of the attacker's request for the victim's reset, http://evil.example/reset-password?token=...
+	monkeypatch.setattr(mail, "testing", False)
+	app.settings["mail"] = {"backend": "smtp", "host": "127.0.0.1", "from": "app@example.com"}
+	with app.test_request_context("/forgot-password", base_url="http://evil.example"):
+		with pytest.raises(accounts.AccountsConfigError, match="public_url"):
+			accounts.send_reset_email(user)
+
+	# With public_url, the Host header doesn't matter
+	app.settings["mail"] = {"backend": "memory"}
+	app.settings["public_url"] = "https://example.com"
+	mail.outbox.clear()
+	with app.test_request_context("/forgot-password", base_url="http://evil.example"):
+		accounts.send_reset_email(user)
+	assert mail.outbox[0].links[0].startswith("https://example.com/reset-password?token=")
+	mail.outbox.clear()
+
+
+@pytest.mark.parametrize("email", ["victim,attacker@evil.example", "a@b.example\r\nBcc: c@d.example", "<a@b.example>", "\"a\"@b.example", "a;b@c.example"])
+def test_account_emails_are_one_plain_address(users, email):
+
+	from domino import accounts
+
+	# "victim,attacker@evil.example" is two addresses in a To: header
+	with pytest.raises(accounts.AccountError):
+		accounts.create_user(email, "correct horse")
+
+
+def test_reset_links_stop_working_when_the_email_changes(users):
+
+	from domino import accounts, mail
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+	app.settings["public_url"] = "https://example.com"
+	accounts.create_user("old@example.com", "correct horse")
+	user = users.find_one({"email": "old@example.com"})  # with its password hash, as the form finds it
+
+	mail.outbox.clear()
+	with app.app_context():
+		accounts.send_reset_email(user)
+		token = mail.outbox[0].links[0].split("token=")[1]
+		mail.outbox.clear()
+		assert accounts._reset_user(token) is not None
+
+		# The account moved to a new address; a link sent to the old one (a mailbox someone else
+		# may now read) no longer resets its password
+		users.update({"_id": user["_id"]}, {"$set": {"email": "new@example.com"}})
+		with pytest.raises(accounts.AccountError, match="invalid"):
+			accounts.reset_password(token, "a new password")
+
+
+def test_oauth_callback_url_uses_public_url(users):
+
+	from urllib.parse import parse_qs, urlsplit
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+	app.settings["accounts"] = {"github": {"client_id": "id", "client_secret": "shh"}}
+	app.settings["public_url"] = "https://example.com"
+
+	response = app.test_client().get("/_domino/accounts/github/login", headers={"Host": "evil.example"})
+	query = parse_qs(urlsplit(response.headers["Location"]).query)
+
+	assert query["redirect_uri"] == ["https://example.com/_domino/accounts/github/callback"]
 
 
 # Limits (denial of service) ----------------------------------------------------------------
