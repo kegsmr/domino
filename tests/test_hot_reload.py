@@ -608,7 +608,10 @@ def test_browser_page_updates_in_place_keeping_state(domino_run):
 
 			# app.py restarts the server, and the page reloads by itself
 			write(folder / "app.py", APP + "\n# changed\n")
-			page.wait_for_function("window.marker === undefined && document.querySelector('p') && document.querySelector('p').textContent.trim() === 'Sum: 0'", timeout=30000)
+			try:
+				page.wait_for_function("window.marker === undefined && document.querySelector('p') && document.querySelector('p').textContent.trim() === 'Sum: 0'", timeout=30000)
+			except playwright.Error as error:
+				raise AssertionError(f"{error}\n{log_path.read_text()}") from None
 		finally:
 			browser.close()
 

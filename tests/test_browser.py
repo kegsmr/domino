@@ -1769,7 +1769,7 @@ def test_chat_appends_reach_other_windows(serve_app, browser):
 			send_message(writer, f"Hello {number}")
 			reader.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=5000)
 
-		assert reader.locator("li").last.inner_text() == "Hello 5"
+		reader.wait_for_function("document.querySelector('li:last-child').textContent.trim() === 'Hello 5'", timeout=5000)
 		assert reader.locator("li").first.inner_text() == "Message 0"
 		if serve_app.transport == "asgi":
 			updates = [frame for frame in frames if frame.get("type") == "update"]

@@ -108,7 +108,8 @@ class HotReloader:
 		if app_file is None:
 			from .asgi import app_location
 			location = app_location(app) or ""
-			if ":" in location:
+			# "path/to/app.py:app" (C:\path\to\app.py:app on Windows), or a folder
+			if location.rpartition(":")[0].endswith(".py"):
 				app_file = location.rpartition(":")[0]
 		if app_file:
 			self.app_file = Path(os.path.realpath(app_file))
