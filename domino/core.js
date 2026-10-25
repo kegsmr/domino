@@ -196,6 +196,13 @@ window.Domino = (() => {
         // Even for a stale update: the server counts its CSS as sent
         addStyles(data.css);
         if (!data.id || !data.html) return;
+        // The page shows where the component's events in flight lead (see predict), which is
+        // newer than this; keep the newest such update for when the last of them is answered
+        if (inflight.get(data.id) > 0 && showingGuess(data.id)) {
+            const kept = deferred.get(data.id);
+            if (!kept || kept.version < data.version) deferred.set(data.id, data);
+            return;
+        }
         if (latest.get(data.id) >= data.version) {
             // A newer update (e.g. pushed by the server) got here first, so the page already
             // shows the server's state; still reset the fields of the element that fired
@@ -212,7 +219,10 @@ window.Domino = (() => {
         const replacement = template.content.firstElementChild;
         if (!replacement) return;
 
+        // Before morphing, which moves nodes out of the template
+        const found = readGraphs(replacement);
         morph(target, replacement, reset);
+        found.forEach(installGraph);
 
         const updated = document.getElementById(data.id);
         if (updated) {
@@ -386,14 +396,22 @@ window.Domino = (() => {
         });
     }
 
-    async function post(eventId, payload) {
-        const response = await fetch('/_domino/events', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ page_id: pageId(), event_id: eventId, data: payload })
+    // POSTs go one at a time, so the server handles events in the order they fired, as it does
+    // over the socket: an event fired from a predicted state needs the events before it handled
+    let posting = Promise.resolve();
+
+    function post(eventId, payload) {
+        const result = posting.then(async () => {
+            const response = await fetch('/_domino/events', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ page_id: pageId(), event_id: eventId, data: payload })
+            });
+            const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+            return { status: response.status, data };
         });
-        const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
-        return { status: response.status, data };
+        posting = result.catch(() => {});
+        return result;
     }
 
     // Send an event over the socket when it's connected (waiting for one that's connecting),
@@ -641,10 +659,12 @@ window.Domino = (() => {
         });
     }
 
-    async function triggerEvent(eventId, payload = {}, reset = null, el = null) {
+    // `owner`: the id of the component whose predicted states the event moved through (see predict)
+    async function triggerEvent(eventId, payload = {}, reset = null, el = null, owner = null) {
         const files = el ? selectedFiles(el) : [];
         const unmark = el ? markBusy(el, reset && reset.submit) : null;
         const page = pageId();
+        let answered = false;
         if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
             if (files.length) {
@@ -659,45 +679,132 @@ window.Domino = (() => {
             await wait(latency / 2);
             const { status, data } = await sendEvent(eventId, payload);
             await wait(latency / 2);
+            // Before handling, so the answer to the last event in flight is shown
+            if (owner) {
+                release(owner);
+                answered = true;
+            }
             // Another page has been swapped in meanwhile; the answer was for the old one
             if (pageId() !== page) return;
             await handleMessage(data, status, { el, eventId, reset, unmark });
         } catch (err) {
             reportError(el, eventId, { error: String(err) });
         } finally {
+            if (owner) {
+                if (!answered) release(owner);
+                settle(owner);
+            }
             if (unmark) unmark();
             if (--inFlight === 0) document.documentElement.removeAttribute('data-domino-loading');
         }
     }
 
-    // The server renders how a component will look after handlers that only change its own
-    // state (domino/optimistic.py) and ships it as inert JSON inside the component. Show it the
-    // moment the event fires; the server's answer then confirms it or puts things right.
-    function predict(el, eventId) {
+    // The server renders the states a component's handlers lead to when they only change its
+    // own state (domino/optimistic.py), and ships them as inert JSON inside the component:
+    // {states: [html, or the index of a state with the same html], edges: [{event: state}]}.
+    // State 0 is the one the server rendered. Per component id: those states, which the page
+    // shows (`key`, null when unknown), and its events in flight and the newest update that
+    // came meanwhile (see apply).
+    const graphs = new Map();
+    const inflight = new Map();
+    const deferred = new Map();
+
+    // [id, graph] for each component in `root` that ships its states, read from the server's
+    // HTML (so before anything changed it), whose own HTML is state 0
+    function readGraphs(root) {
+        const found = [];
+        for (const script of within(root, 'script[data-domino-predict]')) {
+            const owner = script.parentElement;
+            if (!owner || !owner.id) continue;
+            let graph;
+            try { graph = JSON.parse(script.textContent); } catch (err) { continue; }
+            const current = owner.cloneNode(true);
+            current.querySelector(':scope > script[data-domino-predict]').remove();
+            graph.states[0] = current.outerHTML;
+            graph.states = graph.states.map((html) => (typeof html === 'number' ? graph.states[html] : html));
+            found.push([owner.id, graph]);
+        }
+        return found;
+    }
+
+    function installGraph([id, graph]) {
+        // With events still in flight, the server's state will move on from this one
+        graph.key = inflight.get(id) > 0 ? null : 0;
+        graphs.set(id, graph);
+    }
+
+    function showingGuess(id) {
+        const graph = graphs.get(id);
+        return graph && graph.key !== null;
+    }
+
+    // `reset`: as for the server's answer, which this stands in for
+    function show(node, graph, key, reset = null) {
+        const template = document.createElement('template');
+        template.innerHTML = graph.states[key];
+        const replacement = template.content.firstElementChild;
+        if (!replacement || replacement.id !== node.id) return false;
+        morph(node, replacement, reset);
+        listen(node);
+        graph.key = key;
+        return true;
+    }
+
+    // Show where the event leads right away, from the component's states, following on from
+    // the states earlier events led to, so any number of clicks show at once. The event still
+    // goes to the server, whose answer to the last one in flight confirms it or puts it right.
+    // Returns the id of the component whose events are being followed, if any.
+    function predict(el, eventId, reset) {
         for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
-            const script = node.querySelector(':scope > script[data-domino-predict]');
-            if (!script) continue;
+            const prefix = 'event-' + node.id + '-';
+            const graph = node.id && eventId.startsWith(prefix) && graphs.get(node.id);
+            if (!graph) continue;
 
-            let predictions = {};
-            try { predictions = JSON.parse(script.textContent); } catch (err) { return; }
-            if (!predictions[eventId]) return;
-
-            const template = document.createElement('template');
-            template.innerHTML = predictions[eventId];
-            const replacement = template.content.firstElementChild;
-            if (!replacement || replacement.id !== node.id) return;
-
-            morph(node, replacement, null);
+            inflight.set(node.id, (inflight.get(node.id) || 0) + 1);
+            const edges = graph.key === null ? null : graph.edges[graph.key];
+            const next = edges ? edges[eventId.slice(prefix.length)] : undefined;
+            if (next === undefined || !show(node, graph, next, reset)) {
+                // Where this leads is up to the server, and so is everything after it
+                graph.key = null;
+                return node.id;
+            }
             // Until the server answers (its HTML doesn't have this), for styling if wanted
             node.setAttribute('data-predicted', '');
-            return;
+            return node.id;
+        }
+        return null;
+    }
+
+    // An event of the component was answered (or failed)
+    function release(id) {
+        inflight.set(id, inflight.get(id) - 1);
+    }
+
+    // Once the component's last event in flight is answered, the server has the last word
+    function settle(id) {
+        if (inflight.get(id) > 0) return;
+        inflight.delete(id);
+        const data = deferred.get(id);
+        deferred.delete(id);
+        if (data) apply(data);
+
+        // Nothing from the server replaced the guess (the event failed, say): go back to the
+        // state the server last rendered
+        const node = document.getElementById(id);
+        const graph = graphs.get(id);
+        if (node && graph && node.hasAttribute('data-predicted')) {
+            show(node, graph, 0);
+            node.removeAttribute('data-predicted');
         }
     }
 
     function fire(el, eventId) {
-        predict(el, eventId);
         const submit = el.tagName === 'FORM' && eventId.endsWith('-submit');
-        triggerEvent(eventId, eventData(el), { root: el, submit }, el);
+        // The event's data first: showing where it leads may change the fields
+        const payload = eventData(el);
+        const reset = { root: el, submit };
+        const owner = predict(el, eventId, reset);
+        triggerEvent(eventId, payload, reset, el, owner);
     }
 
     function handle(el, eventId, e) {
@@ -875,8 +982,13 @@ window.Domino = (() => {
     function swap(doc) {
         const scripts = new Set(document.scripts);
         latest.clear();
+        // The new page's components and their states, read from its HTML before it's shown
+        const found = readGraphs(doc.documentElement);
 
         morph(document.documentElement, doc.documentElement, { root: document.documentElement, submit: true });
+        graphs.clear();
+        deferred.clear();
+        found.forEach(installGraph);
         document.documentElement.setAttribute('data-domino-loading', '');
         shown = location.pathname + location.search;
 
@@ -927,6 +1039,7 @@ window.Domino = (() => {
 
     document.addEventListener('DOMContentLoaded', () => {
         latency = readLatency();
+        readGraphs(document).forEach(installGraph);
         listen();
         scheduleAfterEvents();
         connect();

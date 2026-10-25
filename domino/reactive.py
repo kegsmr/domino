@@ -39,6 +39,10 @@ class Dependency:
 
 	def depend(self):
 
+		# A prediction's reads don't subscribe anything; the real render's do
+		if getattr(_state, "overlay", None) is not None:
+			return
+
 		component = current_component()
 		if component is None:
 			return
@@ -191,15 +195,27 @@ def schedule(component):
 	component.refresh()
 
 
-@contextmanager
-def predicting():
+class predicting:
 	"""Within the block, State changes are kept aside (and dropped after), so a handler can be
-	run to see what it would change without changing anything."""
+	run to see what it would change without changing anything. `values` ({State: value}, a dict
+	this keeps the changes in) are what those States read as meanwhile. Gives that dict.
 
-	_state.overlay = {}
-	try:
-		yield
-	finally:
+	A class rather than @contextmanager: predicting a component's states runs it many times."""
+
+
+	def __init__(self, values=None):
+
+		self.overlay = {} if values is None else values
+
+
+	def __enter__(self):
+
+		_state.overlay = self.overlay
+		return self.overlay
+
+
+	def __exit__(self, *error):
+
 		_state.overlay = None
 
 

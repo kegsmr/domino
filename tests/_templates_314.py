@@ -267,7 +267,8 @@ def test_optimistic_predictions_for_a_template_counter():
 
 	_, _, page = load(app)
 	script = page.split("data-domino-predict>")[1].split("</script>")[0]
-	predictions = json.loads(script)
+	graph = json.loads(script)
 
-	assert len(predictions) == 1
-	assert "Count: 1" in next(iter(predictions.values()))
+	# A counter can go up forever, so just the next step
+	assert len(graph["edges"]) == 1 and len(graph["states"]) == 2
+	assert "Count: 1" in graph["states"][1]

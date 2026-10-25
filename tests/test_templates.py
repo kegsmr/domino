@@ -294,10 +294,11 @@ def test_predictions_for_a_paired_template_counter(tmp_path):
 	module = import_file(write(tmp_path / "counter.py", COUNTER))
 
 	_, _, _, page = serve(tmp_path, module.Counter())
-	predictions = json.loads(page.split("data-domino-predict>")[1].split("</script>")[0])
+	graph = json.loads(page.split("data-domino-predict>")[1].split("</script>")[0])
 
-	assert len(predictions) == 1
-	assert "<p>Count: 1</p>" in next(iter(predictions.values()))
+	# A counter can go up forever, so just the next step
+	assert len(graph["edges"]) == 1 and len(graph["states"]) == 2
+	assert "<p>Count: 1</p>" in graph["states"][1]
 
 
 def test_on_with_several_events_and_debounce(tmp_path):

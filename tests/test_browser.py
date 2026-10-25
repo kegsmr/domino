@@ -477,6 +477,147 @@ def test_wrong_prediction_is_corrected_by_the_server(serve, page):
 	assert page.errors == []
 
 
+def instant_component(name):
+	"""The instance of a component class of the instant example on its one open page."""
+
+	module = sys.modules["example_instant"]
+	(page_state,) = module.app.page_store.pages.values()
+
+	return next(component for component in page_state.components if type(component).__name__ == name)
+
+
+# Clicks a button (picked by a selector, and text if given) and reports what the component shows
+# straight after, in the same task: before any answer from the server could have arrived
+CLICK_AND_READ = """([button, text, shown]) => {
+	const buttons = Array.from(document.querySelectorAll(button));
+	const target = text ? buttons.find((el) => el.textContent.includes(text)) : buttons[0];
+	const started = performance.now();
+	target.click();
+	return {
+		shown: document.querySelector(shown).textContent.trim(),
+		ms: performance.now() - started,
+		loading: document.documentElement.hasAttribute('data-domino-loading'),
+	};
+}"""
+
+
+def test_many_clicks_in_a_row_show_at_once_and_the_server_agrees(serve, page):
+
+	sent = sent_events(page)
+	page.goto(serve("instant"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	# Tabs: every click shows its tab at once, though no answer has come back yet
+	started = time.monotonic()
+	for tab in ["How", "Truth", "Overview", "Truth", "How"]:
+		result = page.evaluate(CLICK_AND_READ, ["[role=tab]", tab, "[role=tabpanel]"])
+		expected = {"Overview": "renders the states", "How": "follows those states", "Truth": "source of truth"}[tab]
+		assert expected in result["shown"]
+		assert result["ms"] < 100 and result["loading"]
+
+	# Stepper: five clicks on +, each shown at once, then + is disabled at the top
+	for value in range(1, 6):
+		result = page.evaluate(CLICK_AND_READ, ["button[aria-label=More]", None, ".Stepper output"])
+		assert result["shown"] == str(value)
+		assert result["ms"] < 100
+	assert page.locator("button[aria-label=More]").is_disabled()
+
+	# The menu's options exist only while it's open: open, pick, open, pick
+	page.evaluate(CLICK_AND_READ, [".SortMenu > button", None, ".SortMenu"])
+	assert page.evaluate(CLICK_AND_READ, ["[role=menuitemradio]", "Oldest", ".SortMenu"])["shown"] == "Sort: Oldest ▾"
+	page.evaluate(CLICK_AND_READ, [".SortMenu > button", None, ".SortMenu"])
+	assert page.evaluate(CLICK_AND_READ, ["[role=menuitemradio]", "Most liked", ".SortMenu"])["shown"] == "Sort: Most liked ▾"
+
+	# All of it before the first answer could arrive
+	assert time.monotonic() - started < 1.4
+	assert page.evaluate("document.querySelectorAll('[data-predicted]').length") == 3
+
+	# The server got every event, in order, and ends up where the page already is
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=10000)
+	assert len(sent) == 14
+	assert instant_component("Tabs").active == 1
+	assert instant_component("Stepper").value == 5
+	assert instant_component("SortMenu").choice == "Most liked" and instant_component("SortMenu").open is False
+	assert "follows those states" in page.locator("[role=tabpanel]").inner_text()
+	assert page.locator(".Stepper output").inner_text() == "5"
+	assert page.locator(".SortMenu").inner_text().strip() == "Sort: Most liked ▾"
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_clicks_keep_showing_at_once_after_the_server_answers(serve, page):
+
+	page.goto(serve("instant"))
+	page.evaluate("Domino.enableLatencySim(400)")
+
+	page.get_by_label("Next").click()
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=4000)
+	assert page.locator("figure").inner_text() == "Noon (2/4)"
+
+	# The answer brought the states from where the server is now
+	result = page.evaluate(CLICK_AND_READ, ["button[aria-label=Next]", None, "figure"])
+	assert result["shown"] == "Dusk (3/4)" and result["loading"]
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=4000)
+	assert instant_component("Carousel").index == 2
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_the_server_corrects_states_that_turned_out_wrong(serve, page):
+
+	page.goto(serve("instant"))
+	stepper = instant_component("Stepper")
+
+	# A change the browser hasn't heard about (no push), so the states it has are out of date
+	type(stepper).value._of(stepper)._value = 3
+
+	page.evaluate("Domino.enableLatencySim(600)")
+	assert page.evaluate(CLICK_AND_READ, ["button[aria-label=More]", None, ".Stepper output"])["shown"] == "1"
+	assert page.evaluate(CLICK_AND_READ, ["button[aria-label=More]", None, ".Stepper output"])["shown"] == "2"
+
+	# The answer to the last click is what the server says: 3 + 2
+	page.wait_for_function("document.querySelector('.Stepper output').textContent.trim() === '5'", timeout=4000)
+	assert not page.evaluate("document.querySelector('.Stepper').hasAttribute('data-predicted')")
+	assert page.locator("button[aria-label=More]").is_disabled()
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_rapid_clicks_on_an_unbounded_counter_end_right_under_latency(serve, page):
+
+	page.goto(serve("counter"))
+	page.evaluate("Domino.enableLatencySim(500)")
+	page.evaluate("() => { const button = document.querySelector('button'); for (let i = 0; i < 5; i++) button.click(); }")
+
+	# The first click shows at once (one step ahead is all a counter gets)
+	assert "Current Count: 1" in page.locator("p").inner_text()
+	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 5')", timeout=5000)
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=5000)
+	page.wait_for_timeout(300)
+	assert "Current Count: 5" in page.locator("p").inner_text()
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_a_failed_event_goes_back_to_what_the_server_showed(serve, page):
+
+	def failing(module):
+		# The page still has the states (the handler is predictable), but the server fails
+		module.app.handle_event = lambda page, event_id, data: ({"error": "Internal Server Error"}, 500)
+
+	page.goto(serve("instant", failing))
+	page.evaluate("Domino.enableLatencySim(400)")
+	page.evaluate("document.addEventListener('domino:error', (e) => e.preventDefault())")
+	assert page.evaluate(CLICK_AND_READ, ["button[aria-label=More]", None, ".Stepper output"])["shown"] == "1"
+	assert page.evaluate(CLICK_AND_READ, ["button[aria-label=More]", None, ".Stepper output"])["shown"] == "2"
+
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=4000)
+	assert page.locator(".Stepper output").inner_text() == "0"
+	page.evaluate("Domino.disableLatencySim()")
+	# Over HTTP the browser logs the 500s itself
+	assert [error for error in page.errors if "status of 500" not in error] == []
+
+
 @pytest.mark.mongo
 def test_accounts_sign_up_log_out_log_in_and_keep_private_notes(serve, page):
 
@@ -1114,3 +1255,22 @@ def test_too_large_upload_shows_an_error(serve, page):
 	assert page.locator("ul img").count() == 0
 	assert page.locator("button[data-loading]").count() == 0
 	assert [error for error in page.errors if "413" not in error and "Domino event error" not in error] == []
+
+
+def test_a_page_swapped_in_shows_clicks_instantly(serve, page):
+
+	# The new page's predicted states come with it, as on a page load
+	page.goto(serve("functional"))
+	page.get_by_role("link", name="Counter").click()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Counter'", timeout=5000)
+
+	page.evaluate("Domino.enableLatencySim(1500)")
+	# An unbounded count is predicted one step ahead
+	page.get_by_text("Click me").click()
+	# Well before the 1.5 s round trip
+	page.wait_for_function("document.querySelector('main p').textContent.includes('Clicked 1 times')", timeout=700)
+
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=8000)
+	assert "Clicked 1 times" in page.inner_text("main p")
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []

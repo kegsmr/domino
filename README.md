@@ -556,7 +556,26 @@ See `examples/settings/`.
 
 ### Instant updates
 
-Handlers that only change their component's own `State` with plain expressions — `self.count += 1`, `self.open = not self.open`, `if len(self.items) < 3: ...` — feel instant even on a slow connection, with nothing to configure. When the server renders such a component it also renders how it will look after each of those handlers and ships that inside the component (inert JSON); the browser shows it the moment the user clicks, and the server's real answer then confirms it or puts it right. Domino decides which handlers qualify by reading their code: anything that calls functions (like `messages.insert(...)`), uses the event's value, or touches anything but the component's `State` is never run ahead of time. While a prediction is showing, the component has a `data-predicted` attribute. Set `optimistic = False` on a component class to turn it off (each prediction costs a render).
+Handlers that only change their component's own `State` with plain expressions — `self.count += 1`, `self.open = not self.open`, `if len(self.items) < 3: ...` — feel instant even on a slow connection, with nothing to configure. So do lambdas that only call such a method with plain values, like `on_click=lambda event, index=index: self.select(index)` (the method's parameters can be read like constants). Domino decides which handlers qualify by reading their code: anything that calls functions (like `messages.insert(...)`), uses the event's value, or touches anything but the component's `State` is never run ahead of time.
+
+When the server renders such a component it follows those handlers from its current state to every state they lead to, renders each state once, and ships them inside the component (inert JSON) with which event leads to which state. Menus, tabs, accordions, toggles, a stepper with bounds or a carousel have only a few states, so the browser can show any number of clicks in a row the moment they happen, without waiting for the server even once. The events still go to the server, in order, and the server stays the source of truth: its answer to the last click in flight confirms what's shown, or puts it right if something changed on the server meanwhile (answers to earlier clicks don't undo later ones). If an event fails, the component goes back to what the server last showed. While the page shows something the server hasn't confirmed, the component has a `data-predicted` attribute.
+
+A component whose states could go on forever (a counter) gets the states one click away instead, as do those with more than 16 states or more than 32 KB of HTML for them; set `optimistic_states = n` on the class to change the number. Set `optimistic = False` to turn it all off (each state costs a render on the server). See `examples/instant/`.
+
+```python
+class Tabs(t.div):
+
+	active = State(0)
+
+	def render(self):
+		return [
+			t.button(on_click=lambda event, index=index: self.select(index)) [name]
+			for index, name in enumerate(["Overview", "How", "Truth"])
+		] + [t.p() [f"Tab {self.active}"]]
+
+	def select(self, index):
+		self.active = index
+```
 
 ### Simulating a slow connection
 
@@ -604,7 +623,7 @@ Served through `app.asgi` (with uvicorn, which `app.run()` and `domino run` use)
 - The handshake is refused when its `Origin` isn't this site, so other sites can't open a socket with your visitors' cookies.
 - Moving to another page of the app (see [Moving between pages](#moving-between-pages)) keeps the socket: it's moved over to the new page, which also brings the cookies the browser had when it loaded that page. Over HTTP, the Server-Sent Events stream is reopened for the new page if it needs one.
 - An open socket keeps its page alive. If the page is gone (expired, or the server restarted), a page showing a live component reloads; others reload on their next event, as over HTTP.
-- Where the socket can't connect or keeps dropping (some proxies block WebSockets), the page falls back by itself after a few tries to POSTing each event to `/_domino/events` and, if it shows a live component, Server-Sent Events from `/_domino/stream`. That's also what pages use when the app is served as plain WSGI (`gunicorn app:app`, `flask run`), which keeps working as before.
+- Where the socket can't connect or keeps dropping (some proxies block WebSockets), the page falls back by itself after a few tries to POSTing each event to `/_domino/events` and, if it shows a live component, Server-Sent Events from `/_domino/stream`. That's also what pages use when the app is served as plain WSGI (`gunicorn app:app`, `flask run`), which keeps working as before. A tab sends its POSTs one at a time, so the server handles its events in the order they fired, as over the socket.
 - `{"domino": {"websocket": false}}` turns the socket off; pages then always use HTTP and Server-Sent Events.
 
 ## Deployment

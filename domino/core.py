@@ -24,7 +24,6 @@ from .settings import Settings, load_settings
 from .util import *
 from . import css, optimistic, reactive
 from .uploads import Uploads
-from .settings import script_json
 
 
 VOID_TAGS = [
@@ -203,6 +202,11 @@ class Page:
 	def register(self, event_id, element, callback):
 
 		self.events[event_id] = (element, callback)
+
+		# The events a component's render binds, so it can predict its own handlers
+		stack = render_stack()
+		if stack and event_id.startswith("event-"):
+			stack[-1][2].append((event_id, callback))
 
 
 	def subtree_events(self, root):
@@ -1197,53 +1201,39 @@ class Element:
 		return self
 
 
-	def _predict(self, page, indent):
-		"""Render this component as it would look after each of its predictable handlers
-		(see domino.optimistic), without changing its state. Done before the real render,
-		so the real render is what the component's children end up as."""
+	def _predict(self, page, indent, bound):
+		"""The states this component's predictable handlers lead to, each rendered once, and
+		which event leads where (see domino.optimistic.graph), or None. `bound` are the events
+		its real render() just bound. Rendering the predictions changes nothing the real render
+		made: its children, the events it bound, its subscriptions."""
 
-		if getattr(type(self), "optimistic", True) is False:
-			return {}
-		names = optimistic.predictable_methods(type(self))
-		if not names:
-			return {}
+		cls = type(self)
+		if getattr(cls, "optimistic", True) is False:
+			return None
+		callbacks = optimistic.own_callbacks(self, bound)
+		if not callbacks:
+			return None
 
-		# Predicting renders bind events too; the real render binds them again
+		children = self.__children__
+		content = self.content_root.__children__
+		embedded = self.__embedded__
 		events = dict(page.events)
-		predictions = {}
+
+		def render(overlay):
+			with reactive.predicting(overlay):
+				# Same formatting as the real render, so the browser patches the component
+				# in place instead of rebuilding it
+				html = self._render(indent=indent)
+			return html, self.__bound__
+
 		try:
-			for name in sorted(names)[:optimistic.MAX_PREDICTIONS]:
-				with reactive.predicting():
-					method = getattr(self, name)
-					try:
-						if accepts_argument(method):
-							method(None)
-						else:
-							method()
-						# Same formatting as the real render, so the browser patches the
-						# component in place instead of rebuilding it
-						predictions[name] = self._render(indent=indent)
-					except Exception:
-						# A prediction is only a preview; the real handler still runs on click
-						continue
+			return optimistic.graph(self, callbacks, render, getattr(cls, "optimistic_states", None))
 		finally:
+			self.__children__ = children
+			self.content_root.__children__ = content
+			self.__embedded__ = embedded
 			page.events.clear()
 			page.events.update(events)
-
-		return predictions
-
-
-	def _predictions_by_event(self, page, predictions):
-
-		if not predictions:
-			return {}
-
-		by_event = {}
-		for event_id, (_, callback) in page.subtree_events(self).items():
-			if getattr(callback, "__self__", None) is self and callback.__name__ in predictions:
-				by_event[event_id] = predictions[callback.__name__]
-
-		return by_event
 
 
 	def is_live(self):
@@ -1326,18 +1316,20 @@ class Element:
 						self.__pages__ = weakref.WeakSet()
 					self.__pages__.add(page)
 
-			predictions = {}
-			if page is not DEFAULT_PAGE and not reactive.is_predicting():
-				predictions = self._predict(page, indent)
-
-			# Subscriptions are rebuilt by whatever this render reads
-			reactive.forget(self)
+			# Subscriptions are rebuilt by whatever this render reads (a prediction's reads
+			# subscribe nothing, so the real render's stay)
+			predicting = reactive.is_predicting()
+			if not predicting:
+				reactive.forget(self)
 			self.__embedded__ = []
-			render_stack().append([self, 0])
+			# [component, events numbered so far, (event id, callback) bound by its render]
+			frame = [self, 0, []]
+			render_stack().append(frame)
 			try:
 				children = render()
 			finally:
 				render_stack().pop()
+			self.__bound__ = frame[2]
 
 			# render() may return its children instead of calling self([...])
 			if children is not None and children is not self:
@@ -1349,9 +1341,11 @@ class Element:
 				page.live = True
 				page.components.add(self)
 
-			predictions = self._predictions_by_event(page, predictions)
+			predictions = None
+			if page is not DEFAULT_PAGE and not predicting:
+				predictions = self._predict(page, indent, frame[2])
 		else:
-			predictions = {}
+			predictions = None
 
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):
@@ -1407,6 +1401,7 @@ class Element:
 		# components so the browser knows to open a stream
 		attributes.pop("live", None)
 		attributes.pop("optimistic", None)
+		attributes.pop("optimistic_states", None)
 		if self.is_live():
 			attributes["data_live"] = True
 
@@ -1489,10 +1484,10 @@ class Element:
 		if head:
 			inner += styles.place(level + 1, indent)
 
-		# How this component would look after each predictable handler, keyed by event id,
-		# for core.js to show instantly; inert JSON, so it costs the page nothing else
+		# The states this component's predictable handlers lead to, for core.js to show
+		# instantly; inert JSON, so it costs the page nothing else
 		if predictions:
-			inner += f"{indentation}{indent}<script type=\"application/json\" data-domino-predict>{script_json(predictions)}</script>{end}"
+			inner += f"{indentation}{indent}<script type=\"application/json\" data-domino-predict>{optimistic.script_json(predictions)}</script>{end}"
 
 		if inner:
 			html += f"{inner}"
