@@ -323,6 +323,70 @@ def test_a_page_id_alone_doesnt_act_as_its_user(monkeypatch):
 	assert seen == ["ada@example.com"]
 
 
+def test_a_page_id_alone_doesnt_get_its_users_pushes(asgi_server, monkeypatch):
+
+	import http.client
+	import json
+	import urllib.request
+
+	from websockets.sync.client import connect
+
+	import domino.tags as t
+	from domino import Collection, State, accounts
+	from domino.components import Document
+
+	monkeypatch.setattr(accounts, "users", Collection())
+	accounts._failures.clear()
+	accounts.create_user("ada@example.com", "correct horse")
+
+	class Inbox(t.div):
+
+		messages = State(0)
+
+		def render(self):
+			return [t.p() [f"{self.messages} private messages"], t.button(on_click=self.check) ["check"]]
+
+		def check(self):
+			pass
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+	app.config["DOMINO_SECURE_COOKIES"] = False
+
+	@app.route("/")
+	def index():
+		return Document() [Inbox(), accounts.LoginForm()]
+
+	server = asgi_server(app)
+
+	# Ada logs in (over HTTP, which sets her cookie) and loads a page
+	html = urllib.request.urlopen(server.url).read().decode()
+	login_page, _ = page_and_event(html)
+	submit = re.search(r'data-event-id="([^"]+-submit)"', html).group(1)
+	connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
+	body = json.dumps({"page_id": login_page, "event_id": submit, "data": {"form": {"email": "ada@example.com", "password": "correct horse"}}})
+	connection.request("POST", "/_domino/events", body, {"Content-Type": "application/json"})
+	response = connection.getresponse()
+	response.read()
+	cookie = response.getheader("Set-Cookie").split(";")[0]
+	request = urllib.request.Request(server.url, headers={"Cookie": cookie})
+	page_id, _ = page_and_event(urllib.request.urlopen(request).read().decode())
+
+	# A stranger with the id gets neither its socket nor its stream
+	with connect(f"{server.ws_url}?page={page_id}", open_timeout=5) as ws:
+		ws.send(json.dumps({"type": "hello", "page_id": page_id}))
+		assert json.loads(ws.recv(5)) == {"type": "expired"}
+	connection.request("GET", f"/_domino/stream?page={page_id}")
+	response = connection.getresponse()
+	response.read()
+	assert response.status == 404
+
+	# Ada does
+	with connect(f"{server.ws_url}?page={page_id}", open_timeout=5, additional_headers={"Cookie": cookie}) as ws:
+		ws.send(json.dumps({"type": "hello", "page_id": page_id}))
+		assert json.loads(ws.recv(5)) == {"type": "ready"}
+
+
 # Accounts ------------------------------------------------------------------------------------
 
 

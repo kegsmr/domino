@@ -119,7 +119,7 @@ class ASGIApp:
 		query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
 		page = self.app._get_page((query.get("page") or [None])[0])
 
-		if page is None:
+		if page is None or not may_use(self.app, handshake_environ(scope), page):
 			body = json.dumps({"error": "Unknown or expired page"}).encode()
 			await send({"type": "http.response.start", "status": 404, "headers": [(b"content-type", b"application/json")]})
 			await send({"type": "http.response.body", "body": body})
@@ -317,6 +317,12 @@ class Connection:
 		if page.cookie is not None:
 			self.environ["HTTP_COOKIE"] = page.cookie
 
+		# A signed-in user's page, for a browser that isn't signed in as them
+		if not may_use(self.app, self.environ, page):
+			await self.send({"type": "expired"})
+			await self.close(1000)
+			return
+
 		# Patches start from what this socket sent for the page; the browser forgets the rest too
 		self.patcher = Patcher() if patch and self.app.config["DOMINO_PATCHES"] else None
 
@@ -448,6 +454,17 @@ class Connection:
 			await self.raw_send({"type": "websocket.close", "code": code})
 		except (OSError, RuntimeError):
 			pass
+
+
+def may_use(app, environ, page):
+	"""Whether the browser whose request `environ` describes may use `page` (see Domino._may_use)."""
+
+	# Most pages aren't a signed-in user's; their session needn't be read
+	if page.user_id._value is None:
+		return True
+
+	with app.request_context(dict(environ)):
+		return app._may_use(page)
 
 
 def with_cookies(header, set_cookies):

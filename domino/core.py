@@ -911,11 +911,8 @@ class Domino(Flask):
 		browser, the same over every transport (HTTP POST or WebSocket). Call it in a request
 		context. It can block, so the WebSocket runs it in a worker thread."""
 
-		# A page acts as the user signed in when it was made, so its id alone mustn't be enough to
-		# act as them: the browser must still be signed in as that user (one signed out since, in
-		# another tab, say, reloads the page)
-		owner = page.user_id._value
-		if owner is not None and has_request_context() and session.get(SESSION_USER_KEY) != owner:
+		# One signed out since, in another tab, say, reloads the page
+		if has_request_context() and not self._may_use(page):
 			return {"error": "Unknown or expired page"}, 404
 
 		# Reactive changes the callback makes re-render their subscribers once the page
@@ -1018,7 +1015,7 @@ class Domino(Flask):
 		def stream():
 
 			page = self._get_page(request.args.get("page"))
-			if page is None:
+			if page is None or not self._may_use(page):
 				return jsonify({"error": "Unknown or expired page"}), 404
 
 			stream = page.open_stream()
@@ -1144,6 +1141,17 @@ class Domino(Flask):
 
 		# Ids come from the browser, which may send anything
 		return self.page_store.load(page_id) if page_id and isinstance(page_id, str) else None
+
+
+	def _may_use(self, page):
+		"""Whether the browser making the current request may use `page`. A page acts as the user
+		signed in when it was made, so its id alone (which access logs of /_domino/ws?page=...
+		keep) mustn't be enough to act as them or see what's pushed to them: the browser must
+		still be signed in as that user."""
+
+		owner = page.user_id._value
+
+		return owner is None or session.get(SESSION_USER_KEY) == owner
 
 
 	def _drop_page(self, page):
