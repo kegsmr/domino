@@ -15,4 +15,5 @@ setup(
 	python_requires=">=3.9",
 	install_requires=["Flask>=2.2", "pymongo>=4"],
 	extras_require={"test": ["pytest"]},
+	entry_points={"console_scripts": ["domino=domino.cli:main"]},
 )

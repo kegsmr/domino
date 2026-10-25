@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
@@ -9,9 +10,11 @@ from collections import OrderedDict
 from pathlib import Path
 
 from flask import *
+from flask.cli import load_dotenv as load_env_files
+from flask.helpers import get_debug_flag, get_load_dotenv
 from markupsafe import Markup, escape
 
-from .settings import load_settings
+from .settings import Settings, load_settings
 from .util import *
 from . import reactive
 
@@ -292,6 +295,54 @@ class Domino(Flask):
 
 		if self.settings.get("secret_key"):
 			self.secret_key = self.settings["secret_key"]
+
+
+	def run(self, host=None, port=None, debug=None, load_dotenv=True, **options):
+
+		# Like `meteor run`: in debug mode an app without a mongo.url setting gets a local
+		# MongoDB, started once in the parent process (the reloader's child inherits the URL).
+		# .env may set FLASK_DEBUG, so it's read first, as Flask does
+		if get_load_dotenv(load_dotenv):
+			load_env_files()
+
+		if debug is not None:
+			debug_mode = bool(debug)
+		elif "FLASK_DEBUG" in os.environ:
+			debug_mode = get_debug_flag()
+		else:
+			debug_mode = self.debug
+
+		in_child = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+		from_flask_cli = os.environ.get("FLASK_RUN_FROM_CLI") == "true"
+
+		if debug_mode and not in_child and not from_flask_cli:
+			self._start_dev_mongo(port or 5000)
+
+		return super().run(host=host, port=port, debug=debug, load_dotenv=load_dotenv, **options)
+
+
+	def _start_dev_mongo(self, app_port):
+
+		from . import devmongo
+
+		reason = devmongo.disabled_reason(self.settings)
+		if reason == "settings mongo.url":
+			devmongo.log("MongoDB: settings mongo.url")
+			return
+		if reason:
+			devmongo.log("MongoDB: disabled")
+			return
+
+		mongo = self.settings.get("mongo")
+		if not isinstance(mongo, dict):
+			mongo = self.settings["mongo"] = Settings()
+
+		version = str(mongo.get("version") or devmongo.DEFAULT_VERSION)
+		url = devmongo.start(self.root_path, devmongo.mongod_port(app_port), version)
+
+		os.environ["DOMINO_MONGO__URL"] = url
+		mongo["url"] = url
+		devmongo.log(f"MongoDB: {url}")
 
 
 	def _add_event_handler(self, route):
