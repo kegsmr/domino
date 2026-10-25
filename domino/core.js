@@ -1,4 +1,18 @@
 window.Domino = (() => {
+    const FIELDS = ['INPUT', 'SELECT', 'TEXTAREA'];
+    const TOGGLES = ['checkbox', 'radio', 'range', 'color', 'file', 'submit', 'button'];
+
+    // Event types we already listen for on the document
+    const listening = new Set();
+
+    // Pending debounce timers per element, and elements with a scheduled after()
+    const debounceTimers = new WeakMap();
+    const scheduled = new WeakSet();
+
+    // Newest update applied per component. The server numbers updates in the order it made
+    // them, so a response that arrives late can't overwrite a newer one.
+    const latest = new Map();
+
     function pageId() {
         const root = document.querySelector('[data-domino-page]');
         return root ? root.dataset.dominoPage : null;
@@ -10,7 +24,7 @@ window.Domino = (() => {
         // The element's own value (checkboxes and radios report checked)
         if (el.type === 'checkbox' || el.type === 'radio') {
             data.value = el.checked;
-        } else if (['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) {
+        } else if (FIELDS.includes(el.tagName)) {
             data.value = el.value;
         }
 
@@ -27,7 +41,115 @@ window.Domino = (() => {
         return data;
     }
 
-    async function triggerEvent(eventId, payload = {}) {
+    // Update `from` in place to match `to`, touching only what changed. Fields keep what the
+    // user entered unless the server changed their value, or they're inside the element that
+    // fired the event (`reset`): the server has handled that, so its state wins. A field the
+    // user is still typing in is left alone unless the event was a submit.
+    function morph(from, to, reset) {
+        if (from.nodeType !== to.nodeType || from.nodeName !== to.nodeName) {
+            from.replaceWith(to);
+            return;
+        }
+        if (from.nodeType !== Node.ELEMENT_NODE) {
+            if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue;
+            return;
+        }
+
+        const field = FIELDS.includes(from.tagName);
+        const serverChanged = field && serverValue(from) !== serverValue(to);
+
+        for (const { name } of Array.from(from.attributes)) {
+            if (!to.hasAttribute(name)) from.removeAttribute(name);
+        }
+        for (const { name, value } of Array.from(to.attributes)) {
+            if (from.getAttribute(name) !== value) from.setAttribute(name, value);
+        }
+
+        morphChildren(from, to, reset);
+
+        const focused = from === document.activeElement;
+        const typing = focused && (from.tagName === 'TEXTAREA' || (from.tagName === 'INPUT' && !TOGGLES.includes(from.type)));
+        const resetting = reset && reset.root.contains(from) && (reset.submit || !typing);
+        if (field && (resetting || (serverChanged && !focused))) {
+            if (from.type === 'checkbox' || from.type === 'radio') {
+                from.checked = to.hasAttribute('checked');
+            } else if (from.tagName === 'SELECT') {
+                const selected = to.querySelector('option[selected]');
+                from.value = selected ? selected.value : (from.options[0] || {}).value;
+            } else {
+                from.value = from.tagName === 'TEXTAREA' ? to.textContent : (to.getAttribute('value') || '');
+            }
+        }
+    }
+
+    // The value the server rendered into a field (not what the user has typed since)
+    function serverValue(el) {
+        if (el.tagName === 'TEXTAREA') return el.textContent;
+        if (el.tagName === 'SELECT') {
+            const selected = el.querySelector('option[selected]');
+            return selected ? selected.getAttribute('value') : null;
+        }
+        return el.getAttribute('value') + '|' + el.hasAttribute('checked');
+    }
+
+    function morphChildren(from, to, reset) {
+        // Children with an id are matched by id, so reordered lists keep their nodes
+        const keyed = new Map();
+        for (const child of from.children) {
+            if (child.id) keyed.set(child.id, child);
+        }
+
+        let current = from.firstChild;
+        for (const next of Array.from(to.childNodes)) {
+            let match = null;
+            if (next.nodeType === Node.ELEMENT_NODE && next.id && keyed.has(next.id)) {
+                match = keyed.get(next.id);
+                keyed.delete(next.id);
+            } else if (current && current.nodeName === next.nodeName && !(current.id && current.id !== next.id)) {
+                match = current;
+            }
+
+            if (match === null) {
+                from.insertBefore(next, current);
+                continue;
+            }
+            if (match === current) {
+                current = current.nextSibling;
+            } else {
+                from.insertBefore(match, current);
+            }
+            morph(match, next, reset);
+        }
+
+        while (current) {
+            const following = current.nextSibling;
+            current.remove();
+            current = following;
+        }
+    }
+
+    function apply(data, reset) {
+        if (!data.id || !data.html || latest.get(data.id) >= data.version) return;
+        latest.set(data.id, data.version);
+
+        const target = document.getElementById(data.id);
+        if (!target) return;
+
+        const template = document.createElement('template');
+        template.innerHTML = data.html;
+        const replacement = template.content.firstElementChild;
+        if (!replacement) return;
+
+        morph(target, replacement, reset);
+
+        const updated = document.getElementById(data.id);
+        if (updated) {
+            listen(updated);
+            scheduleAfterEvents(updated);
+        }
+    }
+
+    async function triggerEvent(eventId, payload = {}, reset = null) {
         try {
             const response = await fetch('/_domino/events', {
                 method: 'POST',
@@ -39,50 +161,88 @@ window.Domino = (() => {
                 window.location.reload();
                 return;
             }
-            const data = await response.json();
-            const target = data.id && document.getElementById(data.id);
-            if (target && data.html) target.outerHTML = data.html;
+            apply(await response.json(), reset);
         } catch (err) {
             console.error('Domino event error:', err);
         }
     }
 
-    function bindEvents() {
-        document.querySelectorAll('[data-event-id]').forEach(el => {
-            if (el.dataset.bound) return;
-            el.dataset.bound = true;
-
-            const eventId = el.dataset.eventId;
-            const eventType = eventId.split('-').pop();
-
-            el.addEventListener(eventType, async (e) => {
-                if (eventType === 'submit') e.preventDefault();
-                await triggerEvent(eventId, eventData(el));
-                bindEvents(); // rebind new elements
-            });
-        });
+    function fire(el, eventId) {
+        const submit = el.tagName === 'FORM' && eventId.endsWith('-submit');
+        triggerEvent(eventId, eventData(el), { root: el, submit });
     }
 
-    function scheduleAfterEvents() {
-        document.querySelectorAll('[data-after-id]').forEach(el => {
-            if (el.dataset.afterBound) return;
-            el.dataset.afterBound = true;
+    function handle(el, eventId, e) {
+        const type = e.type;
+        if (type === 'submit') e.preventDefault();
 
-            const eventId = el.dataset.afterId;
-            const delay = parseInt(eventId.split('-').pop());
+        const delay = parseInt(el.getAttribute('data-debounce-' + type), 10);
+        if (!delay) {
+            fire(el, eventId);
+            return;
+        }
 
-            setTimeout(async () => {
-                await triggerEvent(eventId);
-                bindEvents();
-                scheduleAfterEvents();
+        // Wait until the user pauses, then send only the latest value
+        const timers = debounceTimers.get(el) || new Map();
+        debounceTimers.set(el, timers);
+        clearTimeout(timers.get(eventId));
+        timers.set(eventId, setTimeout(() => {
+            timers.delete(eventId);
+            fire(el, eventId);
+        }, delay));
+    }
+
+    // One listener per event type on the document; it finds the bound elements itself
+    function onEvent(e) {
+        let el = e.target;
+        while (el && el.nodeType === Node.ELEMENT_NODE) {
+            const ids = el.getAttribute('data-event-id');
+            if (ids) {
+                for (const eventId of ids.split(' ')) {
+                    if (eventId.split('-').pop() === e.type) handle(el, eventId, e);
+                }
+            }
+            // Events like focus or mouseenter belong only to their own element
+            if (!e.bubbles) return;
+            el = el.parentElement;
+        }
+    }
+
+    function within(root, selector) {
+        const found = Array.from(root.querySelectorAll(selector));
+        if (root.matches && root.matches(selector)) found.unshift(root);
+        return found;
+    }
+
+    function listen(root = document) {
+        for (const el of within(root, '[data-event-id]')) {
+            for (const eventId of el.getAttribute('data-event-id').split(' ')) {
+                const type = eventId.split('-').pop();
+                if (listening.has(type)) continue;
+                listening.add(type);
+                document.addEventListener(type, onEvent, true);
+            }
+        }
+    }
+
+    function scheduleAfterEvents(root = document) {
+        for (const el of within(root, '[data-after-id]')) {
+            if (scheduled.has(el)) continue;
+            scheduled.add(el);
+
+            const delay = parseInt(el.getAttribute('data-after-id').split('-').pop(), 10);
+            setTimeout(() => {
+                scheduled.delete(el);
+                // Skip elements that were removed while waiting
+                if (el.isConnected) triggerEvent(el.getAttribute('data-after-id'));
             }, delay);
-        });
+        }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        bindEvents();
+        listen();
         scheduleAfterEvents();
     });
 
-    return { bindEvents, scheduleAfterEvents, triggerEvent };
+    return { listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen };
 })();

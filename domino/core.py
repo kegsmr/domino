@@ -41,6 +41,7 @@ class Page:
 		self.id = str(uuid.uuid4())
 		self.events = {}
 		self.lock = threading.RLock()  # serializes events for this page
+		self.version = 0  # bumped per update, so the browser can drop stale responses
 		self.touch()
 
 
@@ -238,10 +239,12 @@ class Domino(Flask):
 					return jsonify({"id": None, "html": None})
 
 				page.unregister_subtree(result)
+				page.version += 1
 
 				return jsonify({
 					"id": result.id(),
-					"html": result._render()
+					"html": result._render(),
+					"version": page.version
 				})
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
@@ -446,11 +449,21 @@ class Element:
 		return f"{kind}-{self.id()}-{suffix}"
 
 
-	def bind(self, event, callback):
+	def bind(self, event, callback, debounce=None):
 
-		event_id = self._event_id("event", event.lower())
+		event = event.lower()
+		event_id = self._event_id("event", event)
 
-		self.configure(data_event_id=event_id)
+		# An element can have several events, kept as a space-separated list
+		event_ids = (self.__attributes__.get("data_event_id") or "").split()
+		if event_id not in event_ids:
+			event_ids.append(event_id)
+		self.configure(data_event_id=" ".join(event_ids))
+
+		# Wait until the user pauses for `debounce` ms before sending (e.g. typing)
+		if debounce:
+			self.configure(**{f"data_debounce_{event}": int(debounce)})
+
 		Page.current().register(event_id, self, callback)
 
 		return self

@@ -40,6 +40,10 @@ t.button(class_="btn btn-primary", aria_pressed="false", style={"font_weight": "
 
 Submit events don't reload the page. See `examples/todo.py`.
 
+`bind(event, callback, debounce=ms)` waits until the user pauses before sending, which suits `"input"` events (see `examples/search.py`). An element can have several events.
+
+Updates are patched into the page in place rather than replacing the component's HTML, so focus, the caret and anything the user is typing survive a re-render. Form fields keep what the user entered unless the server changes their value, or they belong to the element whose event was just handled (a submitted form is reset to what the server renders).
+
 ## Deployment
 
 Components and their event handlers live in the memory of the server process that rendered the page. Each page load gets its own state, which expires after `DOMINO_PAGE_TTL` seconds of inactivity (default 1800). At most `DOMINO_MAX_PAGES` pages are kept (default 1000); when a page has expired, the browser reloads it.
