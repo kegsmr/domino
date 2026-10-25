@@ -55,7 +55,7 @@ class Domino(Flask):
 
 	def _add_static_route(self, route, data):
 
-		self.add_url_rule(route, route, lambda: data, methods=["GET"])
+		self.add_url_rule(route, route, lambda: Response(data, mimetype="text/javascript"), methods=["GET"])
 
 
 	def route(self, rule, **options):
@@ -88,9 +88,9 @@ class Domino(Flask):
 		return decorator
 
 
-	def style(self, href="", external=False, **kwargs):
+	def style(self, href="", external=False):
 
-		self.stylesheet = Style(self, href, external, **kwargs)
+		self.stylesheet = Style(self, href, external)
 
 		return self.stylesheet
 
