@@ -20,6 +20,18 @@ VOID_TAGS = [
 RAW_TEXT_TAGS = ["script", "style"]
 
 
+_render_state = threading.local()
+
+
+def render_stack():
+	"""Components whose render() is running in this thread, innermost last."""
+
+	if not hasattr(_render_state, "stack"):
+		_render_state.stack = []
+
+	return _render_state.stack
+
+
 class Page:
 	"""Event registry for one rendered page (one page load in one browser tab)."""
 
@@ -28,6 +40,7 @@ class Page:
 
 		self.id = str(uuid.uuid4())
 		self.events = {}
+		self.lock = threading.RLock()  # serializes events for this page
 		self.touch()
 
 
@@ -71,6 +84,80 @@ class Page:
 DEFAULT_PAGE = Page()
 
 
+class PageStore:
+	"""Where Domino keeps pages between requests.
+
+	Pages hold live Python objects (components and their callbacks), so a store
+	must keep them in this process or be able to serialize them. Subclass this
+	and pass `Domino(__name__, page_store=...)` to change how pages are kept.
+	"""
+
+
+	def save(self, page):
+		raise NotImplementedError
+
+
+	def load(self, page_id):
+		"""Return the page (marking it as used) or None if unknown or expired."""
+		raise NotImplementedError
+
+
+	def delete(self, page_id):
+		raise NotImplementedError
+
+
+	def prune(self, ttl, max_pages):
+		"""Drop pages idle for more than `ttl` seconds, then the oldest beyond `max_pages`."""
+		raise NotImplementedError
+
+
+class MemoryPageStore(PageStore):
+	"""Keeps pages in this process. With several worker processes, use sticky sessions."""
+
+
+	def __init__(self):
+
+		self.pages = {}
+		self.lock = threading.Lock()
+
+
+	def save(self, page):
+
+		with self.lock:
+			self.pages[page.id] = page
+
+
+	def load(self, page_id):
+
+		with self.lock:
+			page = self.pages.get(page_id)
+			if page:
+				page.touch()
+
+		return page
+
+
+	def delete(self, page_id):
+
+		with self.lock:
+			self.pages.pop(page_id, None)
+
+
+	def prune(self, ttl, max_pages):
+
+		with self.lock:
+			cutoff = time.monotonic() - ttl
+			for page_id, page in list(self.pages.items()):
+				if page.last_access < cutoff:
+					del self.pages[page_id]
+
+			excess = len(self.pages) - max_pages
+			if excess > 0:
+				oldest = sorted(self.pages.values(), key=lambda page: page.last_access)
+				for page in oldest[:excess]:
+					del self.pages[page.id]
+
+
 class Event:
 	"""What the browser sent with an event: the element's value and its form's fields."""
 
@@ -105,15 +192,14 @@ class Event:
 class Domino(Flask):
 
 
-	def __init__(self, *args, **kwargs):
+	def __init__(self, *args, page_store: PageStore = None, **kwargs):
 
 		super().__init__(*args, **kwargs)
 
 		self.config.setdefault("DOMINO_PAGE_TTL", 30 * 60)  # seconds of inactivity
 		self.config.setdefault("DOMINO_MAX_PAGES", 1000)
 
-		self._pages = {}
-		self._pages_lock = threading.Lock()
+		self.page_store = page_store or MemoryPageStore()
 
 		with open(Path(__file__).parent / 'core.js', encoding='utf-8') as js_file:
 			CORE_JS = js_file.read()
@@ -133,28 +219,30 @@ class Domino(Flask):
 			page = self._get_page(data.get("page_id")) or DEFAULT_PAGE
 			event_id = data.get("event_id")
 
-			event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
-			if event is None:
-				return jsonify({"error": "Unknown or expired event"}), 404
+			with page.lock:
 
-			g.domino_page = page
+				event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
+				if event is None:
+					return jsonify({"error": "Unknown or expired event"}), 404
 
-			_, callback = event
+				g.domino_page = page
 
-			if accepts_argument(callback):
-				result = callback(Event.from_request(event_id, data.get("data")))
-			else:
-				result = callback()
+				_, callback = event
 
-			if not isinstance(result, Element):
-				return jsonify({"id": None, "html": None})
+				if accepts_argument(callback):
+					result = callback(Event.from_request(event_id, data.get("data")))
+				else:
+					result = callback()
 
-			page.unregister_subtree(result)
+				if not isinstance(result, Element):
+					return jsonify({"id": None, "html": None})
 
-			return jsonify({
-				"id": result.id(),
-				"html": result._render()
-			})
+				page.unregister_subtree(result)
+
+				return jsonify({
+					"id": result.id(),
+					"html": result._render()
+				})
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
 
@@ -163,9 +251,8 @@ class Domino(Flask):
 
 		page = Page()
 
-		with self._pages_lock:
-			self._pages[page.id] = page
-			self._prune_pages()
+		self.page_store.save(page)
+		self._prune_pages()
 
 		g.domino_page = page
 
@@ -174,34 +261,19 @@ class Domino(Flask):
 
 	def _get_page(self, page_id):
 
-		with self._pages_lock:
-			self._prune_pages()
-			page = self._pages.get(page_id)
-			if page:
-				page.touch()
+		self._prune_pages()
 
-		return page
+		return self.page_store.load(page_id) if page_id else None
 
 
 	def _drop_page(self, page):
 
-		with self._pages_lock:
-			self._pages.pop(page.id, None)
+		self.page_store.delete(page.id)
 
 
 	def _prune_pages(self):
 
-		# Caller must hold self._pages_lock
-		cutoff = time.monotonic() - self.config["DOMINO_PAGE_TTL"]
-		for page_id, page in list(self._pages.items()):
-			if page.last_access < cutoff:
-				del self._pages[page_id]
-
-		excess = len(self._pages) - self.config["DOMINO_MAX_PAGES"]
-		if excess > 0:
-			oldest = sorted(self._pages.values(), key=lambda page: page.last_access)
-			for page in oldest[:excess]:
-				del self._pages[page.id]
+		self.page_store.prune(self.config["DOMINO_PAGE_TTL"], self.config["DOMINO_MAX_PAGES"])
 
 
 	def _add_static_route(self, route, data):
@@ -360,9 +432,23 @@ class Element:
 		return self
 
 
+	def _event_id(self, kind, suffix):
+
+		# Inside a component's render(), number events per component so the
+		# same button gets the same event id every time it's re-rendered;
+		# clicks sent from the previous render then still find their handler
+		stack = render_stack()
+		if stack:
+			frame = stack[-1]
+			frame[1] += 1
+			return f"{kind}-{frame[0].id()}-{frame[1]}-{suffix}"
+
+		return f"{kind}-{self.id()}-{suffix}"
+
+
 	def bind(self, event, callback):
 
-		event_id = f"event-{self.id()}-{event.lower()}"
+		event_id = self._event_id("event", event.lower())
 
 		self.configure(data_event_id=event_id)
 		Page.current().register(event_id, self, callback)
@@ -372,7 +458,7 @@ class Element:
 
 	def after(self, delay: int, func):
 
-		event_id = f"after-{self.id()}-{delay}"
+		event_id = self._event_id("after", delay)
 
 		self.configure(data_after_id=event_id)
 		Page.current().register(event_id, self, func)
@@ -383,7 +469,11 @@ class Element:
 	def _render(self, level=0, indent=4) -> str:
 
 		if hasattr(self, 'render'):
-			self.render()
+			render_stack().append([self, 0])
+			try:
+				self.render()
+			finally:
+				render_stack().pop()
 
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):

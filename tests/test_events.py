@@ -87,7 +87,7 @@ def test_events_do_not_accumulate_on_rerender():
 		event_id = data["html"].split('data-event-id="')[1].split('"')[0]
 
 	assert "Count: 50" in data["html"]
-	assert len(app._pages[page_id].events) == 1
+	assert len(app.page_store.pages[page_id].events) == 1
 
 
 def test_pages_are_isolated():
@@ -121,7 +121,7 @@ def test_pages_expire_and_are_capped():
 
 	for _ in range(10):
 		load(client)
-	assert len(app._pages) == 3
+	assert len(app.page_store.pages) == 3
 
 	app.config["DOMINO_PAGE_TTL"] = -1
 	page_id, event_id = load(client)
@@ -134,4 +134,4 @@ def test_routes_without_events_keep_no_page():
 	client = app.test_client()
 
 	assert client.get("/plain").get_data(as_text=True) == "plain"
-	assert app._pages == {}
+	assert app.page_store.pages == {}
