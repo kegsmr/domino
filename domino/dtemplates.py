@@ -130,11 +130,23 @@ def file_format(path, setting=None):
 	with open(path, encoding="utf-8") as file:
 		source = file.read()
 	kind = source_format(path, source, setting)
-	if kind == "domino" and DEFINITION_START.match(source):
+	if kind == "domino" and DEFINITION_START.match(source) and not is_page_path(path):
 		kind = "components"
 	_formats[path] = (mtime, kind)
 
 	return kind
+
+
+# The apps' pages folders (see TemplateFinder), so a page is known as one with or without an app
+pages_folders = set()
+
+
+def is_page_path(path):
+	"""Whether `path` is a page template (see TemplateFinder.is_page)."""
+
+	from .templates import is_page_template
+
+	return any(is_page_template(path, folder) for folder in pages_folders)
 
 
 def root_name(expression):
@@ -744,15 +756,16 @@ VALUE, ATTRIBUTE_OP, CLASS, STYLE, EVENTS, IF, EACH, COMPONENT, SLOT = range(9)
 class Definition:
 	"""A component's markup: <TodoList class="x">...</TodoList> at the top level of a file."""
 
-	__slots__ = ("name", "where", "ops", "root")
+	__slots__ = ("name", "where", "ops", "root", "document")
 
 
-	def __init__(self, name, where, ops, root):
+	def __init__(self, name, where, ops, root, document=False):
 
 		self.name = name
 		self.where = where
 		self.ops = ops
 		self.root = root  # (static [(name, value)], bound [(name, function)], events, debounce)
+		self.document = document  # its markup is a whole <html> document (a layout)
 
 
 class Compiled:
@@ -766,6 +779,7 @@ class Compiled:
 		self.ops = None
 		self.document = False
 		self.wrap = False  # Meteor-style <head> and <body> without <html>
+		self.single = None  # a page that is one component (<Layout title="About">...</Layout>): its name
 
 
 def parse_file(path, source=None):
@@ -784,8 +798,9 @@ def parse_file(path, source=None):
 	nodes = Parser(source, path).parse()
 	compiled = Compiled(path)
 
-	first = next((node for node in nodes if not (isinstance(node, Text) and node.blank())), None)
-	if isinstance(first, Tag) and first.component:
+	top = [node for node in nodes if not (isinstance(node, Text) and node.blank())]
+	first = top[0] if top else None
+	if isinstance(first, Tag) and first.component and not is_page_path(path):
 		for node in nodes:
 			if isinstance(node, Text) and node.blank():
 				continue
@@ -808,6 +823,8 @@ def parse_file(path, source=None):
 	tags = {node.name.lower() for node in nodes if isinstance(node, Tag)}
 	compiled.document = any(isinstance(node, Raw) for node in nodes) or bool(tags & {"html", "head", "body"})
 	compiled.wrap = "html" not in tags and bool(tags & {"head", "body"})
+	if len(top) == 1 and isinstance(first, Tag) and first.component and not first.directive():
+		compiled.single = first.name
 
 	return compiled
 
@@ -846,9 +863,28 @@ def compile_definition(tag):
 	if tag.directive():
 		raise TemplateError(f"{tag.where}: <{tag.name} {tag.directive()}> defines {tag.name}; each/if go on the elements inside it")
 
+	children = list(tag.children)
+	_strip(children)
+
+	# <Layout><html lang="en">...</html></Layout>: the component is the whole document, its element
+	# the <html> (as with as="html"), so a page that wraps itself in <Layout> is a whole page
+	attributes = list(tag.attributes)
+	document = False
+	only = [node for node in children if not (isinstance(node, Text) and node.blank())]
+	if len(only) == 1 and isinstance(only[0], Tag) and only[0].name.lower() == "html":
+		html = only[0]
+		if tag.attribute("as") is not None:
+			raise tag.where.error(f"<{tag.name}>'s markup is an <html> document, so it is the <html>; leave out as=")
+		if html.directive():
+			raise html.where.error(f"<html {html.directive()}>: a document is shown whole; put each/if on the elements inside it")
+		attributes += html.attributes
+		children = list(html.children)
+		_strip(children)
+		document = True
+
 	compiler = Compiler()
-	static, bound, events, debounce, element = [], [], [], None, None
-	for name, value, text, where in tag.attributes:
+	static, bound, events, debounce, element = [], [], [], None, "html" if document else None
+	for name, value, text, where in attributes:
 		if name == "as":
 			# <Sidebar as="aside">: the component's element is an <aside>
 			if not value or not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", value) or is_component_name(value):
@@ -866,10 +902,7 @@ def compile_definition(tag):
 			compiler.literal(value, where)
 			static.append((name, True if value is None else unescape(value)))
 
-	children = list(tag.children)
-	_strip(children)
-
-	return Definition(tag.name, tag.where, compiler.nodes(children), (static, bound, events, debounce, element))
+	return Definition(tag.name, tag.where, compiler.nodes(children), (static, bound, events, debounce, element), document)
 
 
 class Compiler:
@@ -1528,6 +1561,8 @@ class Lookup:
 				return values[name]
 			if name in component_names(type(element)):
 				return getattr(element, name)
+			if isinstance(element, MarkupComponent) and not name.startswith("_") and name not in BUILTINS:
+				return None
 		elif name in self.context:
 			return self.context[name]
 
@@ -1627,6 +1662,15 @@ def find_class(name, where, path):
 		# components/card.py) that nothing has imported yet
 		if _import_definer(name):
 			_known.clear()
+		classes = app_classes(name, mine=True)
+
+	if not classes:
+		# Markup without a class (layouts/layout.html defining <Layout>, say): a component of its
+		# own, before any class of that name another app (or test) has
+		finder = _finder()
+		defined = finder.current_definitions().get(name) if finder is not None else None
+		if defined:
+			return markup_component(name, defined[0])
 		classes = app_classes(name)
 
 	if not classes:
@@ -1647,6 +1691,39 @@ def find_class(name, where, path):
 	return classes[0]
 
 
+from .tags import div as _div
+
+
+class MarkupComponent(_div):
+	"""A component defined only in a template, with no class of its own: what it's given
+	(<Layout title="About">) are its values, and a name it isn't given shows nothing."""
+
+	_domino_base = True
+
+
+	def configure(self, **kwargs):
+
+		for key in list(kwargs):
+			if key not in ("class_", "id", "style", "debounce") and not key.startswith(("on_", "data_", "aria_")):
+				self.__dict__[key] = kwargs.pop(key)
+
+		return super().configure(**kwargs)
+
+
+_markup_components = {}
+
+
+def markup_component(name, path):
+	"""The class for <name> when only its markup exists (at `path`), made once per file."""
+
+	key = (name, os.path.abspath(path))
+	cls = _markup_components.get(key)
+	if cls is None:
+		cls = _markup_components[key] = type(name, (MarkupComponent,), {"_domino_definition": key[1], "__module__": __name__})
+
+	return cls
+
+
 def _import_definer(name):
 
 	finder = _finder()
@@ -1657,7 +1734,8 @@ def _import_definer(name):
 	# render() has none, but often shares a module), then components/<snake_case name>.py
 	definitions = finder.current_definitions()
 	paths = list(definitions.get(name, ()))
-	paths += [path for found in definitions.values() for path in found if path not in paths]
+	for found in definitions.values():
+		paths += [path for path in found if path not in paths]
 	from .templates import snake_case
 	paths.append(os.path.join(finder.root, "components", f"{snake_case(name)}.html"))
 
@@ -1667,9 +1745,10 @@ def _import_definer(name):
 	imported = False
 	for path in paths:
 		module = _module_for(path, finder.root)
-		source = os.path.splitext(path)[0] + ".py"
+		source = os.path.abspath(os.path.splitext(path)[0] + ".py")
 		if not module or source in files:
 			continue
+		files.add(source)
 		loaded = sys.modules.get(module)
 		if loaded is None and not _importable(module, finder.root):
 			# Not importable by its name from here (the app's folder isn't on the import path), or
@@ -1730,7 +1809,8 @@ def _module_for(path, root):
 
 def warn_unused():
 	"""Once per scan of the app's files: warn about definitions no component class is named after
-	(a typo, or a class renamed). Their modules next to them are imported to know."""
+	but one is named much like (a typo, or a class renamed). A definition with no class like it is
+	a component that is only markup (see MarkupComponent). Modules next to them are imported to know."""
 
 	finder = _finder()
 	if finder is None or finder.warned:
@@ -1750,11 +1830,12 @@ def warn_unused():
 		_known.clear()
 		if not app_classes(name):
 			close = difflib.get_close_matches(name, list(known_classes()), n=1)
-			hint = f" (did you mean {close[0]}?)" if close else ""
-			_app().logger.warning(
-				"Domino: %s defines <%s>, but no component class is called %s%s; the definition is unused",
-				", ".join(shown_path(path) for path in paths), name, name, hint
-			)
+			if close:
+				_app().logger.warning(
+					"Domino: %s defines <%s>, but no component class is called %s (did you mean %s?); "
+					"it's used as markup only",
+					", ".join(shown_path(path) for path in paths), name, name, close[0]
+				)
 
 
 def _finder():
@@ -1798,6 +1879,21 @@ def definition_for(cls, path):
 		f"{shown_path(path)} defines {defined}, not {name}: add <{name}>...</{name}> for the class "
 		f"{cls.__module__}.{name}, or give it a render() method.{hint}"
 	)
+
+
+def defines_document(name):
+	"""Whether the component called `name` is defined as a whole <html> document (a layout)."""
+
+	finder = _finder()
+	if finder is None:
+		return False
+
+	for path in finder.current_definitions().get(name, ()):
+		definition = load(path, _checking()).definitions.get(name)
+		if definition is not None and definition.document:
+			return True
+
+	return False
 
 
 def render_component(element, path):
@@ -1881,6 +1977,58 @@ def _declared_tag(cls):
 	return None
 
 
+def whole_page(result):
+	"""`result`, or, for a component whose markup is a whole <html> document (a layout returned
+	from page() or a route: Layout(title="About") [...]), that component as the page."""
+
+	if not isinstance(result, Element) or isinstance(result, (DominoTemplate, WholePage)):
+		return result
+
+	from .templates import paired_template, template_format
+
+	cls = type(result)
+	path = paired_template(cls)
+	if not path or template_format(path) != "components":
+		return result
+	definition = load(path, _checking()).definitions.get(cls.__name__)
+	if definition is None or not definition.document:
+		return result
+
+	return WholePage(result)
+
+
+class WholePage(Element):
+	"""A document component as the page: its <html>, with the doctype and Domino's script."""
+
+	verbatim = True
+	is_document = True
+
+
+	def __init__(self, component):
+
+		super().__init__("")
+
+		self.component = component
+		self.__children__ = [component]
+
+
+	def _render(self, level=0, indent=4):
+
+		styles = current_styles()
+		if styles is None:
+			with collect_styles() as styles:
+				html = self._render(level, indent)
+			return styles.finish(html)
+
+		html = "<!DOCTYPE html>\n" + self.component._render(level, indent)
+
+		if self.__attributes__:
+			from .templates import _as_page
+			return _as_page(html, self.__attributes__)
+
+		return html
+
+
 class DominoTemplate(Element):
 	"""template("home.html"): a page, or part of one, written as a Domino template."""
 
@@ -1902,7 +2050,9 @@ class DominoTemplate(Element):
 	@property
 	def is_document(self):
 
-		return load(self.path, _checking()).document
+		compiled = load(self.path, _checking())
+
+		return compiled.document or (compiled.single is not None and defines_document(compiled.single))
 
 
 	def _render(self, level=0, indent=4):
@@ -1929,7 +2079,7 @@ class DominoTemplate(Element):
 		self.__children__ = [chunk for chunk in chunks if isinstance(chunk, Element)]
 		html = render_chunks(chunks)
 
-		if compiled.document:
+		if self.is_document:
 			if compiled.wrap:
 				html = f"<html>\n{html}\n</html>"
 			if not html.lstrip()[:2].startswith("<!"):

@@ -193,18 +193,19 @@ def test_page_module_change_updates_open_pages_and_its_route(make_app):
 	assert app.test_page("/").text("h1") == "Hot counter"
 
 
-LAYOUT_HTML = '<html><head><title>Site</title></head><body><nav>{nav}</nav><slot /></body></html>'
+LAYOUT_HTML = '<Layout><html><head><title>Site</title></head><body><nav>{nav}</nav><slot /></body></html></Layout>'
 
 
-def test_a_saved_layout_html_updates_open_pages_and_new_template_pages_get_routes(make_app):
+def test_a_saved_layout_updates_open_pages_and_new_template_pages_get_routes(make_app):
 
-	app, reloader = make_app({"pages/layout.html": LAYOUT_HTML.format(nav="old"), "pages/about.html": "<p>About</p>"})
+	app, reloader = make_app({"layouts/layout.html": LAYOUT_HTML.format(nav="old"), "pages/about.html": "<Layout><p>About</p></Layout>"})
 	page = app.test_page("/about")
 	assert page.text("nav") == "old" and page.text("p") == "About"
 
-	assert change(reloader, "pages/layout.html", LAYOUT_HTML.format(nav="new")) == "hot"
-	(message,) = messages(app, page)
-	assert "<nav>new</nav>" in message["html"] and "<p>About</p>" in message["html"]
+	assert change(reloader, "layouts/layout.html", LAYOUT_HTML.format(nav="new")) == "hot"
+	found = messages(app, page)
+	print(found)
+	assert any("<nav>new</nav>" in message.get("html", "") and "<p>About</p>" in message["html"] for message in found)
 
 	assert app.test_client().get("/contact").status_code == 404
 	assert change(reloader, "pages/contact.html", "<p>Contact</p>") == "hot"

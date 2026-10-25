@@ -29,29 +29,28 @@ if __name__ == "__main__":
 
 # "{title}" is replaced with the app's name
 LAYOUT_TEMPLATE = '''\
-<!-- Wraps every page in this folder and below: the page goes where <slot /> is.
-     Domino adds the doctype, its script and the components' CSS -->
-<html lang="en">
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>{title}</title>
-	</head>
-	<body>
-		<h1>{title}</h1>
-		<slot />
-	</body>
-</html>
+<!-- The layout: a component pages wrap themselves in (<Layout title="...">...</Layout>). The page
+     goes where <slot /> is; Domino adds the doctype, its script and the components' CSS -->
+<Layout>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<title>{{ title }} · {title}</title>
+		</head>
+		<body>
+			<h1>{{ title }}</h1>
+			<slot />
+		</body>
+	</html>
+</Layout>
 '''
 
 INDEX_TEMPLATE = '''\
-from components.tasks import Tasks
-
-
-# This file is the page at /
-def page():
-
-	return Tasks()
+<!-- The page at /, inside the layout (layouts/layout.html) -->
+<Layout title="Tasks">
+	<Tasks />
+</Layout>
 '''
 
 COMPONENT_TEMPLATE = '''\
@@ -131,7 +130,7 @@ tasks = Collection("tasks")
 '''
 
 INDEX_TEST_TEMPLATE = '''\
-# Tests for pages/index.py, run with `pytest`. `page` is the page, open in a simulated browser.
+# Tests for pages/index.html, run with `pytest`. `page` is the page, open in a simulated browser.
 # Each test gets an empty database, on a MongoDB started for the tests
 
 
@@ -157,21 +156,24 @@ def test_other_tabs_see_it(page, open_page):
 
 # `domino create --tailwind`: the same app, styled with Tailwind CSS classes
 TAILWIND_LAYOUT_TEMPLATE = '''\
-<!-- Wraps every page in this folder and below: the page goes where <slot /> is. Tailwind CSS
-     classes work anywhere ("tailwind": true in settings.json), built into the CSS every page links -->
-<html lang="en">
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>{title}</title>
-	</head>
-	<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-		<main class="mx-auto max-w-xl px-6 py-12">
-			<h1 class="mb-6 text-3xl font-bold tracking-tight">{title}</h1>
-			<slot />
-		</main>
-	</body>
-</html>
+<!-- The layout: a component pages wrap themselves in (<Layout title="...">...</Layout>). The page
+     goes where <slot /> is. Tailwind CSS classes work anywhere ("tailwind": true in settings.json),
+     built into the CSS every page links -->
+<Layout>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<title>{{ title }} · {title}</title>
+		</head>
+		<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+			<main class="mx-auto max-w-xl px-6 py-12">
+				<h1 class="mb-6 text-3xl font-bold tracking-tight">{{ title }}</h1>
+				<slot />
+			</main>
+		</body>
+	</html>
+</Layout>
 '''
 
 # The Python side is the same (components/tasks.py); the markup has Tailwind classes
@@ -465,8 +467,8 @@ def create(name, with_tailwind=False):
 
 	files = {
 		"app.py": APP_TEMPLATE,
-		"pages/layout.html": (TAILWIND_LAYOUT_TEMPLATE if with_tailwind else LAYOUT_TEMPLATE).replace("{title}", html.escape(title)),
-		"pages/index.py": INDEX_TEMPLATE,
+		"layouts/layout.html": (TAILWIND_LAYOUT_TEMPLATE if with_tailwind else LAYOUT_TEMPLATE).replace("{title}", html.escape(title)),
+		"pages/index.html": INDEX_TEMPLATE,
 		"pages/index_test.py": INDEX_TEST_TEMPLATE,
 		"components/tasks.py": COMPONENT_TEMPLATE,
 		"components/tasks.html": TAILWIND_COMPONENT_HTML_TEMPLATE if with_tailwind else COMPONENT_HTML_TEMPLATE,

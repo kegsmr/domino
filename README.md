@@ -38,10 +38,11 @@ myapp/
       [id].py            /users/<id>
       [id]/posts.py      /users/<id>/posts
     docs/[...path].py    /docs/<path:path>, the rest of the URL
-    layout.html          wraps every page in its folder and below (or layout.py)
     404.py               the page for URLs no page serves
     _helpers.py          not a page: names starting with _ are private
-  components/            components the pages import
+  layouts/
+    layout.html          <Layout>: the document pages wrap themselves in
+  components/            components the pages use
   data.py                Collections the pages import
   settings.json
 ```
@@ -87,30 +88,42 @@ class Page(t.div):
 		self.count += 1
 ```
 
-A layout wraps every page in its folder and below in what they share, usually the document and the navigation. Write it as HTML, `layout.html`, with `<slot />` where the page goes:
+A layout is the document and navigation pages share. It's a [component](#templates) like any other, by convention in `layouts/`, whose markup is a whole `<html>` document with `<slot />` where the page goes. A page wraps itself in it, so each page says which layout it's in and can pass it values:
 
 ```html
-<!-- pages/layout.html -->
-<html lang="en">
-	<head>
-		<title>My site</title>
-	</head>
-	<body>
-		<nav>
-			<a href="/">Home</a>
-			<a href="/about">About</a>
-		</nav>
-		<slot />
-	</body>
-</html>
+<!-- layouts/layout.html -->
+<Layout>
+	<html lang="en">
+		<head>
+			<title>{{ title }} · My site</title>
+		</head>
+		<body>
+			<nav>
+				<a href="/">Home</a>
+				<a href="/about">About</a>
+			</nav>
+			<main><slot /></main>
+		</body>
+	</html>
+</Layout>
 ```
 
-- The outermost layout is the document: Domino adds the doctype, its script and the components' CSS. Layouts nest: the `pages/` folder's own is the outermost, then each subfolder's, down to the page's own folder; `pages/admin/layout.html` is a fragment (`<section class="admin"><slot /></section>`) that goes in the outer layout's `<slot />` (a nested layout with `<html>` is an error naming both files).
-- It's a [Domino template](#templates): components as tags, `{{ values }}`, `each=`, `if=`. The URL's parameters are its values by name (`{{ id }}` in `pages/users/[id]/layout.html`).
-- With a `layout.py` next to it, the Python side is the logic and the HTML the markup: `layout()` returns the template's values as a dict (`return {"title": current_user()["name"]}`), and can take `content` and the URL's parameters, by name.
-- `layout.html` is never a page itself. Links between pages keep the layout's elements as they are (see [Moving between pages](#moving-between-pages)), and saving it updates open pages.
+```html
+<!-- pages/about.html -->
+<Layout title="About">
+	<h1>About</h1>
+	<p>...</p>
+</Layout>
+```
 
-A layout can also be Python: `layout.py` defines `layout(content)` and returns the page wrapped in whatever every page shares, usually a `Document` with the navigation. A layout that names URL parameters (`layout(content, id)`) receives them. Python and HTML layouts mix across folders.
+- A page in a layout is the whole document: Domino adds the doctype, its script and the components' CSS.
+- A layout needs no Python class. What a page gives it (`title="About"`) are its values, and a value it isn't given shows nothing. A class (`layouts/layout.py`, `class Layout(t.div)`) adds what any component has: helpers (the signed-in user for the nav), `State` and handlers (a menu that opens), live data. Its handlers are answered by the server rather than predicted.
+- Several layouts are several components: `<AdminLayout>` in `layouts/admin.html`, say. A component inside a layout, like a sidebar, goes in its markup as usual.
+- From Python, a page returns it like any component: `return Layout(title="About") [Article()]`.
+- Links between pages keep the layout's elements as they are (see [Moving between pages](#moving-between-pages)), and saving it updates open pages.
+- `pages/layout.html` (which wrapped a folder's pages automatically in development versions) stops the app with a message saying how to move it.
+
+The older way still works: a `layout.py` in `pages/` or a subfolder wraps every page in its folder and below. It defines `layout(content)` and returns the page wrapped in whatever every page shares, usually a `Document` with the navigation. Layouts nest from the `pages/` folder inward, and one that names URL parameters (`layout(content, id)`) receives them.
 
 ```python
 # pages/layout.py
@@ -156,7 +169,7 @@ cd myapp
 domino run
 ```
 
-`domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, `pages/index.py` and `pages/layout.html`, components in `components/` (their logic in `tasks.py`, their markup in `tasks.html`, see [Templates](#templates)), a `Collection` in `data.py`, a test for the page in `pages/index_test.py` (run it with `pytest`; see [Testing your app](#testing-your-app)), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
+`domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, the page `pages/index.html` in the layout `layouts/layout.html`, components in `components/` (their logic in `tasks.py`, their markup in `tasks.html`, see [Templates](#templates)), a `Collection` in `data.py`, a test for the page in `pages/index_test.py` (run it with `pytest`; see [Testing your app](#testing-your-app)), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
 
 `domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode, with [hot reloading](#hot-reloading): saving a file in the app's folder updates the open pages in place. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `--port 0` picks a free port. `domino --version` prints the version.
 
@@ -456,7 +469,7 @@ class TodoList(t.div):
 
 **Whitespace** is kept as written: nothing is added around inline elements (`<a>Domino</a>.` has no space before the dot), and `each`/`if` take the line break before their element along, so each item is on a line of its own and a hidden element leaves no empty line.
 
-**Pages and layouts.** An `.html` file in `pages/` without a `.py` of the same name is a page: `pages/about.html` is `/about`, inside the layouts, with the URL's parameters as its values (`pages/users/[name].html` reads `{{ name }}`). `pages/layout.html` is a layout, with `<slot />` where the page goes (see [Pages](#pages)); the standard form of the outermost one is a whole `<html>` document. A page with `<html>`, or `<head>` and `<body>` without `<html>` (like Meteor's `index.html`), is a whole document itself, used without layouts. Domino adds the doctype, its script and the components' CSS to documents. `template("home.html", title="Home")` renders any template from Python.
+**Pages and layouts.** An `.html` file in `pages/` without a `.py` of the same name is a page: `pages/about.html` is `/about`, with the URL's parameters as its values (`pages/users/[name].html` reads `{{ name }}`). A capitalized tag at a page's top level uses that component: `<Layout title="About">...</Layout>` puts the page in the layout (see [Pages](#pages)). A component whose markup is a whole `<html>` document, like a layout, makes the page that uses it a whole document. A page with `<html>`, or `<head>` and `<body>` without `<html>` (like Meteor's `index.html`), is a whole document itself, used without layouts. Domino adds the doctype, its script and the components' CSS to documents. `template("home.html", title="Home")` renders any template from Python.
 
 **Compiled once.** Each file is parsed once into static HTML strings and the few dynamic parts, so rendering a template does little more than join strings (about as fast as Jinja, faster than tag classes); while debugging, a file that changed is parsed again, and hot reloading updates open pages.
 

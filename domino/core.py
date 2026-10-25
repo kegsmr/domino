@@ -1294,6 +1294,10 @@ class Domino(Flask):
 		# Call the original handler function
 		result = function(*args, **kwargs)
 
+		# A layout component returned as it is (Layout(title="About") [...]) is the whole page
+		from .dtemplates import whole_page
+		result = whole_page(result)
+
 		# Check if the result has a `render` method
 		if hasattr(result, "_render"):
 			result.configure(data_domino_page=page.id)
@@ -1579,6 +1583,9 @@ class Element:
 		cls = type(self)
 		if getattr(cls, "optimistic", True) is False:
 			return None
+		# A component that is the whole document (a layout) is updated by the server, not guessed
+		if self.__tag__ == "html":
+			return None
 		callbacks = optimistic.own_callbacks(self, bound)
 		if not callbacks:
 			return None
@@ -1765,7 +1772,8 @@ class Element:
 		class_names = []
 		styled = []
 		for base in self.__class__.__mro__:
-			if base in (object, Element) or base.__name__ == tag or base.__module__ == "domino.tags":
+			# Domino's own bases (tags, a markup-only component's) aren't the component's classes
+			if base in (object, Element) or base.__name__ == tag or base.__module__ == "domino.tags" or "_domino_base" in base.__dict__:
 				continue
 			name = css_class_name(base)
 			if name not in class_names:

@@ -952,108 +952,151 @@ def test_as_and_a_tag_set_by_the_class_must_agree(tmp_path):
 		dtemplates.render_component(sidebar, str(tmp_path / "components" / "sidebar.html"))
 
 
-# Layouts as HTML
+# Layouts: components pages wrap themselves in
 
-DOCUMENT_LAYOUT = """
-<html lang="en">
-	<head><title>Site</title></head>
-	<body>
-		<nav>nav</nav>
-		<slot />
-	</body>
-</html>
+LAYOUT = """
+<Layout>
+	<html lang="en">
+		<head><title>{{ title }} · Site</title></head>
+		<body>
+			<nav>nav</nav>
+			<main><slot /></main>
+		</body>
+	</html>
+</Layout>
 """
 
 
-def test_a_layout_html_is_the_document_and_the_page_goes_in_its_slot(tmp_path):
+def test_a_page_wrapped_in_its_layout_is_the_whole_document(tmp_path):
 
-	write(tmp_path / "pages" / "layout.html", DOCUMENT_LAYOUT)
-	write(tmp_path / "pages" / "index.html", "<main>home</main>")
-	write(tmp_path / "pages" / "about.py", "import domino.tags as t\n\n\ndef page():\n\treturn t.p() ['about']\n")
+	write(tmp_path / "layouts" / "layout.html", LAYOUT)
+	write(tmp_path / "pages" / "index.html", """
+		<Layout title="Home">
+			<p>home</p>
+		</Layout>
+	""")
 	app = make_app(tmp_path)
 
 	html = html_of(app)
+
+	# The layout's <html> is the page's, with the doctype, the page id and Domino's script
 	assert html.startswith("<!DOCTYPE html>\n<html ") and "data-domino-page=" in html and 'lang="en"' in html
-	assert "<nav>nav</nav>\n\t\t<main>home</main>\n\t</body>" in html
+	assert 'class="Layout"' in html.split(">")[1]
 	assert '<script class="Core" src="/_domino/core"' in html.split("</head>")[0]
-	# A Python page goes in the slot too; layout.html itself is no page
-	assert "<nav>nav</nav>" in html_of(app, "/about") and ">about</p>" in html_of(app, "/about")
-	assert app.test_client().get("/layout").status_code == 404
+	page = app.test_page("/")
+	assert page.text("title") == "Home · Site"
+	assert page.find("body nav").text == "nav" and page.find("body main p").text == "home"
 
 
-def test_layouts_nest_by_folder_and_mix_with_layout_py(tmp_path):
+def test_a_layout_needs_no_class_and_a_value_it_isnt_given_shows_nothing(tmp_path):
 
-	write(tmp_path / "pages" / "layout.html", DOCUMENT_LAYOUT)
-	write(tmp_path / "pages" / "admin" / "layout.py", "import domino.tags as t\n\n\ndef layout(content):\n\treturn t.section(class_='admin') [content]\n")
-	write(tmp_path / "pages" / "admin" / "users" / "layout.html", '<div class="users"><h2>Users</h2><slot /></div>')
-	write(tmp_path / "pages" / "admin" / "users" / "[name].html", "<p>User {{ name }}</p>")
+	write(tmp_path / "layouts" / "layout.html", LAYOUT)
+	write(tmp_path / "pages" / "index.html", "<Layout><p>home</p></Layout>")
 	app = make_app(tmp_path)
 
-	page = app.test_page("/admin/users/ada")
-
-	# Outermost first: the document, then admin's section, then users' div, then the page
-	assert page.find("body nav").text == "nav"
-	assert page.find("body section.admin div.users p").text == "User ada"
-	assert page.find("div.users h2").text == "Users"
+	assert app.test_page("/").text("title") == "· Site"
 
 
-def test_a_layout_py_gives_its_layout_html_values(tmp_path):
+def test_components_work_inside_a_layout(tmp_path):
 
-	write(tmp_path / "pages" / "layout.html", DOCUMENT_LAYOUT.replace("<title>Site</title>", "<title>{{ title }}</title>").replace("<nav>nav</nav>", "<nav>{{ who }}</nav>"))
-	write(tmp_path / "pages" / "[who]" / "index.html", "<p>page</p>")
-	write(tmp_path / "pages" / "layout.py", "def layout(content, who=None):\n\treturn {'title': f'Hi {who}'}\n")
-	app = make_app(tmp_path)
-
-	page = app.test_page("/ada")
-
-	# The URL's parameters are its values too
-	assert page.text("title") == "Hi ada" and page.text("nav") == "ada" and page.text("p") == "page"
+	write(tmp_path / "layouts" / "layout.html", LAYOUT)
+	write(tmp_path / "components" / "counter.py", """
+		import domino.tags as t
+		from domino import State
 
 
-def test_a_layout_py_next_to_a_layout_html_returns_values(tmp_path):
+		class Counter(t.div):
 
-	write(tmp_path / "pages" / "layout.html", DOCUMENT_LAYOUT)
-	write(tmp_path / "pages" / "layout.py", "def layout(content):\n\treturn content\n")
-	write(tmp_path / "pages" / "index.html", "<p>page</p>")
-	app = make_app(tmp_path)
+			count = State(0)
 
-	with pytest.raises(Exception, match="returns the template's values as a dict"):
-		app.test_page("/")
-
-
-def test_only_the_outermost_layout_can_be_a_document(tmp_path):
-
-	write(tmp_path / "pages" / "layout.html", DOCUMENT_LAYOUT)
-	write(tmp_path / "pages" / "admin" / "layout.html", DOCUMENT_LAYOUT)
-	write(tmp_path / "pages" / "admin" / "index.html", "<p>admin</p>")
-	app = make_app(tmp_path)
-
-	with pytest.raises(Exception) as error:
-		app.test_page("/admin")
-
-	assert os.path.join("admin", "layout.html") in str(error.value) and "only the outermost layout" in str(error.value)
-	assert str(tmp_path / "pages" / "layout.html") in str(error.value)
-
-
-def test_a_fragment_layout_without_a_document_layout_gets_one(tmp_path):
-
-	write(tmp_path / "pages" / "layout.html", '<div class="frame"><slot /></div>')
-	write(tmp_path / "pages" / "index.html", "<p>page</p>")
+			def add(self):
+				self.count += 1
+	""")
+	write(tmp_path / "components" / "counter.html", '<Counter><p>{{ count }}</p><button on-click="add">+</button></Counter>')
+	write(tmp_path / "pages" / "index.html", '<Layout title="Home"><Counter /></Layout>')
 	app = make_app(tmp_path)
 
 	page = app.test_page("/")
+	page.click("button")
+	page.click("button")
 
-	assert page.find("html").attrs.get("data-domino-page") and page.find("body div.frame p").text == "page"
+	assert page.text("main p") == "2"
 
 
-def test_404_inside_an_html_layout(tmp_path):
+def test_a_layout_with_a_class_from_python_pages_and_404(tmp_path):
 
-	write(tmp_path / "pages" / "layout.html", DOCUMENT_LAYOUT)
-	write(tmp_path / "pages" / "404.py", "import domino.tags as t\n\n\ndef page():\n\treturn t.p() ['Not here']\n")
+	write(tmp_path / "layouts" / "layout.html", LAYOUT.replace("<nav>nav</nav>", "<nav>{{ greeting }}</nav>"))
+	write(tmp_path / "layouts" / "layout.py", """
+		import domino.tags as t
+
+
+		class Layout(t.div):
+
+			title = "Untitled"
+
+			def greeting(self):
+				return f"Welcome to {self.title}"
+	""")
+	write(tmp_path / "pages" / "about.py", """
+		import domino.tags as t
+
+		from layouts.layout import Layout
+
+
+		def page():
+			return Layout(title="About") [t.p() ["about"]]
+	""")
+	write(tmp_path / "pages" / "404.py", """
+		import domino.tags as t
+
+		from layouts.layout import Layout
+
+
+		def page():
+			return Layout(title="Not found") [t.p() ["Not here"]]
+	""")
+	sys.path.insert(0, str(tmp_path))
+	try:
+		app = make_app(tmp_path)
+		html = html_of(app, "/about")
+		assert html.startswith("<!DOCTYPE html>\n<html ") and "data-domino-page=" in html
+		page = app.test_page("/about")
+		assert page.text("title") == "About · Site" and page.text("nav") == "Welcome to About" and page.text("main p") == "about"
+
+		response = app.test_client().get("/nowhere")
+		assert response.status_code == 404 and "<title>Not found · Site</title>" in response.get_data(as_text=True)
+	finally:
+		sys.path.remove(str(tmp_path))
+		for name in [name for name in sys.modules if name == "layouts" or name.startswith("layouts.")]:
+			del sys.modules[name]
+
+
+def test_a_layout_html_in_pages_says_where_layouts_go_now(tmp_path):
+
+	from domino.pages import PagesError
+
+	write(tmp_path / "pages" / "layout.html", "<html><body><slot /></body></html>")
+	write(tmp_path / "pages" / "index.html", "<p>home</p>")
+
+	with pytest.raises(PagesError, match="layouts/layout.html"):
+		make_app(tmp_path)
+
+
+def test_a_page_template_next_to_a_module_still_defines_its_components(tmp_path):
+
+	# pages/about.html beside pages/about.py is about.py's components' markup, not a page
+	write(tmp_path / "pages" / "about.py", """
+		import domino.tags as t
+
+
+		class About(t.div):
+			pass
+
+
+		def page():
+			return About()
+	""")
+	write(tmp_path / "pages" / "about.html", "<About><p>about</p></About>")
 	app = make_app(tmp_path)
 
-	response = app.test_client().get("/nowhere")
-	html = response.get_data(as_text=True)
-
-	assert response.status_code == 404
-	assert "<nav>nav</nav>" in html and ">Not here</p>" in html
+	assert app.test_page("/about").text("p") == "about"

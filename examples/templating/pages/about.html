@@ -1,8 +1,10 @@
-<!-- The page at /about: a template with no Python at all, inside layout.html -->
-<main>
-	<h1>About</h1>
-	<p>This page is <code>pages/about.html</code>. Moving between pages swaps only what differs: the navigation from <code>layout.html</code> stays as it is.</p>
-	<Card heading="A counter here too">
-		<Counter />
-	</Card>
-</main>
+<!-- The page at /about: a template with no Python at all, inside the layout (layouts/layout.html) -->
+<Layout title="About">
+	<main>
+		<h1>About</h1>
+		<p>This page is <code>pages/about.html</code>. Moving between pages swaps only what differs: the navigation from <code>layouts/layout.html</code> stays as it is.</p>
+		<Card heading="A counter here too">
+			<Counter />
+		</Card>
+	</main>
+</Layout>

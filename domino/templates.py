@@ -589,12 +589,23 @@ class TemplateFinder(BaseLoader):
 			self.template_folder = os.path.join(self.root, template_folder)
 		# Templates in pages/ are pages, found by their URL, so names there may repeat
 		self.pages = os.path.join(self.root, pages) if pages else None
+		if self.pages:
+			from .dtemplates import pages_folders
+			pages_folders.add(self.pages)
 		self.setting = setting  # {"templates": "jinja"} reads every file as Jinja
 		self.paired = {}  # paired component templates, by path
 		self.ambiguous = {}  # names of several pages' templates -> their paths
 		self.stale = False  # definitions to find again (hot reloading)
 		self.warned = False  # about definitions without a class
 		self.index = self.scan()
+
+
+	def is_page(self, path):
+		"""Whether `path` is a page template: in the pages folder, without a .py of the same name
+		(whose components' markup it would be). A capitalized tag at a page's top level uses that
+		component (<Layout title="About">...</Layout>) rather than defining it."""
+
+		return is_page_template(path, self.pages)
 
 
 	def skip(self, folder, name):
@@ -667,7 +678,7 @@ class TemplateFinder(BaseLoader):
 
 		definitions = {}
 		for path in paths:
-			if not path.endswith(".html"):
+			if not path.endswith(".html") or self.is_page(path):
 				continue
 			with open(path, encoding="utf-8") as file:
 				source = file.read()
@@ -919,6 +930,15 @@ def on(event=None, callback=None, debounce=None, **events):
 	return Markup(f"data-event-id=\"{' '.join(ids)}\"" + "".join(marks))
 
 
+def is_page_template(path, pages):
+
+	if not pages:
+		return False
+	path = os.path.abspath(path)
+
+	return path.startswith(os.path.abspath(pages) + os.sep) and not os.path.exists(os.path.splitext(path)[0] + ".py")
+
+
 def snake_case(name):
 
 	return re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name).lower()
@@ -929,6 +949,11 @@ def paired_template(cls):
 	(<TodoList>...</TodoList>, see domino.dtemplates), the one next to its module winning when
 	several classes share the name; or a Jinja template next to its module named after the class
 	(TodoList -> todo_list.html) or the module (counter.py -> counter.html)."""
+
+	# A component that is only markup (see dtemplates.MarkupComponent)
+	definition = cls.__dict__.get("_domino_definition")
+	if definition is not None:
+		return definition
 
 	if cls.__module__.split(".")[0] == "domino":
 		return None

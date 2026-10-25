@@ -2073,3 +2073,61 @@ def test_tailwind_rebuilds_are_swapped_in_without_reloading(transport, page, tmp
 		if transport == "wsgi":
 			server.shutdown()
 		tailwind.stop_all()
+
+
+def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser, tmp_path):
+	"""A layout is the whole document; when it renders again (its own handler, here), the page's
+	<html> keeps Domino's marks, the head keeps its script and styles, and events keep working."""
+
+	from domino import Domino
+
+	files = {
+		"layouts/layout.html": """<Layout>
+	<html lang="en">
+		<head><title>{{ title }} · Site</title></head>
+		<body>
+			<nav><button class="menu" on-click="toggle">Menu</button> <span if="open">open</span></nav>
+			<main><slot /></main>
+		</body>
+	</html>
+</Layout>
+""",
+		"layouts/layout.py": "import domino.tags as t\nfrom domino import State\n\n\nclass Layout(t.div):\n\n\ttitle = ''\n\topen = State(False)\n\n\tdef toggle(self):\n\t\tself.open = not self.open\n",
+		"components/counter.py": "import domino.tags as t\nfrom domino import State\n\n\nclass Counter(t.div):\n\n\tcss = {'color': 'rgb(0, 128, 0)'}\n\tcount = State(0)\n\n\tdef add(self):\n\t\tself.count += 1\n",
+		"components/counter.html": '<Counter><p class="count">{{ count }}</p><button class="add" on-click="add">+</button></Counter>',
+		"pages/index.html": '<Layout title="Home"><Counter /></Layout>',
+	}
+	for path, text in files.items():
+		(tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+		(tmp_path / path).write_text(text)
+
+	sys.path.insert(0, str(tmp_path))
+	page = browser.new_page()
+	errors = []
+	page.on("pageerror", lambda error: errors.append(str(error)))
+	try:
+		app = Domino("layout_app", root_path=str(tmp_path))
+		page.goto(serve_app(app))
+		page.click("button.add")
+		page.wait_for_function("document.querySelector('p.count').textContent === '1'")
+
+		# The layout's own handler renders the whole document again
+		page.click("button.menu")
+		page.wait_for_function("document.querySelector('nav span') && document.querySelector('nav span').textContent === 'open'")
+
+		assert page.evaluate("document.documentElement.dataset.dominoPage") is not None
+		assert page.evaluate("document.documentElement.lang") == "en"
+		assert page.title() == "Home · Site"
+		assert page.evaluate("getComputedStyle(document.querySelector('.Counter')).color") == "rgb(0, 128, 0)"
+
+		# Events still work after it
+		page.click("button.add")
+		page.wait_for_function("document.querySelector('p.count').textContent === '2'")
+		page.click("button.menu")
+		page.wait_for_function("!document.querySelector('nav span')")
+		assert errors == []
+	finally:
+		page.close()
+		sys.path.remove(str(tmp_path))
+		for name in [name for name in sys.modules if name.split(".")[0] in ("layouts", "components")]:
+			del sys.modules[name]

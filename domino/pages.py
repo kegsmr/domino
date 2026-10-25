@@ -162,31 +162,36 @@ def find_pages(folder):
 
 def find_template_pages(folder):
 	"""Templates in `folder` that are pages: about.html is /about, like about.py, unless there's an
-	about.py (then about.html is its components' template) or it defines components."""
-
-	from .templates import template_format
+	about.py (then about.html is its components' template)."""
 
 	for path in sorted(folder.rglob("*.html")):
 
 		parts = path.relative_to(folder).parts
-		if any(part.startswith(("_", ".")) for part in parts) or path.name in ("404.html", "layout.html"):
+		if any(part.startswith(("_", ".")) for part in parts) or path.name == "404.html":
 			continue
-		if path.with_suffix(".py").exists() or template_format(str(path)) == "components":
+		if path.name == "layout.html":
+			raise PagesError(
+				f"{path.relative_to(folder).as_posix()}: layouts are components that pages name. Move it to "
+				"layouts/layout.html, wrap its markup in <Layout>...</Layout> (with <slot /> where the page "
+				"goes), and wrap each page in <Layout>...</Layout>"
+			)
+		# about.html next to about.py is the markup of about.py's components
+		if path.with_suffix(".py").exists():
 			continue
 
 		yield path
 
 
 def find_layouts(folder, path):
-	"""The layouts that wrap `path`, outermost (the pages folder's own) first: per folder,
-	(its layout.py or None, its layout.html or None)."""
+	"""The layout.py files that wrap `path`, outermost (the pages folder's own) first, as
+	(layout.py, None). Layouts in HTML are components pages name (<Layout>...</Layout>) instead."""
 
 	layouts = []
 	directory = path.parent
 	while True:
-		code, markup = directory / "layout.py", directory / "layout.html"
-		if code.is_file() or markup.is_file():
-			layouts.insert(0, (code if code.is_file() else None, str(markup) if markup.is_file() else None))
+		code = directory / "layout.py"
+		if code.is_file():
+			layouts.insert(0, (code, None))
 		if directory == folder:
 			return layouts
 		directory = directory.parent
@@ -285,6 +290,10 @@ def layout_view(make, layouts):
 	def view(**params):
 
 		result = make(**params)
+
+		# A layout component (Layout(title="About") [...]) is the whole page
+		from .dtemplates import whole_page
+		result = whole_page(result)
 
 		# A whole document (Document or any <html>), a Jinja template(...), a Domino template with
 		# <html>, <head> or <body>, and Flask responses are already complete

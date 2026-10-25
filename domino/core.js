@@ -241,15 +241,19 @@ window.Domino = (() => {
         const target = document.getElementById(data.id);
         if (!target) return;
 
-        const template = document.createElement('template');
-        template.innerHTML = data.html;
-        const replacement = template.content.firstElementChild;
-        if (!replacement) return;
+        if (target === document.documentElement) {
+            morphDocument(data.html, reset);
+        } else {
+            const template = document.createElement('template');
+            template.innerHTML = data.html;
+            const replacement = template.content.firstElementChild;
+            if (!replacement) return;
 
-        // Before morphing, which moves nodes out of the template
-        const found = readGraphs(replacement);
-        morph(target, replacement, reset);
-        found.forEach(installGraph);
+            // Before morphing, which moves nodes out of the template
+            const found = readGraphs(replacement);
+            morph(target, replacement, reset);
+            found.forEach(installGraph);
+        }
 
         const updated = document.getElementById(data.id);
         if (updated) {
@@ -895,6 +899,25 @@ window.Domino = (() => {
             found.push([owner.id, graph]);
         }
         return found;
+    }
+
+    // A component that is the whole document (a layout: <Layout><html>...</html></Layout>) can't
+    // be parsed in a <template>, which drops <html>, <head> and <body>. Its <html>'s attributes,
+    // the title and the body are updated; the head keeps Domino's script and the page's styles.
+    function morphDocument(html, reset) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const root = document.documentElement;
+        const next = doc.documentElement;
+        for (const { name, value } of Array.from(next.attributes)) {
+            if (root.getAttribute(name) !== value) root.setAttribute(name, value);
+        }
+        for (const { name } of Array.from(root.attributes)) {
+            if (!next.hasAttribute(name) && !name.startsWith('data-domino')) root.removeAttribute(name);
+        }
+        if (doc.title !== document.title) document.title = doc.title;
+        const found = readGraphs(doc.body);
+        morph(document.body, doc.body, reset);
+        found.forEach(installGraph);
     }
 
     function installGraph([id, graph]) {
