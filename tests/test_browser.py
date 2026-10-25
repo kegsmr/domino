@@ -1757,6 +1757,46 @@ def send_message(page, text):
 	page.press("input[name=text]", "Enter")
 
 
+def test_typing_after_a_submit_isnt_cleared_by_its_answer(serve_app, browser):
+
+	import time
+
+	import domino.tags as t
+	from domino import Collection, Domino
+	from domino.components import Document
+
+	messages = Collection()
+
+	class Chat(t.div):
+
+		def render(self):
+			return [
+				t.ul()([t.li() [message["text"]] for message in messages.find()]),
+				t.form(on_submit=self.send) [t.input(name="text")],
+			]
+
+		def send(self, event):
+			time.sleep(0.5)
+			messages.insert({"text": event.form["text"]})
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Chat()]
+
+	page = browser.new_page()
+	try:
+		page.goto(serve_app(app))
+		send_message(page, "first")
+		# The next message, typed while the first is on its way
+		page.fill("input[name=text]", "second")
+		page.wait_for_function("document.querySelector('li') && document.querySelector('li').textContent.trim() === 'first'")
+		assert page.input_value("input[name=text]") == "second"
+	finally:
+		page.close()
+
+
 def test_chat_appends_reach_other_windows(serve_app, browser):
 
 	url = serve_app(chat_app())

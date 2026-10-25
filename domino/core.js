@@ -79,7 +79,7 @@ window.Domino = (() => {
 
         const focused = from === document.activeElement;
         const typing = isTyping(from);
-        const resetting = reset && reset.root.contains(from) && (reset.submit || !typing);
+        const resetting = reset && reset.root.contains(from) && (reset.submit || !typing) && !editedSince(from, reset);
         if (field && (resetting || (serverChanged && !focused))) {
             if (from.type === 'checkbox' || from.type === 'radio') {
                 from.checked = to.hasAttribute('checked');
@@ -120,7 +120,7 @@ window.Domino = (() => {
 
         for (const field of fields) {
             const typing = field === document.activeElement && !reset.submit && !TOGGLES.includes(field.type);
-            if (typing) continue;
+            if (typing || editedSince(field, reset)) continue;
             if (field.type === 'checkbox' || field.type === 'radio') {
                 field.checked = field.defaultChecked;
             } else if (field.tagName === 'SELECT') {
@@ -129,6 +129,24 @@ window.Domino = (() => {
                 field.value = field.defaultValue;
             }
         }
+    }
+
+    // The fields' values when an event fired, so its answer doesn't reset what's typed since
+    // (the next chat message, typed while the last one was being sent)
+    function fieldValues(root) {
+        const values = new Map();
+        const fields = Array.from(root.querySelectorAll('input, select, textarea'));
+        if (FIELDS.includes(root.tagName)) fields.push(root);
+        for (const field of fields) values.set(field, fieldValue(field));
+        return values;
+    }
+
+    function fieldValue(field) {
+        return field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value;
+    }
+
+    function editedSince(field, reset) {
+        return Boolean(reset.values && reset.values.has(field) && reset.values.get(field) !== fieldValue(field));
     }
 
     function morphChildren(from, to, reset) {
@@ -953,6 +971,7 @@ window.Domino = (() => {
         const payload = eventData(el);
         const reset = { root: el, submit };
         const owner = predict(el, eventId, reset);
+        reset.values = fieldValues(el);
         triggerEvent(eventId, payload, reset, el, owner);
     }
 
