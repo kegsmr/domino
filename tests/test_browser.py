@@ -14,6 +14,8 @@ playwright = pytest.importorskip("playwright.sync_api")
 
 from werkzeug.serving import make_server
 
+from conftest import EXAMPLES, MONGO_URL, Served
+
 
 @pytest.fixture(scope="module")
 def browser():
@@ -804,7 +806,8 @@ def test_asgi_events_go_over_one_websocket(serve_asgi, page):
 	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 3')")
 
 	assert len(seen["websockets"]) == 1
-	assert seen["websockets"][0].url.endswith("/_domino/ws")
+	# With the page id, for `domino serve`'s router
+	assert "/_domino/ws?page=" in seen["websockets"][0].url
 	assert seen["posts"] == [] and seen["streams"] == []
 	assert page.errors == []
 
@@ -1274,3 +1277,135 @@ def test_a_page_swapped_in_shows_clicks_instantly(serve, page):
 	assert "Clicked 1 times" in page.inner_text("main p")
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []
+
+
+@pytest.fixture
+def serve_workers(tmp_path):
+	"""Serves an example with `domino serve --workers 2`: two processes behind the router."""
+
+	started = []
+
+	def start(name):
+		served = Served(EXAMPLES / name, 2, tmp_path / f"{name}.log").start()
+		started.append(served)
+		return served.url
+
+	yield start
+
+	for served in started:
+		served.stop()
+
+
+def open_on_each_worker(browser, url, count=2):
+	"""Tabs of `url`, one on each worker (page loads take turns, as do script requests)."""
+
+	tabs = {}
+	for _ in range(10):
+		tab = browser.new_page()
+		tab.errors = []
+		tab.on("pageerror", lambda error, tab=tab: tab.errors.append(str(error)))
+		tab.goto(url)
+		worker = tab.get_attribute("[data-domino-page]", "data-domino-page").split("-")[0]
+		if worker in tabs:
+			tab.close()
+		else:
+			tabs[worker] = tab
+		if len(tabs) == count:
+			return list(tabs.values())
+
+	raise AssertionError("pages didn't reach every worker")
+
+
+def test_counter_through_serve_workers(serve_workers, browser):
+
+	tabs = open_on_each_worker(browser, serve_workers("counter"))
+
+	for clicks, tab in enumerate(tabs, 1):
+		posts = []
+		tab.on("request", lambda request, posts=posts: "/_domino/events" in request.url and posts.append(request))
+		for _ in range(clicks * 2):
+			tab.get_by_text("Increment").click()
+		tab.wait_for_function(f"document.querySelector('p').textContent.includes('Current Count: {clicks * 2}')", timeout=5000)
+		# Over the page's WebSocket, which the router passed to the page's worker
+		assert posts == []
+
+	for tab in tabs:
+		assert tab.errors == []
+		tab.close()
+
+
+@pytest.mark.mongo
+def test_chat_through_serve_workers_reaches_windows_on_the_other_worker(serve_workers, browser):
+
+	import os
+
+	import pymongo
+
+	# The database the workers use (conftest sets it for the test run)
+	with pymongo.MongoClient(os.environ["DOMINO_MONGO__URL"]) as client:
+		client.get_default_database()["messages"].delete_many({})
+
+	first, second = open_on_each_worker(browser, serve_workers("chat"))
+
+	# Written by one worker, re-rendered on the other through MongoDB's change stream
+	first.fill("input[name=name]", "Ada")
+	first.fill("input[name=text]", "Hi from another process")
+	first.press("input[name=text]", "Enter")
+	second.wait_for_function("document.querySelectorAll('.messages li').length === 1", timeout=10000)
+	assert "Hi from another process" in second.locator(".messages").inner_text()
+
+	second.fill("input[name=name]", "Grace")
+	second.fill("input[name=text]", "Hi back")
+	second.press("input[name=text]", "Enter")
+	first.wait_for_function("document.querySelectorAll('.messages li').length === 2", timeout=10000)
+
+	for tab in (first, second):
+		assert tab.errors == []
+		tab.close()
+
+
+def test_a_page_switch_to_another_worker_opens_a_socket_to_it(serve_asgi, page, monkeypatch):
+
+	# Each page as if from another worker of `domino serve` (all served by one process here),
+	# so every page switch moves to a page the open socket's worker doesn't have
+	import itertools
+	import domino.core
+	workers = itertools.cycle(["w1-", "w2-", "w3-"])
+	monkeypatch.setattr(domino.core, "worker_prefix", lambda: next(workers))
+
+	sockets = []
+	posts = []
+	page.on("websocket", lambda ws: sockets.append(ws))
+	page.on("request", lambda request: "/_domino/events" in request.url and posts.append(request))
+	page.goto(serve_asgi("functional") + "counter")
+	page.get_by_text("Click me").click()
+	page.wait_for_function("document.querySelector('main p').textContent.includes('Clicked 1 times')", timeout=5000)
+
+	page.get_by_role("link", name="Home").click()
+	page.wait_for_function("document.querySelector('h1').textContent.includes('Welcome')", timeout=5000)
+	page.get_by_role("link", name="Counter").click()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Counter'", timeout=5000)
+	page.get_by_text("Click me").click()
+	page.get_by_text("Click me").click()
+	page.wait_for_function("document.querySelector('main p').textContent.includes('Clicked 2 times')", timeout=5000)
+
+	# The second counter (w3) is on another worker than the socket (w1): a new socket, the old
+	# one closed once its events were answered; no POSTs
+	assert [ws.url.split("page=")[1][:3] for ws in sockets] == ["w1-", "w3-"]
+	page.wait_for_timeout(300)
+	assert [ws.is_closed() for ws in sockets] == [True, False]
+	assert posts == []
+	assert page.errors == []
+
+
+def test_uploads_through_serve_workers_reach_the_page_worker(serve_workers, browser):
+
+	tabs = open_on_each_worker(browser, serve_workers("uploads"))
+
+	for tab in tabs:
+		tab.set_input_files("input[name=photos]", [image_file("red.png", (220, 40, 40))])
+		tab.get_by_text("Upload", exact=True).click()
+		# The upload and its event went to the worker with this tab's page
+		tab.wait_for_function("document.querySelectorAll('ul img').length === 1", timeout=5000)
+		assert tab.errors == []
+		tab.close()

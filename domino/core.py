@@ -49,6 +49,18 @@ SESSION_USER_KEY = "domino_user_id"
 # Seconds a browser has to claim a session changed over the WebSocket (see session_handoff)
 SESSION_HANDOFF_TTL = 60
 
+# Set in each worker process by `domino serve --workers N` (see domino.workers)
+WORKER_ID_ENV = "DOMINO_WORKER_ID"
+
+
+def worker_prefix():
+	""""w3-" in worker 3 of `domino serve`, else "". Page ids and session tokens start with it,
+	so the router in front of the workers sends their requests to the process that has them."""
+
+	worker = os.environ.get(WORKER_ID_ENV)
+
+	return f"w{worker}-" if worker else ""
+
 
 def render_stack():
 	"""Components whose render() is running in this thread, innermost last."""
@@ -176,7 +188,7 @@ class Page:
 
 	def __init__(self):
 
-		self.id = str(uuid.uuid4())
+		self.id = worker_prefix() + str(uuid.uuid4())
 		self.events = {}
 		self.lock = threading.RLock()  # serializes events for this page
 		self.version = 0  # bumped per update, so the browser can drop stale responses
@@ -615,7 +627,19 @@ class Domino(Flask):
 		reload = options.pop("use_reloader", debug_mode)
 		options.pop("threaded", None)  # Werkzeug's; uvicorn needs no thread per request
 
-		from .asgi import serve
+		from .asgi import app_location, serve
+
+		# Like `domino serve --workers N`: processes that each load the app from its file
+		workers = options.pop("workers", None) or 1
+		if workers > 1 and reload:
+			self.logger.warning("Domino: serving one process, not %s workers, while reloading on changes", workers)
+		elif workers > 1 and app_location(self) is None:
+			self.logger.warning("Domino: serving one process; for workers the app must be defined at the top level of a module file")
+		elif workers > 1:
+			from . import workers as serving
+			serving.serve(app_location(self), host or "127.0.0.1", port or 5000, workers)
+			return
+
 		serve(self, host or "127.0.0.1", port or 5000, reload, **options)
 
 
@@ -856,7 +880,7 @@ class Domino(Flask):
 		if not cookies:
 			return None, []
 
-		token = secrets.token_urlsafe(32)
+		token = worker_prefix() + secrets.token_urlsafe(32)
 		now = time.monotonic()
 		with self._handoffs_lock:
 			# Unclaimed tokens (the tab closed) expire after a minute

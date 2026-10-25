@@ -92,6 +92,30 @@ def test_run_arguments_can_be_set():
 	assert (args.app, args.port, args.host, args.no_mongo, args.mongo_version) == ("site/main.py", 8000, "0.0.0.0", True, "8.0")
 
 
+def test_serve_arguments_default_to_every_core():
+
+	args = cli.build_parser().parse_args(["serve"])
+
+	assert (args.command, args.app, args.workers, args.port, args.host) == ("serve", ".", None, 8000, "127.0.0.1")
+
+
+def test_serve_arguments_can_be_set():
+
+	args = cli.build_parser().parse_args(["serve", "site", "--workers", "4", "--port", "80", "--host", "0.0.0.0"])
+
+	assert (args.app, args.workers, args.port, args.host) == ("site", 4, 80, "0.0.0.0")
+
+
+@pytest.mark.parametrize("workers", ["0", "-2", "many"])
+def test_serve_needs_at_least_one_worker(workers, capsys):
+
+	with pytest.raises(SystemExit) as exit:
+		cli.main(["serve", "--workers", workers])
+
+	assert exit.value.code == 2
+	assert "--workers" in capsys.readouterr().err
+
+
 def test_version_flag(capsys):
 
 	with pytest.raises(SystemExit) as exit:
@@ -369,6 +393,60 @@ def test_flask_run_serves_the_app_itself(tmp_path, started, monkeypatch):
 	make_app(tmp_path / "flask").run(debug=True)
 
 	assert started["run"] == []
+
+
+# domino serve
+
+
+@pytest.fixture
+def workers_serve(monkeypatch):
+
+	import domino.workers
+
+	calls = []
+	monkeypatch.setattr(domino.workers, "serve", lambda *args: calls.append(args) or 0)
+	monkeypatch.setattr(domino.workers, "default_count", lambda: 6)
+
+	return calls
+
+
+def test_serve_starts_a_worker_per_core_without_loading_the_app(tmp_path, workers_serve, started):
+
+	folder = tmp_path / "prod"
+	write_app(folder)
+
+	assert cli.main(["serve", str(folder), "--port", "9000"]) == 0
+
+	assert workers_serve == [(str(folder.resolve()), "127.0.0.1", 9000, 6)]
+	# Production: no local MongoDB, and the router process doesn't import the app
+	assert started["mongo"] == [] and started["run"] == []
+
+
+def test_serve_with_one_worker_serves_the_app_itself(tmp_path, workers_serve, started, capsys):
+
+	path = write_app(tmp_path / "single")
+
+	assert cli.main(["serve", str(path), "--workers", "1", "--host", "0.0.0.0"]) == 0
+
+	assert workers_serve == []
+	assert started["run"] == [{"host": "0.0.0.0", "port": 8000, "reload": False, "debug": False}]
+	assert started["mongo"] == []
+	assert "App: http://0.0.0.0:8000/ (1 worker)" in capsys.readouterr().err
+
+
+def test_serve_checks_the_app_is_there(tmp_path, workers_serve, capsys):
+
+	assert cli.main(["serve", str(tmp_path / "nope.py")]) == 1
+	assert "No app at" in capsys.readouterr().err
+
+	(tmp_path / "empty").mkdir()
+	assert cli.main(["serve", str(tmp_path / "empty")]) == 1
+	assert "No app.py or pages/ folder" in capsys.readouterr().err
+
+	# A folder with just pages/ is an app
+	(tmp_path / "pages_only" / "pages").mkdir(parents=True)
+	assert cli.main(["serve", str(tmp_path / "pages_only")]) == 0
+	assert workers_serve == [(str((tmp_path / "pages_only").resolve()), "127.0.0.1", 8000, 6)]
 
 
 # Serving with uvicorn

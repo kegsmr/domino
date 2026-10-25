@@ -304,10 +304,19 @@ window.Domino = (() => {
         return !!document.querySelector('[data-event-id], [data-after-id], [data-live]');
     }
 
+    // The worker process of `domino serve` that has a page ("w3" from "w3-<id>"), or "" with
+    // a single process
+    function workerOf(id) {
+        const match = /^(w\d+)-/.exec(id || '');
+        return match ? match[1] : '';
+    }
+
     function openSocket() {
         const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
-        const ws = new WebSocket(scheme + location.host + '/_domino/ws');
+        // The page id in the URL tells `domino serve`'s router which worker process has the page
+        const ws = new WebSocket(scheme + location.host + '/_domino/ws?page=' + encodeURIComponent(pageId()));
         let readyAt = 0;
+        ws.worker = workerOf(pageId());
         socket = ws;
         socketReady = new Promise((resolve) => { settleReady = resolve; });
 
@@ -338,6 +347,7 @@ window.Domino = (() => {
                 waiting.delete(data.ref);
                 clearTimeout(request.timer);
                 request.resolve({ status: data.status, data });
+                if (ws.retired) closeWhenIdle(ws);
             } else {
                 // Not 'expired', which must be handled before the close that follows it
                 if (data.type === 'update') await wait(latency / 2);
@@ -347,6 +357,8 @@ window.Domino = (() => {
 
         ws.onclose = (e) => {
             clearTimeout(timer);
+            // Retired for a page in another worker (see rebind): closed by us, once idle
+            if (ws.retired) return;
             settleReady(false);
             if (socket === ws) {
                 socket = null;
@@ -391,7 +403,7 @@ window.Domino = (() => {
                 waiting.delete(ref);
                 reject(new Error('No answer from the server'));
             }, RESULT_TIMEOUT);
-            waiting.set(ref, { resolve, reject, timer });
+            waiting.set(ref, { resolve, reject, timer, ws });
             ws.send(JSON.stringify({ type: 'event', ref, page_id: pageId(), event_id: eventId, data: payload }));
         });
     }
@@ -454,6 +466,18 @@ window.Domino = (() => {
         }
         // A socket still connecting says hello for whatever page is shown when it opens
         if (socket.readyState !== WebSocket.OPEN) return;
+        // The new page is in another worker process of `domino serve`: a socket to that one.
+        // The old one answers the events it has in flight, then closes
+        if (needsServer() && workerOf(pageId()) !== socket.worker) {
+            const old = socket;
+            old.retired = true;
+            old.send(JSON.stringify({ type: 'leave' }));
+            socket = null;
+            socketReady = null;
+            closeWhenIdle(old);
+            connect();
+            return;
+        }
         if (needsServer()) {
             socketReady = new Promise((resolve) => { settleReady = resolve; });
             socket.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
@@ -461,6 +485,13 @@ window.Domino = (() => {
             socket.send(JSON.stringify({ type: 'leave' }));
             socketReady = Promise.resolve(true);
         }
+    }
+
+    function closeWhenIdle(ws) {
+        for (const request of waiting.values()) {
+            if (request.ws === ws) return;
+        }
+        ws.close(1000);
     }
 
     // Requests in flight, so overlapping ones keep <html data-domino-loading> until the last ends

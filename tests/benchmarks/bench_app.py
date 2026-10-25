@@ -2,9 +2,11 @@
 
 wsgi serves it like before the async core (Werkzeug's threaded server: one thread per request,
 each tab's Server-Sent Events stream holds one); asgi serves app.asgi with uvicorn.
+bench_serve.py serves it with `domino serve bench_app.py --workers N` (/busy).
 """
 
 import sys
+import time
 
 import domino.tags as t
 from domino import Domino
@@ -67,6 +69,26 @@ class Counter(t.div):
 		return self
 
 
+def work(seconds):
+	"""Busy Python, holding the GIL, like a handler or a page that computes something. Counts
+	this thread's CPU time, so a process waiting for a core still does all of its work."""
+
+	deadline = time.thread_time() + seconds
+	while time.thread_time() < deadline:
+		pass
+
+
+class Busy(Counter):
+	"""The counter, with a handler that does about 5 ms of Python work."""
+
+
+	def increment(self):
+
+		work(0.005)
+
+		return super().increment()
+
+
 # Shared by every page, so one refresh() fans out to all of them
 ticker = Ticker()
 
@@ -77,6 +99,16 @@ def index():
 	return Document() [
 		ticker,
 		Counter()
+	]
+
+
+@app.route("/busy")
+def busy():
+
+	work(0.005)
+
+	return Document() [
+		Busy()
 	]
 
 

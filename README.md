@@ -134,7 +134,9 @@ domino run
 
 `domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode with uvicorn's reloader, so it restarts when you save a `.py` file in the app's folder. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `domino --version` prints the version.
 
-`app.run(debug=True)` (what `python app.py` does in the examples) serves the same way. Reloading starts a new process that loads the app again from its file, so the app must be assigned at the top level of the module (`app = Domino(__name__)`); otherwise it runs without reloading. Without debug mode, `app.run()` serves with uvicorn without reloading.
+`domino serve [folder or app.py] [--workers N] [--port 8000] [--host 127.0.0.1]` serves the app in production, on every CPU core; see [Deployment](#deployment).
+
+`app.run(debug=True)` (what `python app.py` does in the examples) serves the same way as `domino run`. Reloading starts a new process that loads the app again from its file, so the app must be assigned at the top level of the module (`app = Domino(__name__)`); otherwise it runs without reloading. Without debug mode, `app.run()` serves with uvicorn without reloading.
 
 ### Development MongoDB
 
@@ -628,17 +630,27 @@ Served through `app.asgi` (with uvicorn, which `app.run()` and `domino run` use)
 
 ## Deployment
 
-Serve the ASGI app with uvicorn (installed with Domino):
+Serve the app with `domino serve`:
 
 ```
-uvicorn app:app.asgi --host 0.0.0.0 --port 8000
+domino serve myapp --host 0.0.0.0 --port 8000
 ```
 
-Behind a proxy, let it pass WebSockets for `/_domino/ws` (with nginx: `proxy_http_version 1.1` and the `Upgrade`/`Connection` headers). Plain WSGI servers (`gunicorn app:app`) work too, with the HTTP fallback above, but then each tab showing a live component holds a server thread.
+It uses every CPU core, with nothing to set up. It starts one worker process per core (`--workers N` to choose), each with its own copy of the app, and listens on the port itself, passing each request to a worker. It's for production, so it doesn't reload on changes or start a development MongoDB: set `mongo.url` (e.g. `DOMINO_MONGO__URL`).
 
-Components and their event handlers live in the memory of the server process that rendered the page. Each page load gets its own state, which expires after `DOMINO_PAGE_TTL` seconds of inactivity (default 1800). At most `DOMINO_MAX_PAGES` pages are kept (default 1000); when a page has expired, the browser reloads it.
+A page lives in the memory of the worker that rendered it: its components, their state and their event handlers. So a tab's events must reach that worker, and they do, without sticky sessions or anything else to configure: each page id starts with its worker's number (`w3-...`), and `domino serve` sends every request about a page to the worker the id names. New page loads go to the least busy worker. The same goes for the token a login over the WebSocket hands the browser.
 
-Because of that, run a single process, or use sticky sessions so a browser keeps talking to the same worker. To change how pages are kept, subclass `domino.PageStore` (or `MemoryPageStore`) and pass `Domino(__name__, page_store=...)`. A store shared between processes would need to serialize components and their callbacks.
+- If a worker crashes, it's started again. Its pages are gone, so their tabs reload, as after a restart. Ctrl+C or `SIGTERM` stops the workers, letting them finish what they're doing; if `domino serve` itself is killed, its workers stop too.
+- Named collections (`Collection("messages")`, MongoDB) are shared: a change made in any worker re-renders the components showing it in every worker, through MongoDB's change streams (which need a replica set).
+- Everything else in Python memory is per worker: `Collection()` without a name, module-level `State`, caches, the failed-login counts. Two tabs on different workers don't see each other's in-memory data, so keep what users share in MongoDB.
+- A background thread the app starts (like `examples/clock/`'s) runs in each worker, and its `refresh()` updates that worker's pages.
+- Workers load the app side by side, so starting takes about as long as with one.
+
+`domino serve --workers 1` serves one process with no router, as does uvicorn itself: `uvicorn app:app.asgi --host 0.0.0.0 --port 8000`. `app.run(workers=4)` (without debug mode) is the same as `domino serve --workers 4`, for an app defined at the top level of its file.
+
+Behind a proxy such as nginx (for HTTPS, say), let it pass WebSockets for `/_domino/ws` (with nginx: `proxy_http_version 1.1` and the `Upgrade`/`Connection` headers). Workers see the visitor's address in `request.remote_addr`; as with uvicorn, an `X-Forwarded-For` header is believed only from the addresses in `FORWARDED_ALLOW_IPS` (default `127.0.0.1`). Plain WSGI servers (`gunicorn app:app`) work too, with the HTTP fallback above, but then each tab showing a live component holds a server thread, and several worker processes need sticky sessions.
+
+Each page load gets its own state, which expires after `DOMINO_PAGE_TTL` seconds of inactivity (default 1800). At most `DOMINO_MAX_PAGES` pages are kept per worker (default 1000); when a page has expired, the browser reloads it. To change how pages are kept, subclass `domino.PageStore` (or `MemoryPageStore`) and pass `Domino(__name__, page_store=...)`.
 
 ## Tests
 

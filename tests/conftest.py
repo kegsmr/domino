@@ -1,10 +1,14 @@
 import asyncio
 import importlib.util
 import os
+import re
+import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -55,7 +59,8 @@ def pytest_sessionfinish(session):
 		client.drop_database(DATABASE)
 
 
-EXAMPLES = Path(__file__).parent.parent / "examples"
+ROOT = Path(__file__).parent.parent
+EXAMPLES = ROOT / "examples"
 
 
 def forget(folder):
@@ -162,3 +167,106 @@ def asgi_server():
 
 	for server in servers:
 		server.stop()
+
+
+def running(pid):
+
+	try:
+		with open(f"/proc/{pid}/stat") as stat:
+			# A zombie has exited; it's only waiting to be reaped
+			return stat.read().rsplit(")", 1)[1].split()[0] != "Z"
+	except FileNotFoundError:
+		return False
+	except OSError:
+		pass
+
+	try:
+		os.kill(pid, 0)
+	except ProcessLookupError:
+		return False
+
+	return True
+
+
+def wait_until(condition, timeout=10, message="timed out"):
+
+	deadline = time.monotonic() + timeout
+	while not condition():
+		assert time.monotonic() < deadline, message
+		time.sleep(0.05)
+
+
+class Served:
+	"""`domino serve <app> --workers N --port 0` in a subprocess."""
+
+
+	def __init__(self, app, count=2, log_path=None):
+
+		self.log_path = log_path or Path(app) / "serve.log"
+		self.log = open(self.log_path, "w")
+
+		env = dict(os.environ, PYTHONPATH=str(ROOT))
+		env.pop("DOMINO_WORKER_ID", None)
+		command = "import sys; from domino.cli import main; sys.exit(main(sys.argv[1:]))"
+		self.process = subprocess.Popen([sys.executable, "-c", command, "serve", str(app), "--workers", str(count), "--port", "0"],
+			stdout=self.log, stderr=subprocess.STDOUT, env=env, cwd=str(self.log_path.parent))
+		self.pids = {}
+		self.port = None
+
+
+	def start(self):
+
+		def started():
+			match = re.search(r"App: http://127\.0\.0\.1:(\d+)/", self.output())
+			if self.process.poll() is not None:
+				raise AssertionError(f"domino serve exited:\n{self.output()}")
+			if match:
+				self.port = int(match.group(1))
+			return match
+
+		wait_until(started, 60, "domino serve didn't start")
+		self.url = f"http://127.0.0.1:{self.port}/"
+		self.ws_url = f"ws://127.0.0.1:{self.port}/_domino/ws"
+
+		return self
+
+
+	def output(self):
+
+		return self.log_path.read_text()
+
+
+	def get(self, path, headers=None):
+
+		request = urllib.request.Request(self.url + path.lstrip("/"), headers=headers or {})
+		with urllib.request.urlopen(request, timeout=10) as response:
+			return response.read().decode()
+
+
+	def workers(self, count=2):
+		"""Worker id -> pid, asking until every worker has answered."""
+
+		pids = {}
+		while len(pids) < count:
+			worker, pid = self.get("/worker").split()
+			pids[int(worker)] = int(pid)
+		self.pids.update(pids)
+
+		return pids
+
+
+	def stop(self):
+
+		if self.process.poll() is None:
+			self.process.terminate()
+			try:
+				self.process.wait(15)
+			except subprocess.TimeoutExpired:
+				self.process.kill()
+				self.process.wait()
+
+		# Never leave a worker behind, whatever the test did
+		for pid in self.pids.values():
+			if running(pid):
+				os.kill(pid, signal.SIGKILL)
+		self.log.close()

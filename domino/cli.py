@@ -1,4 +1,5 @@
-"""The `domino` command: `domino run` and `domino create`, like `meteor run` and `meteor create`."""
+"""The `domino` command: `domino run` and `domino create`, like `meteor run` and `meteor create`,
+and `domino serve` for production."""
 
 import argparse
 import importlib.util
@@ -150,10 +151,25 @@ def build_parser():
 	run.add_argument("--no-mongo", action="store_true", help="don't start a local MongoDB")
 	run.add_argument("--mongo-version", help=f"MongoDB release series to download (default: {devmongo.DEFAULT_VERSION})")
 
+	serve = commands.add_parser("serve", help="serve an app in production, on every CPU core")
+	serve.add_argument("app", nargs="?", default=".", help="the app's folder or Python file (default: the current folder)")
+	serve.add_argument("--workers", type=positive_int, help="processes to serve with (default: one per CPU core)")
+	serve.add_argument("--port", type=int, default=8000, help="port to serve on (default: 8000)")
+	serve.add_argument("--host", default="127.0.0.1", help="interface to serve on (default: 127.0.0.1; 0.0.0.0 for every one)")
+
 	create = commands.add_parser("create", help="create a new app folder")
 	create.add_argument("name", help="folder to create")
 
 	return parser
+
+
+def positive_int(value):
+
+	number = int(value)
+	if number < 1:
+		raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+
+	return number
 
 
 def main(argv=None):
@@ -164,6 +180,8 @@ def main(argv=None):
 	try:
 		if args.command == "run":
 			return run(args)
+		if args.command == "serve":
+			return serve(args)
 		if args.command == "create":
 			return create(args.name)
 	except (CliError, devmongo.DevMongoError) as error:
@@ -261,6 +279,35 @@ def run(args):
 	app.run(host=args.host, port=args.port, debug=True)
 
 	return 0
+
+
+def app_path(path):
+	"""The app's folder or file, checked like load_app() does but without importing it."""
+
+	path = Path(path).resolve()
+	if path.is_dir() and not (path / "app.py").is_file() and not (path / "pages").is_dir():
+		raise CliError(f"No app.py or pages/ folder in {path}")
+	if not path.exists():
+		raise CliError(f"No app at {path} (pass the app's folder or Python file, e.g. `domino serve app.py`)")
+
+	return str(path)
+
+
+def serve(args):
+
+	from . import asgi, workers
+
+	count = args.workers or workers.default_count()
+
+	# One process needs no router: the app served by uvicorn, as `uvicorn app:app.asgi` would
+	if count == 1:
+		app = load_app(args.app)
+		print(f"domino: App: http://{args.host}:{args.port}/ (1 worker)", file=sys.stderr, flush=True)
+		asgi.serve(app, args.host, args.port, False)
+		return 0
+
+	# The workers load the app themselves; this process only routes
+	return workers.serve(app_path(args.app), args.host, args.port, count)
 
 
 def create(name):
