@@ -315,9 +315,9 @@ class Counter(t.div):
 
 - As a class attribute (`count = State(0)`), each component instance has its own value, like React's `useState`; read and assign it as `self.count`.
 - At module level (`online = State(0)`), one value is shared by everyone: `online.value` reads it and `online.value = 3` changes it, re-rendering the components that show it on every open page (see [Reactive data](#reactive-data)).
-- Lists and dicts: assign a new value (`self.items = self.items + [x]`) or set them again after changing them in place, since changes inside them can't be seen.
+- Lists, dicts and sets can be changed in place in event handlers (`self.items.append(x)`, `self.flags[key] = True`): each one a handler reads is compared with how it was at the start, so the change re-renders like an assignment. Elsewhere (a background thread, say), assign a new value or set it again after changing it.
 - Each page load, including a page swapped in by a link, makes its components afresh, so their state starts again. Keep what should last, or be shared, in a `Collection`.
-- Handlers that only change their own component's `State` show at once in the browser, before the server answers (see [Instant updates](#instant-updates)).
+- Handlers that only change their own component's `State` or a `Collection` show at once in the browser, before the server answers (see [Instant updates](#instant-updates)).
 
 ## Templates
 
@@ -526,6 +526,7 @@ class Chat(t.ul):
 
 - `State(value)`: `.value` reads (and subscribes), `.value = x` changes it.
 - `Collection(name)`: `insert(doc)` (returns the `_id`), `find(query, sort=..., limit=...)` (a cursor you iterate or `.fetch()`), `find_one`, `count`, `update(query, {"$set": ...}, multi=False)` and `remove(query)`, with MongoDB-style queries (`$gt`, `$in`, `$or`, dotted paths, ...). Documents come back as copies.
+- Writes from handlers show at once in the browser that made them, before the server answers (see [Instant updates](#instant-updates)).
 - Changes made while handling an event re-render each subscriber once, in the background, so the user who made the change gets their response straight away. Use `with batch():` to group changes made elsewhere, and `domino.wait()` in tests to let background updates finish.
 
 See `examples/chat/`.
@@ -723,11 +724,68 @@ See `examples/settings/`.
 
 ### Instant updates
 
-Handlers that only change their component's own `State` with plain expressions — `self.count += 1`, `self.open = not self.open`, `if len(self.items) < 3: ...` — feel instant even on a slow connection, with nothing to configure. So do lambdas that only call such a method with plain values, like `on_click=lambda event, index=index: self.select(index)` (the method's parameters can be read like constants). Domino decides which handlers qualify by reading their code: anything that calls functions (like `messages.insert(...)`), uses the event's value, or touches anything but the component's `State` is never run ahead of time.
+Handlers that only change their component's own `State` with plain Python — `self.count += 1`, `self.open = not self.open`, `self.items.append(x)`, `if len(self.items) < 3: ...` — feel instant even on a slow connection, with nothing to configure. So do lambdas that only call such a method with plain values, like `on_click=lambda event, index=index: self.select(index)` (the method's parameters can be read like constants), and `functools.partial(self.select, index)`. Domino decides which handlers qualify by reading their code. A handler may use:
+
+- the component's `State`, its own local variables (`step = 2`, `a, b = b, a`) and parameters, and constants;
+- arithmetic, comparisons, f-strings, list, dict and set literals and comprehensions, slicing, `for` loops (with `break`, `continue`) and an early `return`;
+- `len`, `min`, `max`, `sum`, `sorted`, `range`, `enumerate`, `zip`, `reversed`, `any`, `all`, `str`, `int`, `list`, `dict`, `set` and a few more builtins;
+- the methods of strings (`.strip()`, `.lower()`, `.split()`, `.join()`, `.replace()`, ...), and of lists, dicts and sets, including those that change them in place (`.append()`, `.pop()`, `self.flags[key] = value`, `del self.items[i]`);
+- other methods of the component that qualify (`self.select(i)`), with plain values;
+- `event.value`, when the element can only send a few values (see below), and `event.form["name"]` (see below);
+- the app's `Collection`s: `find`, `find_one`, `count`, `insert`, `update` and `remove` (see below), and `time.time()`.
+
+Anything else — calling other functions, reading globals or attributes of other objects, `while` loops, `try`, imports, defining functions — is never run ahead of time, and neither is a handler whose component holds `State` that isn't plain data (numbers, strings, lists, dicts, dates, ...). To be sure, a prediction doesn't run your method but a copy compiled with nothing but those builtins in reach, whose method calls check the value's type as they run, on copies of the state, with a cap on loop steps; and writes to collections while predicting are kept aside, never made.
 
 When the server renders such a component it follows those handlers from its current state to every state they lead to, renders each state once, and ships them inside the component (inert JSON) with which event leads to which state. Menus, tabs, accordions, toggles, a stepper with bounds or a carousel have only a few states, so the browser can show any number of clicks in a row the moment they happen, without waiting for the server even once. The events still go to the server, in order, and the server stays the source of truth: its answer to the last click in flight confirms what's shown, or puts it right if something changed on the server meanwhile (answers to earlier clicks don't undo later ones). If an event fails, the component goes back to what the server last showed. While the page shows something the server hasn't confirmed, the component has a `data-predicted` attribute.
 
-A component whose states could go on forever (a counter) gets the states one click away instead, as do those with more than 16 states or more than 32 KB of HTML for them; set `optimistic_states = n` on the class to change the number. Set `optimistic = False` to turn it all off (each state costs a render on the server). See `examples/instant/`.
+A component whose states could go on forever (a counter) gets the states one click away instead (at most 24), as do those with more than 16 states or more than 32 KB of HTML for them (large states are sent as patches, so that's usually a lot); set `optimistic_states = n` on the class to change the number. Set `optimistic = False` to turn it all off (each state costs a render on the server). The inspector (see [Developer tools](#developer-tools)) says why a handler isn't predicted. See `examples/instant/`.
+
+**Choices.** A handler that reads `event.value` is predicted for each value the element can send, when there are only a few: a `<select>`'s options (up to 16), a checkbox (`True` or `False`), a radio button (`True`: it's only sent when checked), a button with a `value`, and elements that aren't fields (`None`). The browser follows the state for the value it sends. Typing in a text field stays up to the server.
+
+```python
+t.select(on_change=self.sort_by)([t.option(value=key, selected=key == self.sort) [label] for key, label in SORTS])
+
+def sort_by(self, event):
+	self.sort = event.value
+```
+
+**Collections, like Meteor's latency compensation.** Handlers that write to a `Collection` qualify too: while predicting, `insert`, `update` and `remove` are kept aside in the prediction and the component's reads (`find`, `find_one`, `count`, in `render()` too) see them, so the predicted state shows the collection as it will be. Ticking or removing a todo by its `_id` is rendered ahead for each todo. A form's fields aren't known until it's submitted, so a handler reading `event.form["text"]` gets a placeholder instead, which the browser replaces with what was typed (escaped) wherever the predicted HTML has it. A todo list or a chat then shows a new item the moment it's submitted, and again for a second and third submission before the server answered:
+
+```python
+todos = Collection("todos")
+
+class Todos(t.div):
+
+	def render(self):
+		return [
+			t.form(on_submit=self.add) [t.input(name="text"), t.button() ["Add"]],
+			t.ul()([
+				t.li() [
+					t.input(type="checkbox", checked=todo["done"], on_change=lambda event, id=todo["_id"]: self.toggle(id)),
+					todo["text"],
+				]
+				for todo in todos.find(sort="added")
+			]),
+		]
+
+	def add(self, event):
+		text = event.form["text"].strip()
+		if text:
+			todos.insert({"text": text, "done": False, "added": time.time()})
+
+	def toggle(self, id):
+		todo = todos.find_one({"_id": id})
+		todos.update({"_id": id}, {"$set": {"done": not todo["done"]}})
+```
+
+The limits of predicting data, all of which the server's answer puts right:
+
+- Only the component whose handler it is is predicted: another component showing the same collection updates when the server answers. Keep the form and the list it adds to in one component.
+- A write is predicted one step from the current state: a second write before the server answered the first (ticking two todos quickly) waits for the server, except submitting the same form again (up to three in a row). Clicks that only change `State` keep following on from each other.
+- With many items, only the first 24 events get a state (each costs a render: about 15 ms for a list of 10 todos), and a long list's states are patches but still add to the page.
+- A form field may only be shown as typed, or changed with `.strip()`, `.lower()`, `.upper()` or `[:n]` (the browser does the same); anything else done with it (`int()`, `.replace()`, `in`, comparing it) stops the prediction or comes out wrong, and it counts as non-empty: the browser predicts only when the fields aren't blank. Its `len()` is taken as 1, so a length check is left to the server.
+- Queries are matched in Python, so only the operators the in-memory collection knows (`$gt`, `$in`, `$or`, ...); a query using others isn't predicted. A predicted document's `_id` is a placeholder, and a document an update brings into a query from beyond its `limit` may be missing.
+- Changes other people make while yours is in flight show when the server answers it.
 
 ```python
 class Tabs(t.div):

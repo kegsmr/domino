@@ -643,7 +643,7 @@ def inspect_component(app, page, component, ancestors, found):
 		event = page.events.get(event_id)
 		if event is None:
 			continue
-		reason = optimistic.explain(component, callback)
+		reason = optimistic.explain(component, callback, event[0])
 		events.append({
 			"id": event_id,
 			"event": event_id.rsplit("-", 1)[-1],

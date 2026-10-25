@@ -491,7 +491,8 @@ def test_event_log_lists_events_with_timings(serve, page):
 	assert re.search(r"\d+ ms", rows.nth(0).locator(".dt-rtt").inner_text())
 
 	submit, click = page.evaluate("Domino.devtools.log")
-	assert submit["event"] == "submit" and submit["predicted"] is False and submit["status"] == 200
+	# The form's text is filled into the predicted state in the browser
+	assert submit["event"] == "submit" and submit["predicted"] is True and submit["matched"] is True and submit["status"] == 200
 	assert click["event"] == "click" and click["predicted"] is True and click["matched"] is True
 	for entry in (submit, click):
 		assert entry["serverMs"] >= 0 and entry["roundTrip"] >= 0
@@ -737,6 +738,225 @@ def test_a_failed_event_goes_back_to_what_the_server_showed(serve, page):
 	page.evaluate("Domino.disableLatencySim()")
 	# Over HTTP the browser logs the 500s itself
 	assert [error for error in page.errors if "status of 500" not in error] == []
+
+
+# Sets a form's fields and submits it, or changes a field (a select's value, a checkbox's checked)
+# or clicks a button, and reports what elements show straight after, before any answer could have
+# arrived
+SUBMIT_AND_READ = """([form, fields, shown]) => {
+	const el = document.querySelector(form);
+	for (const [name, value] of Object.entries(fields)) el.querySelector(`[name=${name}]`).value = value;
+	const started = performance.now();
+	el.requestSubmit();
+	return {
+		shown: document.querySelector(shown).textContent.replace(/\\s+/g, ' ').trim(),
+		ms: performance.now() - started,
+		predicted: el.closest('[data-predicted]') !== null,
+	};
+}"""
+
+CHANGE_AND_READ = """([field, value, shown]) => {
+	const el = document.querySelector(field);
+	const started = performance.now();
+	if (el.type === 'checkbox' || el.tagName === 'BUTTON') {
+		el.click();
+	} else {
+		el.value = value;
+		el.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+	return {
+		shown: Array.from(document.querySelectorAll(shown)).map((node) => node.textContent.replace(/\\s+/g, ' ').trim()),
+		ms: performance.now() - started,
+	};
+}"""
+
+
+def instant_todos():
+
+	return [todo["text"] for todo in sys.modules["data"].todos.find(sort="added")]
+
+
+def test_select_and_checkboxes_show_at_once(serve, page):
+
+	page.goto(serve("instant"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	result = page.evaluate(CHANGE_AND_READ, [".Playlist select", "year", ".Playlist li"])
+	assert result["shown"][:2] == ["♥ So What 1959", "♥ Blue in Green 1959"] and result["ms"] < 100
+
+	result = page.evaluate(CHANGE_AND_READ, [".Playlist input[type=checkbox]", None, ".Playlist li"])
+	assert len(result["shown"]) == 3 and result["ms"] < 100
+	result = page.evaluate(CHANGE_AND_READ, [".Playlist select", "liked", ".Playlist li"])
+	assert len(result["shown"]) == 3 and result["shown"][0].startswith("♥")
+
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=8000)
+	playlist = instant_component("Playlist")
+	assert playlist.sort == "liked" and playlist.liked_only is True
+	assert page.locator(".Playlist select").input_value() == "liked"
+	assert page.locator(".Playlist input[type=checkbox]").first.is_checked()
+	assert page.locator(".Playlist li").count() == 3
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_todos_add_tick_and_remove_show_at_once_and_the_server_agrees(serve, page):
+
+	page.goto(serve("instant"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	# Added: the typed text shows at once, in the server's own HTML for it
+	result = page.evaluate(SUBMIT_AND_READ, [".Todos form", {"text": "  Water the plants "}, ".Todos ul"])
+	assert result["shown"] == "Water the plants ×" and result["predicted"] and result["ms"] < 100
+	assert page.locator(".Todos input[name=text]").input_value() == ""
+	assert page.locator(".Todos .note").inner_text() == "1 left"
+	# And another before the server answered the first
+	result = page.evaluate(SUBMIT_AND_READ, [".Todos form", {"text": "Feed the cat"}, ".Todos ul"])
+	assert result["shown"] == "Water the plants × Feed the cat ×"
+
+	page.wait_for_function("!document.querySelector('.Todos[data-predicted]')", timeout=8000)
+	assert instant_todos() == ["Water the plants", "Feed the cat"]
+	assert page.locator(".Todos li").count() == 2
+
+	# Ticked, then removed, each at once (a write to a collection is predicted one step ahead,
+	# so the second waits for the first to be answered)
+	result = page.evaluate(CHANGE_AND_READ, [".Todos li input[type=checkbox]", None, ".Todos .note"])
+	assert result["shown"] == ["1 left"] and result["ms"] < 100
+	assert page.evaluate("document.querySelector('.Todos li').className") == "done"
+	page.wait_for_function("!document.querySelector('.Todos[data-predicted]')", timeout=8000)
+	assert sys.modules["data"].todos.find_one({"text": "Water the plants"})["done"] is True
+	result = page.evaluate(CHANGE_AND_READ, [".Todos .remove", None, ".Todos ul"])
+	assert result["shown"] == ["Feed the cat ×"] and result["ms"] < 100
+
+	page.wait_for_function("!document.querySelector('.Todos[data-predicted]')", timeout=8000)
+	assert instant_todos() == ["Feed the cat"]
+	assert " ".join(page.locator(".Todos ul").inner_text().split()) == "Feed the cat ×"
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_a_form_shown_at_once_can_be_sent_again_and_keeps_what_is_typed_next(serve, page):
+
+	page.goto(serve("instant"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+	field = ".Todos input[name=text]"
+
+	page.fill(field, "First")
+	page.press(field, "Enter")
+	assert page.locator(".Todos li").count() == 1
+	# Not disabled while in flight, so Enter submits again
+	assert not page.locator(".Todos button[type=submit]").is_disabled()
+	page.fill(field, "Second")
+	page.press(field, "Enter")
+	assert page.locator(".Todos li").count() == 2
+
+	# What's typed while the answers come is kept
+	page.locator(field).type("Third, half")
+	page.wait_for_function("!document.querySelector('.Todos[data-predicted]')", timeout=8000)
+	page.wait_for_timeout(200)
+	assert page.locator(field).input_value() == "Third, half"
+	assert instant_todos() == ["First", "Second"]
+	assert [" ".join(text.split()) for text in page.locator(".Todos li").all_inner_texts()] == ["First ×", "Second ×"]
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_chat_messages_show_at_once_and_what_was_typed_stays_text(serve, page):
+
+	page.goto(serve("instant"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	typed = '<img src=x onerror="window.pwned = 1"> & <b>bold</b>'
+	result = page.evaluate(SUBMIT_AND_READ, [".Chat form", {"name": "Ada", "text": typed}, ".Chat .messages"])
+	assert result["shown"] == f"Ada {typed}" and result["predicted"] and result["ms"] < 100
+	# Escaped where the browser filled it in: text, not elements
+	assert page.evaluate("document.querySelectorAll('.Chat .messages img, .Chat .messages b').length") == 0
+	assert page.locator(".Chat input[name=name]").input_value() == "Ada"
+
+	page.wait_for_function("!document.querySelector('.Chat[data-predicted]')", timeout=8000)
+	assert page.locator(".Chat .messages li").inner_text() == f"Ada {typed}"
+	assert page.evaluate("window.pwned") is None
+	assert [message["text"] for message in sys.modules["data"].messages.find()] == [typed]
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_a_change_from_another_tab_during_a_prediction_ends_right(serve, browser):
+
+	url = serve("instant")
+	slow, other = browser.new_page(), browser.new_page()
+	errors = []
+	for window in (slow, other):
+		window.on("pageerror", lambda error: errors.append(str(error)))
+		window.goto(url)
+	slow.evaluate("Domino.enableLatencySim(1500)")
+
+	result = slow.evaluate(SUBMIT_AND_READ, [".Todos form", {"text": "From the slow tab"}, ".Todos ul"])
+	assert result["shown"] == "From the slow tab ×"
+
+	# Meanwhile another tab adds one, which reaches the server first
+	other.fill(".Todos input[name=text]", "From the other tab")
+	other.press(".Todos input[name=text]", "Enter")
+	other.wait_for_function("document.querySelectorAll('.Todos li').length >= 1", timeout=5000)
+
+	# The slow tab ends where the server is: both, in the server's order
+	slow.wait_for_function("document.querySelectorAll('.Todos li').length === 2 && !document.querySelector('.Todos[data-predicted]')", timeout=10000)
+	slow.wait_for_timeout(300)
+	assert instant_todos() == ["From the other tab", "From the slow tab"]
+	assert [text.strip() for text in slow.locator(".Todos li label").all_inner_texts()] == instant_todos()
+	other.wait_for_function("document.querySelectorAll('.Todos li').length === 2", timeout=5000)
+	assert errors == []
+
+	slow.evaluate("Domino.disableLatencySim()")
+	for window in (slow, other):
+		window.close()
+
+
+def test_a_wrong_data_prediction_is_corrected_by_the_server(serve, page):
+
+	page.goto(serve("instant"))
+	page.fill(".Todos input[name=text]", "Old text")
+	page.press(".Todos input[name=text]", "Enter")
+	page.wait_for_function("document.querySelectorAll('.Todos li').length === 1 && !document.querySelector('[data-predicted]')", timeout=5000)
+
+	# A change the browser hasn't heard about (no push), so its prediction is out of date
+	todos = sys.modules["data"].todos
+	(stored,) = todos.store().documents.values()
+	stored["text"] = "Changed on the server"
+	todos._results.clear()
+
+	page.evaluate("Domino.enableLatencySim(1000)")
+	result = page.evaluate(CHANGE_AND_READ, [".Todos li input[type=checkbox]", None, ".Todos li"])
+	assert result["shown"] == ["Old text ×"]
+	assert page.evaluate("document.querySelector('.Todos li').className") == "done"
+
+	page.wait_for_function("document.querySelector('.Todos li').textContent.includes('Changed on the server')", timeout=5000)
+	assert not page.evaluate("document.querySelector('.Todos').hasAttribute('data-predicted')")
+	assert page.evaluate("document.querySelector('.Todos li').className") == "done"
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_screenshots_of_instant_data(serve_asgi, page):
+	"""Not a check: pictures of the instant example mid-prediction, for the docs and reviews."""
+
+	directory = os.environ.get("DOMINO_SCREENSHOTS")
+	if not directory:
+		pytest.skip("set DOMINO_SCREENSHOTS to a folder to take them")
+
+	page.set_viewport_size({"width": 900, "height": 1400})
+	page.goto(serve_asgi("instant"))
+	page.fill(".Todos input[name=text]", "Water the plants")
+	page.press(".Todos input[name=text]", "Enter")
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=5000)
+	page.evaluate("Domino.enableLatencySim(3000)")
+	page.evaluate(CHANGE_AND_READ, [".Playlist select", "year", ".Playlist li"])
+	page.evaluate(SUBMIT_AND_READ, [".Todos form", {"text": "Feed the cat <b>now</b>"}, ".Todos ul"])
+	page.evaluate(SUBMIT_AND_READ, [".Chat form", {"name": "Ada", "text": "Sent at 3 s of latency"}, ".Chat .messages"])
+	page.locator("h2", has_text="Select and checkboxes").scroll_into_view_if_needed()
+	page.screenshot(path=os.path.join(directory, "instant2-predicted.png"), full_page=True)
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=10000)
+	page.screenshot(path=os.path.join(directory, "instant2-confirmed.png"), full_page=True)
+	page.evaluate("Domino.disableLatencySim()")
 
 
 @pytest.mark.mongo

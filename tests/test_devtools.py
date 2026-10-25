@@ -49,7 +49,7 @@ class Counter(t.div):
 		return [
 			t.p() [f"Count: {self.count}"],
 			t.button(on_click=self.increment) ["+"],
-			t.button(on_click=self.save) ["Save"],
+			t.input(name="count", on_change=self.save),
 		]
 
 
@@ -329,7 +329,7 @@ def test_inspect_gives_state_events_and_predictions():
 	assert events["Counter.increment"]["event"] == "click"
 	assert events["Counter.increment"]["element"].startswith("<button>")
 	assert events["Counter.save"]["predicted"] is False
-	assert "reads the event" in events["Counter.save"]["reason"]
+	assert "reads event.value, and the <input> it's bound to can have any value" in events["Counter.save"]["reason"]
 
 	# Live: the State as it is now
 	click(client, page_id, event_ids[0])
@@ -455,7 +455,7 @@ def test_explain_says_why_a_handler_isnt_predicted():
 	other = Explained()
 
 	assert optimistic.explain(component, component.plain) is None
-	assert "reads the event" in optimistic.explain(component, component.uses_event)
+	assert "reads event.value" in optimistic.explain(component, component.uses_event)
 	assert "calls print()" in optimistic.explain(component, component.writes)
 	assert "line" in optimistic.explain(component, component.writes)
 	assert "returns a value" in optimistic.explain(component, component.returns)

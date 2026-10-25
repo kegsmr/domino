@@ -628,11 +628,7 @@ def component_text(cls):
 def forget_caches(app, templates):
 	"""Forget what Domino worked out per class or per file, which the new code may change."""
 
-	optimistic._methods.clear()
-	optimistic._callable.clear()
-	optimistic._lambdas.clear()
-	optimistic._sources.clear()
-	optimistic._state_lists.clear()
+	optimistic.forget()
 	util._class_attributes.clear()
 	core._component_css.clear()
 	core._paired_templates.clear()

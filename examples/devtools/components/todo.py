@@ -66,7 +66,7 @@ class TodoList(t.section):
 
 	def add(self, event):
 
-		# Reads the event, so it can't be predicted
+		# Reads the form: predicted with the text the browser fills in
 		text = event.form.get("text", "").strip()
 		if text:
 			self.items = self.items + [{"text": text, "done": False}]

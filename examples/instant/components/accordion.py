@@ -5,7 +5,7 @@ from domino import State
 SECTIONS = [
 	("What runs in the browser?", "Nothing you write: the server renders each state once and the browser swaps them in."),
 	("What if the server disagrees?", "Its answer wins. If something changed on the server meanwhile, the page shows what it says."),
-	("Which handlers qualify?", "Ones that only set the component's own State with plain expressions. Anything else waits for the server."),
+	("Which handlers qualify?", "Ones that only change the component's own State or a collection, with plain expressions, loops and the methods of strings, lists and dicts. Anything else waits for the server."),
 ]
 
 

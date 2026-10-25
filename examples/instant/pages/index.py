@@ -3,9 +3,12 @@ from domino.components import Document
 
 from components.accordion import Accordion
 from components.carousel import Carousel
+from components.chat import Chat
 from components.menu import SortMenu
+from components.playlist import Playlist
 from components.stepper import Stepper
 from components.tabs import Tabs
+from components.todos import Todos
 
 
 # Plain JavaScript for the latency button: it only sets core.js's latency simulator
@@ -35,8 +38,9 @@ def page():
 		],
 		t.p(class_="note") [
 			"Everything below is written in Python and rendered by the server, yet every click shows at once, "
-			"even ten clicks in a row on a slow connection. Turn on the latency simulator and try it: the "
-			"dashed outline marks what the server hasn't confirmed yet."
+			"even ten clicks in a row on a slow connection, and so do choices, todos and messages saved in a "
+			"collection. Turn on the latency simulator and try it: the dashed outline marks what the server "
+			"hasn't confirmed yet."
 		],
 		t.p() [
 			t.button(id="latency", type="button", onclick="toggleLatency()") [
@@ -54,6 +58,12 @@ def page():
 		Stepper(),
 		t.h2() ["Carousel"],
 		Carousel(),
+		t.h2() ["Select and checkboxes"],
+		Playlist(),
+		t.h2() ["Todo list (a collection)"],
+		Todos(),
+		t.h2() ["Chat (a collection)"],
+		Chat(),
 		t.script() [LATENCY_SCRIPT]
 	]
 
@@ -64,6 +74,7 @@ def page():
 	page.style("body", font_family="system-ui, sans-serif", max_width="40rem", margin="2rem auto", padding="0 1rem",
 		background="var(--background)", color="var(--text)", line_height="1.5")
 	page.style("button", font="inherit", color="inherit")
+	page.style("input, select", font="inherit")
 	page.style("h2", font_size="1rem", text_transform="uppercase", letter_spacing="0.05em", color="var(--muted)", margin="2rem 0 0.5rem")
 	page.style(".note", color="var(--muted)")
 	page.style("#latency", padding="0.4rem 0.9rem", cursor="pointer")

@@ -28,7 +28,7 @@ window.Domino = (() => {
         // The element's own value (checkboxes and radios report checked)
         if (el.type === 'checkbox' || el.type === 'radio') {
             data.value = el.checked;
-        } else if (FIELDS.includes(el.tagName)) {
+        } else if (FIELDS.includes(el.tagName) || (el.tagName === 'BUTTON' && el.hasAttribute('value'))) {
             data.value = el.value;
         }
 
@@ -879,6 +879,7 @@ window.Domino = (() => {
     function installGraph([id, graph]) {
         // With events still in flight, the server's state will move on from this one
         graph.key = inflight.get(id) > 0 ? null : 0;
+        graph.bindings = {};
         graphs.set(id, graph);
     }
 
@@ -887,15 +888,73 @@ window.Domino = (() => {
         return graph && graph.key !== null;
     }
 
-    // `reset`: as for the server's answer, which this stands in for
-    function show(node, graph, key, reset = null) {
+    // Where an edge leads for an event with this payload: {to: state, bind: {slot: value}}, or
+    // null. An edge is a state's index; or {value: {value as JSON: edge}} for an event predicted
+    // per value (a <select>'s options); or {to, form: {field: slot}} for a state that shows what
+    // was typed in the form's fields, which are filled in by `bind` (see fill)
+    function follow(edge, payload) {
+        if (edge === undefined || edge === null) return null;
+        if (typeof edge === 'number') return { to: edge, bind: null };
+        if (edge.value) {
+            const value = payload.value === undefined ? null : payload.value;
+            return follow(edge.value[JSON.stringify(value)], payload);
+        }
+        const bind = {};
+        for (const [field, slot] of Object.entries(edge.form || {})) {
+            const value = payload.form ? payload.form[field] : undefined;
+            // A blank field is up to the server (handlers usually ignore it)
+            if (typeof value !== 'string' || !value.trim()) return null;
+            bind[slot] = value;
+        }
+        return { to: edge.to, bind };
+    }
+
+    const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+    // A form field's value where a predicted state has its placeholder: the server's marker,
+    // <slot><changes>, where the changes are what the handler did to the value,
+    // done here the same way (s: strip, <: lstrip, >: rstrip, l: lower, u: upper, t<n>;: [:n]).
+    // Escaped, so what was typed shows as text, in an attribute or not. Null if a slot isn't bound.
+    function fill(html, bindings) {
+        if (html.indexOf('') < 0) return html;
+        let missing = false;
+        const filled = html.replace(/(\d+)([^]*)/g, (marker, slot, changes) => {
+            if (!(slot in bindings)) {
+                missing = true;
+                return '';
+            }
+            let value = bindings[slot];
+            const pattern = /t(\d+);|./g;
+            let match;
+            while ((match = pattern.exec(changes)) !== null) {
+                const change = match[0][0];
+                if (change === 's') value = value.trim();
+                else if (change === '<') value = value.replace(/^\s+/, '');
+                else if (change === '>') value = value.replace(/\s+$/, '');
+                else if (change === 'l') value = value.toLowerCase();
+                else if (change === 'u') value = value.toUpperCase();
+                else if (change === 't') value = Array.from(value).slice(0, parseInt(match[1], 10)).join('');
+            }
+            return value.replace(/[&<>"']/g, (character) => ESCAPES[character]);
+        });
+        return missing ? null : filled;
+    }
+
+    // `reset`: as for the server's answer, which this stands in for. `bind`: form fields' values
+    // for the placeholders of the state (see fill)
+    function show(node, graph, key, reset = null, bind = null) {
+        const bindings = bind ? Object.assign({}, graph.bindings, bind) : graph.bindings;
+        const html = fill(graph.states[key], bindings);
+        if (html === null) return false;
         const template = document.createElement('template');
-        template.innerHTML = graph.states[key];
+        template.innerHTML = html;
         const replacement = template.content.firstElementChild;
         if (!replacement || replacement.id !== node.id) return false;
         morph(node, replacement, reset);
         listen(node);
         graph.key = key;
+        graph.bindings = bindings;
+        graph.shown = html;
         return true;
     }
 
@@ -903,7 +962,7 @@ window.Domino = (() => {
     // the states earlier events led to, so any number of clicks show at once. The event still
     // goes to the server, whose answer to the last one in flight confirms it or puts it right.
     // Returns the id of the component whose events are being followed, if any.
-    function predict(el, eventId, reset) {
+    function predict(el, eventId, reset, payload) {
         for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
             const prefix = 'event-' + node.id + '-';
             const graph = node.id && eventId.startsWith(prefix) && graphs.get(node.id);
@@ -911,14 +970,17 @@ window.Domino = (() => {
 
             inflight.set(node.id, (inflight.get(node.id) || 0) + 1);
             const edges = graph.key === null ? null : graph.edges[graph.key];
-            const next = edges ? edges[eventId.slice(prefix.length)] : undefined;
-            if (next === undefined || !show(node, graph, next, reset)) {
+            const next = edges ? follow(edges[eventId.slice(prefix.length)], payload) : null;
+            if (next === null || !show(node, graph, next.to, reset, next.bind)) {
                 // Where this leads is up to the server, and so is everything after it
                 graph.key = null;
                 return node.id;
             }
             // Until the server answers (its HTML doesn't have this), for styling if wanted
             node.setAttribute('data-predicted', '');
+            // A submission shown at once has reset its form already: the answer leaves alone what's
+            // typed next, and the form isn't disabled meanwhile, so it can be sent again
+            if (reset) reset.submit = false;
             return node.id;
         }
         return null;
@@ -952,7 +1014,7 @@ window.Domino = (() => {
         // The event's data first: showing where it leads may change the fields
         const payload = eventData(el);
         const reset = { root: el, submit };
-        const owner = predict(el, eventId, reset);
+        const owner = predict(el, eventId, reset, payload);
         triggerEvent(eventId, payload, reset, el, owner);
     }
 

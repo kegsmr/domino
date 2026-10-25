@@ -2,6 +2,7 @@
 component, and changing it re-renders every subscribed component on every open page."""
 
 import logging
+import marshal
 import queue
 import threading
 import uuid
@@ -224,6 +225,41 @@ def is_predicting():
 	return getattr(_state, "overlay", None) is not None
 
 
+# The prediction overlay's entry for what a predicted handler wrote to collections: a tuple of
+# (collection, write), which reads made while predicting see on top of what's stored
+DATA = "data"
+
+
+@contextmanager
+def tracking():
+	"""Within the block (an event handler), a list, dict or set a State holds counts as changed
+	when it's changed in place (self.items.append(x)): each one read is copied the first time,
+	and compared with that copy at the end."""
+
+	if getattr(_state, "touched", None) is not None:
+		yield
+		return
+
+	touched = _state.touched = {}
+	try:
+		yield
+	finally:
+		_state.touched = None
+		for state, before in touched.items():
+			if snapshot(state._value) != before:
+				state._dependency.changed()
+
+
+def snapshot(value):
+	"""Something equal to what snapshot() gives for `value` until it changes. marshal (version 2,
+	which doesn't share repeated objects) is several times faster than a copy, for plain data."""
+
+	try:
+		return marshal.dumps(value, 2)
+	except ValueError:
+		return copy_document(value)
+
+
 class State:
 	"""A reactive value. Read it with .value (or get()), change it with .value = x (or set()).
 
@@ -277,8 +313,13 @@ class State:
 		self._dependency.depend()
 
 		overlay = getattr(_state, "overlay", None)
-		if overlay is not None and self in overlay:
-			return overlay[self]
+		if overlay is not None:
+			return overlay[self] if self in overlay else self._value
+
+		# Changes in place show only as a difference from what the handler first read
+		touched = getattr(_state, "touched", None)
+		if touched is not None and self not in touched and type(self._value) in (list, dict, set):
+			touched[self] = snapshot(self._value)
 
 		return self._value
 
@@ -373,7 +414,31 @@ class Collection:
 		self.changed()
 
 
+	def __deepcopy__(self, memo):
+
+		# A handle on the documents, not a value: predictions copy what they hold, but not this
+		return self
+
+
+	def _predicted(self, write):
+		"""While predicting, keep a write aside in the overlay instead of making it (see
+		domino.optimistic); reads made while predicting see it."""
+
+		# Outside a prediction of data (a render that writes, say) the write is just dropped
+		overlay = getattr(_state, "overlay", None)
+		if DATA in overlay:
+			overlay[DATA] = overlay[DATA] + ((self, write),)
+
+
 	def insert(self, document):
+
+		overlay = getattr(_state, "overlay", None)
+		if overlay is not None:
+			document = copy_document(document)
+			count = sum(write[0] == "insert" for _, write in overlay.get(DATA, ()))
+			document.setdefault("_id", f"predicted-{count}")
+			self._predicted(("insert", document))
+			return document["_id"]
 
 		document = deepcopy(document)
 		document.setdefault("_id", uuid.uuid4().hex)
@@ -406,6 +471,11 @@ class Collection:
 		"""Apply `changes` ($set, $unset, $inc, $push, $pull, or a whole replacement document)
 		to the first matching document, or every one with multi=True. Returns the count."""
 
+		if is_predicting():
+			matched = len(self.find(query).fetch())
+			self._predicted(("update", copy_document(query or {}), copy_document(changes), multi))
+			return matched if multi else min(matched, 1)
+
 		updated = self.store().update(query or {}, changes, multi)
 		if updated:
 			self._wrote()
@@ -415,6 +485,11 @@ class Collection:
 
 	def remove(self, query=None):
 
+		if is_predicting():
+			matched = len(self.find(query).fetch())
+			self._predicted(("remove", copy_document(query or {})))
+			return matched
+
 		removed = self.store().remove(query or {})
 		if removed:
 			self._wrote()
@@ -423,6 +498,17 @@ class Collection:
 
 
 	def _fetch(self, query, sort, limit):
+
+		overlay = getattr(_state, "overlay", None)
+		if overlay is not None:
+			writes = [write for collection, write in overlay.get(DATA, ()) if collection is self]
+			if writes:
+				return predicted_find(self, writes, query, sort, limit)
+
+		return self._read(query, sort, limit)
+
+
+	def _read(self, query, sort, limit):
 
 		store = self.store()
 		self._dependency.depend()
@@ -440,6 +526,46 @@ class Collection:
 
 		# Copies, so callers can't change the stored documents or the cached results
 		return [copy_document(document) for document in documents]
+
+
+def predicted_find(collection, writes, query, sort, limit):
+	"""What a query would find after the writes a prediction kept aside: the stored documents it
+	finds (and those the predicted updates match, which they may bring into it), with the writes
+	applied in order. Queries are matched here, so only the operators matches() knows work."""
+
+	check_query(query)
+	others = sum(write[0] != "insert" for write in writes)
+	documents = {}
+	for document in collection._read(query, sort, None if limit is None else limit + others):
+		documents[document["_id"]] = document
+	for write in writes:
+		if write[0] == "update":
+			for document in collection._read(write[1], None, None):
+				documents.setdefault(document["_id"], document)
+
+	for write in writes:
+		if write[0] == "insert":
+			if write[1]["_id"] in documents:
+				raise ValueError(f"Duplicate _id: {write[1]['_id']!r}")
+			documents[write[1]["_id"]] = copy_document(write[1])
+		elif write[0] == "update":
+			_, selector, changes, multi = write
+			check_query(selector)
+			for key, document in list(documents.items()):
+				if matches(document, selector):
+					documents[key] = apply_changes(document, changes)
+					if not multi:
+						break
+		else:
+			check_query(write[1])
+			for key in [key for key, document in documents.items() if matches(document, write[1])]:
+				del documents[key]
+
+	found = sort_documents([document for document in documents.values() if matches(document, query)], sort)
+	if limit is not None:
+		found = found[:limit]
+
+	return found
 
 
 class MemoryStore:

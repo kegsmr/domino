@@ -19,6 +19,12 @@
 ### Styles
 - Tailwind CSS with zero setup: `{"tailwind": true}` (or a `tailwind.css` in the app's folder) and classes work anywhere. Tailwind's standalone CLI is downloaded once into `~/.domino/tailwind/`; `domino run` rebuilds as files change and open pages swap in the new CSS; `domino serve` builds it minified; `domino tailwind build` for Dockerfiles; `domino create --tailwind`.
 
+### Instant updates
+- Many more handlers show at once: local variables, comprehensions, `for` loops, early `return`, the methods of strings, lists, dicts and sets (including `self.items.append(x)`), calls of other qualifying methods, `functools.partial`. Predictions run a sandboxed copy of the method whose calls are checked as they run.
+- `event.value` of a `<select>`, checkbox, radio button or button with a value is predicted per value.
+- Writes to a `Collection` are predicted like Meteor's latency compensation: kept aside while predicting, with form fields filled in by the browser (escaped), so adding, ticking and removing todos or sending a chat message show at once.
+- Lists, dicts and sets in `State` changed in place in a handler re-render like an assignment.
+
 ### Speed
 - Over the WebSocket, updates are sent as line-diff patches against what the tab already has: a chat message to a 200-message list goes from 28 KB to 198 bytes. Large predicted states are patched too.
 - Hidden tabs pause: the server skips their updates until they're shown again.

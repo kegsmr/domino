@@ -8,7 +8,7 @@ import time
 import pytest
 
 import domino.tags as t
-from domino import Collection, Domino, State, patches
+from domino import Collection, Domino, State, patches, reactive
 from domino.components import Document
 from domino.patches import Patcher, apply, diff
 
@@ -328,7 +328,9 @@ class Feed(t.div):
 
 	def render(self):
 
-		self.renders.append(self)
+		# Not the render predicting what Clear shows (see domino.optimistic)
+		if not reactive.is_predicting():
+			self.renders.append(self)
 
 		return [
 			t.ul()([

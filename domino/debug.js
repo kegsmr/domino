@@ -259,7 +259,7 @@ html[data-domino-inspecting], html[data-domino-inspecting] * { cursor: crosshair
             log.length = 0;
             logPage = pageId();
         }
-        const guess = graph && graph.key !== null && graph.key !== undefined ? graph.states[graph.key] : null;
+        const guess = graph && graph.key !== null && graph.key !== undefined ? graph.shown || graph.states[graph.key] : null;
         const entry = {
             n: ++counter,
             event: eventType(eventId),

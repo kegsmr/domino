@@ -3,7 +3,7 @@ from domino import State
 
 
 TABS = [
-	("Overview", "Every handler on this page only changes its component's own State, so Domino renders the states it leads to ahead of time."),
+	("Overview", "Every handler on this page only changes its component's own State or a collection, so Domino renders the states it leads to ahead of time."),
 	("How", "The browser follows those states as you click, any number of clicks in a row, while the events still go to the server in order."),
 	("Truth", "The server stays the source of truth: its answer to your last click confirms what you see, or puts it right."),
 ]

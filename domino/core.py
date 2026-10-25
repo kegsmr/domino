@@ -883,10 +883,12 @@ class Domino(Flask):
 				g.domino_debug = (time.perf_counter(), callback)
 
 			try:
-				if accepts_argument(callback):
-					result = callback(Event.from_request(event_id, data, files))
-				else:
-					result = callback()
+				# Lists, dicts and sets in State changed in place (self.items.append(x)) count as changes
+				with reactive.tracking():
+					if accepts_argument(callback):
+						result = callback(Event.from_request(event_id, data, files))
+					else:
+						result = callback()
 
 				# A handler that returns nothing re-renders the component its changes
 				# affected on this page, or else the component it's a method of
@@ -1404,7 +1406,7 @@ class Element:
 		cls = type(self)
 		if getattr(cls, "optimistic", True) is False:
 			return None
-		callbacks = optimistic.own_callbacks(self, bound)
+		callbacks = optimistic.own_callbacks(self, bound, page.events)
 		if not callbacks:
 			return None
 
@@ -1421,7 +1423,7 @@ class Element:
 			return html, self.__bound__
 
 		try:
-			return optimistic.graph(self, callbacks, render, getattr(cls, "optimistic_states", None))
+			return optimistic.graph(self, callbacks, render, getattr(cls, "optimistic_states", None), elements=page.events)
 		finally:
 			self.__children__ = children
 			self.content_root.__children__ = content
