@@ -596,3 +596,26 @@ def test_oauth_buttons_and_routes_only_exist_when_configured(users):
 	html = client.get("/?next=/private").get_data(as_text=True)
 	assert 'href="/_domino/accounts/github/login?next=%2Fprivate"' in html
 	assert "Continue with GitHub" in html and "Google" not in html
+
+
+def test_whole_flow_with_the_test_client(users):
+
+	app = make_app()
+	page = app.test_page("/private")
+
+	# Not signed in: sent to the login page
+	assert page.path == "/login"
+
+	page = app.test_page("/signup")
+	page.fill("input[name=email]", "ada@example.com")
+	page.fill("input[name=password]", PASSWORD)
+	page.submit()
+
+	# Signed in, and domino.redirect() was followed (same cookies, like one browser)
+	page.load("/private")
+	assert page.text("p") == "Hello ada@example.com"
+
+	page.load("/")
+	page.click("button", text="Log out")
+	page.load("/private")
+	assert page.path == "/login"

@@ -199,14 +199,23 @@ class TestPage:
 
 		self.app = app
 		self.client = client or app.test_client()
-		response = self.client.get(path)
+		self.load(path)
+
+
+	def load(self, path):
+		"""Navigate this tab to `path` (redirects are followed, cookies kept)."""
+
+		response = self.client.get(path, follow_redirects=True)
 		self.status = response.status_code
+		self.path = response.request.path
 		self.root = parse(response.get_data(as_text=True))
 
 		root = next((node for node in self.root.elements() if "data-domino-page" in node.attrs), None)
 		self.page_id = None
 		if root is not None:
 			self.page_id = root.attrs["data-domino-page"]
+
+		return self
 
 
 	@property
@@ -317,10 +326,11 @@ class TestPage:
 	def dispatch(self, node, event_type):
 		"""Fire `event_type` on `node` and every ancestor bound to it (events bubble)."""
 
+		page_id = self.page_id
 		element = node
 		while element is not None and element.tag != "#document":
 			for event_id in element.attrs.get("data-event-id", "").split():
-				if event_id.rsplit("-", 1)[-1] == event_type:
+				if event_id.rsplit("-", 1)[-1] == event_type and self.page_id == page_id:
 					self.send(element, event_id)
 			element = element.parent
 
@@ -341,6 +351,11 @@ class TestPage:
 		if response.status_code != 200:
 			message = payload.get("traceback") or payload.get("error") or response.status_code
 			raise DominoTestError(f"The event handler failed: {message}")
+
+		# The handler called domino.redirect(): the browser goes there instead
+		if payload.get("redirect"):
+			self.load(payload["redirect"])
+			return
 
 		# Like the browser, the fields of the element that fired take the server's state
 		self.apply(payload, element)
