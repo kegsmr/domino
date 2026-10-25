@@ -27,3 +27,19 @@ jobs:
       - run: python -m pytest -v
         env:
           DOMINO_TEST_MONGO_URL: mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true
+
+  # Windows, without MongoDB (the tests that need one are skipped): Python's oldest and newest
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e .[test] playwright
+      - run: python -m playwright install chromium
+      - run: python -m pytest -v
