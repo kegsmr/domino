@@ -7,3 +7,5 @@ output.html
 settings.local.json
 .domino/
 *.egg-info/
+build/
+dist/
