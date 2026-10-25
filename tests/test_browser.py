@@ -52,6 +52,7 @@ def page(browser):
 	page = browser.new_page()
 	page.errors = []
 	page.on("console", lambda message: message.type == "error" and page.errors.append(message.text))
+	page.on("pageerror", lambda error: page.errors.append(str(error)))
 	yield page
 	page.close()
 
@@ -123,3 +124,13 @@ def test_debounced_search_keeps_focus_and_typing(serve, page):
 	assert page.locator("li").all_inner_texts() == ["Rust"]
 	assert len(posts) == 2
 	assert page.errors == []
+
+
+def test_server_push_updates_the_clock_without_user_action(serve, page):
+
+	page.goto(serve("clock"))
+	first = page.locator("p").inner_text()
+
+	page.wait_for_function(f"document.querySelector('p').textContent.trim() !== {first!r}", timeout=5000)
+	assert page.errors == []
+

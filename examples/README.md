@@ -12,6 +12,7 @@ python examples/counter.py
 | `functional.py` | Several pages linking to each other by passing view functions as `href` |
 | `counter.py` | A component with state, re-rendered by `bind("click", ...)` |
 | `random_number.py` | `after(ms, ...)` updating a component on a timer |
+| `clock.py` | `refresh()` pushing a component to the browser from a background thread |
 | `todo.py` | Form submits handled in Python with `event.form`, without reloading the page |
 | `forms.py` | Form controls (`select`, range, checkbox), `event.value`, and re-rendering only part of a component |
 | `search.py` | Search as you type: `bind("input", ..., debounce=250)`, with the input keeping focus and caret while results update |

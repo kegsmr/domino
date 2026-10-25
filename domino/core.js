@@ -146,7 +146,22 @@ window.Domino = (() => {
         if (updated) {
             listen(updated);
             scheduleAfterEvents(updated);
+            openStream();
         }
+    }
+
+    // Components re-rendered with refresh() arrive over Server-Sent Events. Only pages
+    // showing a live component open the stream. EventSource reconnects by itself after a
+    // dropped connection but gives up on an error status, so an expired page (404) stops.
+    let stream = null;
+
+    function openStream() {
+        if (stream || !document.querySelector('[data-live]')) return;
+        const id = pageId();
+        if (!id) return;
+
+        stream = new EventSource('/_domino/stream?page=' + encodeURIComponent(id));
+        stream.onmessage = (e) => apply(JSON.parse(e.data), null);
     }
 
     async function triggerEvent(eventId, payload = {}, reset = null) {
@@ -242,6 +257,7 @@ window.Domino = (() => {
     document.addEventListener('DOMContentLoaded', () => {
         listen();
         scheduleAfterEvents();
+        openStream();
     });
 
     return { listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen };

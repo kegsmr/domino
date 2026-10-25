@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+import weakref
+from collections import OrderedDict
 from pathlib import Path
 
 from flask import *
@@ -21,6 +23,9 @@ RAW_TEXT_TAGS = ["script", "style"]
 
 
 _render_state = threading.local()
+
+# Guards Element.__pages__, which request threads add to while refresh() reads it
+_pages_lock = threading.Lock()
 
 
 def render_stack():
@@ -42,6 +47,10 @@ class Page:
 		self.events = {}
 		self.lock = threading.RLock()  # serializes events for this page
 		self.version = 0  # bumped per update, so the browser can drop stale responses
+		self.live = False  # shows a live component, so the browser opens a stream
+		self.updates = {}  # element id -> html not yet sent to the browser
+		self.updates_ready = threading.Condition()
+		self.stream = None  # the newest stream; older ones stop
 		self.touch()
 
 
@@ -55,10 +64,9 @@ class Page:
 		self.events[event_id] = (element, callback)
 
 
-	def unregister_subtree(self, root):
+	def subtree_events(self, root):
+		"""This page's events bound to `root` or its descendants."""
 
-		# Drop events bound to `root` or its descendants; they are about to be
-		# replaced in the browser and would otherwise leak
 		elements = set()
 		stack = [root]
 		while stack:
@@ -67,13 +75,64 @@ class Page:
 				elements.add(id(element))
 				stack.extend(element.__children__)
 
-		for event_id, (element, _) in list(self.events.items()):
-			if id(element) in elements:
-				del self.events[event_id]
+		return {event_id: event for event_id, event in self.events.items() if id(event[0]) in elements}
+
+
+	def unregister_subtree(self, root):
+
+		# Drop events bound to `root` or its descendants; they are about to be
+		# replaced in the browser and would otherwise leak
+		for event_id in self.subtree_events(root):
+			del self.events[event_id]
+
+
+	def push(self, element_id, html):
+		"""Queue a re-rendered component for this page's stream. Call with self.lock held."""
+
+		self.version += 1
+
+		with self.updates_ready:
+			# A newer render replaces one the browser hasn't received yet; moving
+			# it to the end keeps it after any parent re-rendered in between
+			self.updates.pop(element_id, None)
+			self.updates[element_id] = {"id": element_id, "html": html, "version": self.version}
+			self.updates_ready.notify_all()
+
+
+	def open_stream(self):
+
+		token = object()
+
+		with self.updates_ready:
+			self.stream = token
+			self.updates_ready.notify_all()
+
+		return token
+
+
+	def pull(self, stream, timeout):
+		"""Wait up to `timeout` seconds for pushed updates and return them (maybe none),
+		or None once a newer stream has replaced `stream`."""
+
+		with self.updates_ready:
+			# After a reconnect the old stream may still be waiting here; it must
+			# not take updates meant for the new one
+			self.updates_ready.wait_for(lambda: self.updates or self.stream is not stream, timeout)
+			if self.stream is not stream:
+				return None
+			updates = list(self.updates.values())
+			self.updates.clear()
+
+		return updates
 
 
 	@staticmethod
 	def current():
+
+		# Set by Element.refresh(), which may run outside a request
+		page = getattr(_render_state, "page", None)
+		if page is not None:
+			return page
 
 		if has_app_context() and "domino_page" in g:
 			return g.domino_page
@@ -118,7 +177,8 @@ class MemoryPageStore(PageStore):
 
 	def __init__(self):
 
-		self.pages = {}
+		# Least recently used first, so pruning only looks at the oldest pages
+		self.pages = OrderedDict()
 		self.lock = threading.Lock()
 
 
@@ -134,6 +194,7 @@ class MemoryPageStore(PageStore):
 			page = self.pages.get(page_id)
 			if page:
 				page.touch()
+				self.pages.move_to_end(page_id)
 
 		return page
 
@@ -147,16 +208,16 @@ class MemoryPageStore(PageStore):
 	def prune(self, ttl, max_pages):
 
 		with self.lock:
-			cutoff = time.monotonic() - ttl
-			for page_id, page in list(self.pages.items()):
-				if page.last_access < cutoff:
-					del self.pages[page_id]
+			while len(self.pages) > max_pages:
+				self.pages.popitem(last=False)
 
-			excess = len(self.pages) - max_pages
-			if excess > 0:
-				oldest = sorted(self.pages.values(), key=lambda page: page.last_access)
-				for page in oldest[:excess]:
-					del self.pages[page.id]
+			# Stop at the first page still in use; everything after it is newer
+			cutoff = time.monotonic() - ttl
+			while self.pages:
+				oldest = next(iter(self.pages.values()))
+				if oldest.last_access >= cutoff:
+					break
+				self.pages.popitem(last=False)
 
 
 class Event:
@@ -199,6 +260,7 @@ class Domino(Flask):
 
 		self.config.setdefault("DOMINO_PAGE_TTL", 30 * 60)  # seconds of inactivity
 		self.config.setdefault("DOMINO_MAX_PAGES", 1000)
+		self.config.setdefault("DOMINO_KEEPALIVE", 15)  # seconds between stream keepalives
 
 		self.page_store = page_store or MemoryPageStore()
 
@@ -207,6 +269,7 @@ class Domino(Flask):
 
 		self._add_static_route('/_domino/core', CORE_JS)
 		self._add_event_handler('/_domino/events')
+		self._add_stream('/_domino/stream')
 
 
 	def _add_event_handler(self, route):
@@ -248,6 +311,43 @@ class Domino(Flask):
 				})
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
+
+
+	def _add_stream(self, route):
+
+		def stream():
+
+			page = self._get_page(request.args.get("page"))
+			if page is None:
+				return jsonify({"error": "Unknown or expired page"}), 404
+
+			stream = page.open_stream()
+
+			def updates():
+
+				# Runs after the request has returned, so don't touch request or g.
+				# When the client goes away, the next yield raises GeneratorExit
+				# Servers send the headers with the first chunk, so send one now
+				yield ": open\n\n"
+				while True:
+					pushed = page.pull(stream, self.config["DOMINO_KEEPALIVE"])
+					if pushed is None:
+						return
+					# Loading touches the page, so an open stream keeps it alive; stop
+					# if it's gone anyway (expired, or pushed out by DOMINO_MAX_PAGES)
+					if self._get_page(page.id) is None:
+						return
+					for update in pushed:
+						yield f"data: {json.dumps(update)}\n\n"
+					if not pushed:
+						yield ": keepalive\n\n"
+
+			return Response(updates(), mimetype="text/event-stream", headers={
+				"Cache-Control": "no-cache",
+				"X-Accel-Buffering": "no"
+			})
+
+		self.add_url_rule(route, route, stream, methods=["GET"])
 
 
 	def _new_page(self):
@@ -307,8 +407,8 @@ class Domino(Flask):
 				else:
 					html = result
 
-				# Don't keep pages that have nothing to handle
-				if not page.events:
+				# Don't keep pages that have nothing to handle or refresh
+				if not page.events and not page.live:
 					self._drop_page(page)
 
 				return html
@@ -346,6 +446,7 @@ class Element:
 		self.__styles__ = {}
 		self.__id__ = uuid.uuid4()
 		self.__id_used__ = False
+		self.__pages__ = weakref.WeakSet()  # live pages this component was rendered on
 
 		self.tag(tag)
 		self.parent(parent)
@@ -479,9 +580,55 @@ class Element:
 		return self
 
 
+	def is_live(self):
+		"""Whether pages showing this component need a stream for refresh()."""
+
+		return getattr(type(self), "live", False) is True
+
+
+	def refresh(self):
+		"""Re-render this component and push it to every live page showing it."""
+
+		with _pages_lock:
+			pages = list(self.__pages__)
+
+		if not pages:
+			return self
+
+		# Render once, on the first page, then share the HTML and the events it bound
+		first = pages[0]
+		with first.lock:
+			# Like the event handler: binds made while rendering belong to this page
+			previous = getattr(_render_state, "page", None)
+			_render_state.page = first
+			try:
+				first.unregister_subtree(self)
+				html = self._render()
+			finally:
+				_render_state.page = previous
+			events = first.subtree_events(self)
+			first.push(self.id(), html)
+
+		for page in pages[1:]:
+			with page.lock:
+				page.unregister_subtree(self)
+				page.events.update(events)
+				page.push(self.id(), html)
+
+		return self
+
+
 	def _render(self, level=0, indent=4) -> str:
 
 		if hasattr(self, 'render'):
+			# Remember where this component is shown so refresh() can update it there
+			page = Page.current()
+			if page is not DEFAULT_PAGE:
+				with _pages_lock:
+					self.__pages__.add(page)
+				if self.is_live():
+					page.live = True
+
 			render_stack().append([self, 0])
 			try:
 				self.render()
@@ -529,6 +676,12 @@ class Element:
 		if "class" in attributes:
 			attributes.pop("class")
 		attributes.update(self.__attributes__)
+
+		# `live = True` is a framework setting, not an HTML attribute; mark live
+		# components so the browser knows to open a stream
+		attributes.pop("live", None)
+		if self.is_live():
+			attributes["data_live"] = True
 
 		# Extra classes from class_="a b" (or a list) come after the component's own
 		for key in ("class", "class_"):
