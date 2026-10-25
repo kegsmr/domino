@@ -19,6 +19,7 @@ from a2wsgi import WSGIMiddleware
 from werkzeug.test import EnvironBuilder
 
 from .core import DEFAULT_PAGE
+from .patches import Patcher
 
 
 WS_PATH = "/_domino/ws"
@@ -84,6 +85,9 @@ class ASGIApp:
 		# url_for, request.cookies and session
 		with self.app.request_context(dict(environ)) as context:
 			page = self.app._get_page(page_id) or DEFAULT_PAGE
+			# An event from a hidden tab (which said so) means it's being used: catch up first
+			if page.paused:
+				page.resume()
 			payload, status = self.app.handle_event(page, message.get("event_id"), message.get("data"))
 
 			# A socket can't set cookies: the browser fetches a changed session with a token
@@ -115,6 +119,9 @@ class ASGIApp:
 		await send({"type": "http.response.body", "body": b": open\n\n", "more_body": True})
 
 		subscription = Subscription(self.app, page)
+		# Pauses are told over the WebSocket; this page is back without one, so catch up
+		if page.paused:
+			await asyncio.get_running_loop().run_in_executor(self.executor, page.resume)
 		disconnected = asyncio.ensure_future(wait_for_disconnect(receive))
 		# Writes to a closed connection don't fail here, so stop as soon as the client goes
 		disconnected.add_done_callback(lambda _: subscription.ready.set())
@@ -197,13 +204,17 @@ class Subscription:
 
 class Connection:
 	"""One tab's WebSocket. JSON messages; the browser sends
-		{"type": "hello", "page_id"} first, then {"type": "event", "ref", "page_id", "event_id", "data"},
+		{"type": "hello", "page_id", "patch": true} first, then {"type": "event", "ref", "page_id", "event_id", "data"},
 		and when it swaps in another page without reloading (see navigate() in core.js), a new
-		{"type": "hello", "page_id"}, or {"type": "leave"} if that page needs nothing from the server,
+		{"type": "hello", "page_id", "patch": true}, or {"type": "leave"} if that page needs nothing from the server,
+		{"type": "pause"} when the tab is hidden and {"type": "resume"} when it's shown again,
+		{"type": "resend", "id"} if it can't apply a patch,
 	and receives
 		{"type": "ready"} once bound to the page, or {"type": "expired"} if it's unknown,
 		{"type": "result", "ref", "status", ...} with what POST /_domino/events would answer,
 		{"type": "update", "id", "html", "version"} for each pushed update, as over SSE.
+	With "patch" in the hello, a result or update may carry "patch" (see domino.patches) instead
+	of "html", and "base": the version of the last HTML this socket sent for that component.
 	"""
 
 
@@ -220,6 +231,8 @@ class Connection:
 		self.listening = None  # the task sending that page's pushes
 		self.closed = False
 		self.events = asyncio.Queue()
+		self.patcher = None  # what this socket sent, if the browser takes patches
+		self.sending = asyncio.Lock()  # messages are encoded in the order they're sent
 
 
 	async def run(self):
@@ -244,8 +257,10 @@ class Connection:
 				data = parse(message)
 				# Hellos go in line with events, so a page's last events reach it before the
 				# socket moves on to the next page
-				if data.get("type") in ("event", "hello", "leave"):
+				if data.get("type") in ("event", "hello", "leave", "pause", "resume"):
 					self.events.put_nowait(data)
+				elif data.get("type") == "resend":
+					tasks.append(asyncio.ensure_future(self.resend(data.get("id"))))
 		finally:
 			self.closed = True
 			for task in tasks:
@@ -254,8 +269,9 @@ class Connection:
 				self.listening.cancel()
 
 
-	async def hello(self, page_id):
-		"""Bind the socket to a page: the tab's first, or one it swapped in without reloading."""
+	async def hello(self, page_id, patch=False):
+		"""Bind the socket to a page: the tab's first, or one it swapped in without reloading.
+		`patch`: the browser takes patches (core.js does; a tab with an older one doesn't)."""
 
 		if page_id is not None and page_id == self.page_id:
 			await self.send({"type": "ready"})
@@ -274,6 +290,13 @@ class Connection:
 		# Loaded after the socket's handshake, maybe with newer cookies
 		if page.cookie is not None:
 			self.environ["HTTP_COOKIE"] = page.cookie
+
+		# Patches start from what this socket sent for the page; the browser forgets the rest too
+		self.patcher = Patcher() if patch and self.app.config["DOMINO_PATCHES"] else None
+
+		# A socket that went while the tab was hidden left it paused
+		if page.paused:
+			await asyncio.get_running_loop().run_in_executor(self.asgi.executor, page.resume)
 
 		self.page_id = page.id
 		self.subscription = Subscription(self.app, page)
@@ -327,7 +350,10 @@ class Connection:
 		while True:
 			message = await self.events.get()
 			if message.get("type") == "hello":
-				await self.hello(message.get("page_id"))
+				await self.hello(message.get("page_id"), message.get("patch") is True)
+				continue
+			if message.get("type") in ("pause", "resume"):
+				await self.visibility(message["type"] == "pause")
 				continue
 			if message.get("type") == "leave":
 				self.leave()
@@ -341,7 +367,39 @@ class Connection:
 			await self.send(dict(payload, type="result", ref=message.get("ref"), status=status))
 
 
+	async def visibility(self, hidden):
+		"""The tab was hidden (pause the bound page) or shown again (send what changed meanwhile)."""
+
+		if self.subscription is None:
+			return
+
+		page = self.subscription.page
+		if hidden:
+			page.pause()
+		elif page.paused:
+			await asyncio.get_running_loop().run_in_executor(self.asgi.executor, page.resume)
+
+
+	async def resend(self, element_id):
+
+		if self.patcher is None or not isinstance(element_id, str):
+			return
+
+		async with self.sending:
+			message = self.patcher.resend(element_id)
+			if message is not None:
+				await self.send_now(message)
+
+
 	async def send(self, data):
+
+		async with self.sending:
+			if self.patcher is not None:
+				data = self.patcher.encode(data)
+			await self.send_now(data)
+
+
+	async def send_now(self, data):
 
 		if self.closed:
 			return
@@ -483,6 +541,8 @@ def serve(app, host="127.0.0.1", port=5000, reload=False, **options):
 	# Server-Sent Event streams only end when their client goes, so don't wait for them
 	# forever when stopping (or restarting on a change)
 	options.setdefault("timeout_graceful_shutdown", 3)
+	# {"domino": {"ws_compression": false}} saves the ~40 KB per socket deflate keeps
+	options.setdefault("ws_per_message_deflate", bool(app.config["DOMINO_WS_COMPRESSION"]))
 
 	uvicorn.run(target, host=host, port=port, **options)
 

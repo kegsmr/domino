@@ -537,7 +537,7 @@ def test_serve_without_reload_runs_the_asgi_app(tmp_path, uvicorn_runs):
 
 	domino.asgi.serve(app, "127.0.0.1", 5000)
 
-	assert uvicorn_runs == [(app.asgi, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3})]
+	assert uvicorn_runs == [(app.asgi, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3, "ws_per_message_deflate": True})]
 	assert "DOMINO_ASGI_APP" not in os.environ
 
 

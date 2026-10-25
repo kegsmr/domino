@@ -588,7 +588,8 @@ def worker_main(location, worker_id, sock, ready):
 
 	asgi = load_asgi(location)
 
-	config = uvicorn.Config(asgi, timeout_graceful_shutdown=GRACEFUL)
+	config = uvicorn.Config(asgi, timeout_graceful_shutdown=GRACEFUL,
+		ws_per_message_deflate=bool(asgi.app.config["DOMINO_WS_COMPRESSION"]))
 	# The address users need is the router's, which it prints
 	logging.getLogger("uvicorn.error").addFilter(lambda record: not str(record.msg).startswith("Uvicorn running on"))
 

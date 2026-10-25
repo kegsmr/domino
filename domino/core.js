@@ -288,6 +288,53 @@ window.Domino = (() => {
     let nextRef = 0;
     const waiting = new Map(); // ref -> the event sent over the socket that awaits its result
 
+    // Each socket keeps, per component id, the last HTML it brought and its version (ws.bases).
+    // The server keeps the same, and sends a component that changed little as a patch against
+    // it (domino/patches.py): ops that are either [start, count], lines of the old HTML, or a
+    // string of new lines.
+    function applyPatch(base, ops) {
+        const lines = base.split('\n');
+        const pieces = [];
+        for (const op of ops) {
+            pieces.push(typeof op === 'string' ? op : lines.slice(op[0], op[0] + op[1]).join('\n'));
+        }
+        return pieces.join('\n');
+    }
+
+    // Turn a patched result or update back into HTML and keep it as the next base, in the order
+    // the socket brought them (before anything waits), as the server encoded them
+    function unpatch(ws, data) {
+        if (data.patch) {
+            const base = ws.bases.get(data.id);
+            if (base && base.version === data.base) {
+                data.html = applyPatch(base.html, data.patch);
+            } else {
+                // Can't happen unless something went wrong: ask for the whole HTML again
+                data.html = null;
+                ws.send(JSON.stringify({ type: 'resend', id: data.id }));
+            }
+            delete data.patch;
+        }
+        if (data.id && data.html) ws.bases.set(data.id, { version: data.version, html: data.html });
+    }
+
+    function hello(ws) {
+        // The server starts patches afresh for the page, so forget what was kept for the last one
+        ws.bases = new Map();
+        ws.bound = false;
+        ws.send(JSON.stringify({ type: 'hello', page_id: pageId(), patch: true }));
+    }
+
+    // A hidden tab tells the server, which stops rendering for it until it's shown again, then
+    // sends each component that changed meanwhile, once
+    function sendVisibility(ws) {
+        if (!ws || !ws.bound || ws.readyState !== WebSocket.OPEN) return;
+        const hidden = document.visibilityState === 'hidden';
+        if (hidden === !!ws.paused) return;
+        ws.paused = hidden;
+        ws.send(JSON.stringify({ type: hidden ? 'pause' : 'resume' }));
+    }
+
     // Open what this page needs to hear from the server: the socket, or else the stream
     function connect() {
         if (useHttp || !window.WebSocket || !document.querySelector('[data-domino-ws]')) {
@@ -317,6 +364,7 @@ window.Domino = (() => {
         const ws = new WebSocket(scheme + location.host + '/_domino/ws?page=' + encodeURIComponent(pageId()));
         let readyAt = 0;
         ws.worker = workerOf(pageId());
+        ws.bases = new Map();
         socket = ws;
         socketReady = new Promise((resolve) => { settleReady = resolve; });
 
@@ -326,7 +374,7 @@ window.Domino = (() => {
         // For the page shown now, which may not be the one that opened it (see rebind)
         ws.onopen = () => {
             if (needsServer()) {
-                ws.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+                hello(ws);
             } else {
                 clearTimeout(timer);
                 settleReady(true);
@@ -337,10 +385,16 @@ window.Domino = (() => {
             let data;
             try { data = JSON.parse(e.data); } catch (err) { return; }
 
+            if (data.type === 'result' || data.type === 'update') unpatch(ws, data);
+
             if (data.type === 'ready') {
                 clearTimeout(timer);
                 readyAt = Date.now();
                 settleReady(true);
+                // A new page starts out shown, as far as the server knows
+                ws.bound = true;
+                ws.paused = false;
+                sendVisibility(ws);
             } else if (data.type === 'result') {
                 const request = waiting.get(data.ref);
                 if (!request) return;
@@ -480,7 +534,7 @@ window.Domino = (() => {
         }
         if (needsServer()) {
             socketReady = new Promise((resolve) => { settleReady = resolve; });
-            socket.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+            hello(socket);
         } else {
             socket.send(JSON.stringify({ type: 'leave' }));
             socketReady = Promise.resolve(true);
@@ -761,6 +815,9 @@ window.Domino = (() => {
             const current = owner.cloneNode(true);
             current.querySelector(':scope > script[data-domino-predict]').remove();
             graph.states[0] = current.outerHTML;
+            // Large states come as patches against the one at graph.base, and repeats as an index
+            const base = graph.states[graph.base];
+            graph.states = graph.states.map((html) => (Array.isArray(html) ? applyPatch(base, html) : html));
             graph.states = graph.states.map((html) => (typeof html === 'number' ? graph.states[html] : html));
             found.push([owner.id, graph]);
         }
@@ -1085,6 +1142,7 @@ window.Domino = (() => {
         connect();
         document.addEventListener('click', onClick);
         window.addEventListener('popstate', onPopState);
+        document.addEventListener('visibilitychange', () => sendVisibility(socket));
     });
 
     return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen, enableLatencySim, disableLatencySim, navigate };

@@ -217,6 +217,8 @@ class Page:
 		self.css = set()  # components whose CSS the browser has (see PageStyles)
 		self.wake = None  # the newest stream's callback for pushes, if it runs in an event loop
 		self.cookie = None  # the browser's Cookie header once it had this page, if swapped in by core.js
+		self.paused = False  # the tab is hidden, so refresh() leaves this page for resume()
+		self.dirty = {}  # components refresh() skipped while paused -> None, in order
 		self.touch()
 
 
@@ -281,6 +283,42 @@ class Page:
 
 		if wake is not None:
 			wake()
+
+
+	def pause(self):
+		"""The tab is hidden: until resume(), refresh() only notes which components changed here."""
+
+		if self is not DEFAULT_PAGE:
+			self.paused = True
+
+
+	def defer(self, component):
+		"""Whether this page is paused, in which case `component` is rendered for it on resume()."""
+
+		if not self.paused:
+			return False
+
+		with self.lock:
+			if not self.paused:
+				return False
+			self.dirty[component] = None
+
+		return True
+
+
+	def resume(self):
+		"""The tab is shown again: render each component that changed meanwhile, once, and push
+		it. Can block (it renders), so not in an event loop."""
+
+		with self.lock:
+			if not self.paused:
+				return
+			self.paused = False
+			dirty = list(self.dirty)
+			self.dirty.clear()
+
+		for component in dirty:
+			component.refresh(only=self)
 
 
 	def open_stream(self, wake=None):
@@ -519,6 +557,8 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_NAVIGATION", True)  # links to other pages swap them in without reloading
 		self.config.setdefault("DOMINO_MAX_UPLOAD_MB", 16)  # per upload request (all its files)
 		self.config.setdefault("DOMINO_UPLOAD_TTL", 10 * 60)  # seconds an upload waits for its event
+		self.config.setdefault("DOMINO_PATCHES", True)  # the WebSocket sends what changed in a component, not all of it
+		self.config.setdefault("DOMINO_WS_COMPRESSION", True)  # per-message deflate on the WebSocket (uvicorn's)
 
 		# settings.json < settings.local.json < DOMINO_* environment variables
 		self.settings = load_settings(self.root_path, settings)
@@ -1335,11 +1375,15 @@ class Element:
 		return getattr(type(self), "live", False) is True or bool(self.__dependencies__)
 
 
-	def refresh(self, skip=None):
-		"""Re-render this component and push it to every live page showing it (except `skip`)."""
+	def refresh(self, skip=None, only=None):
+		"""Re-render this component and push it to every live page showing it (except `skip`;
+		or just to `only`)."""
 
 		with _pages_lock:
-			pages = [page for page in self.__pages__ or () if page is not skip]
+			pages = [page for page in self.__pages__ or () if page is not skip and (only is None or page is only)]
+
+		# Hidden tabs get it once they're shown again, rendered once however often it changed
+		pages = [page for page in pages if not page.defer(self)]
 
 		if not pages:
 			return self

@@ -22,7 +22,7 @@ import textwrap
 import types
 from copy import deepcopy
 
-from . import reactive
+from . import patches, reactive
 from .reactive import State
 from .util import accepts_argument
 
@@ -393,7 +393,8 @@ def graph(component, callbacks, render, limit=None, budget=None):
 	"""The states the component's predictable handlers reach from its current one, for core.js:
 	{"states": [html per state], "edges": [{event: state index} per state]}. State 0 is the
 	current one, whose HTML the browser already has (null here); a state whose HTML another
-	state already has refers to it by its index. Event ids leave out the component's prefix
+	state already has refers to it by its index, and a large state may be a patch (a list, see
+	domino.patches) against the state whose index is "base". Event ids leave out the component's prefix
 	("event-<id>-"), which is the same for all of them.
 
 	When more than `limit` states are reachable, or their HTML is longer than `budget`, only the
@@ -516,7 +517,23 @@ class Graph:
 
 	def data(self):
 
-		return {"states": self.states, "edges": self.edges}
+		data = {"states": self.states, "edges": self.edges}
+
+		# States usually differ in a line or two (one item of a list toggled, say), so a large
+		# one is sent as a patch against the first, which core.js applies (see domino.patches)
+		texts = [index for index, html in enumerate(self.states) if isinstance(html, str)]
+		if len(texts) < 2 or len(self.states[texts[0]]) < patches.MIN_SIZE:
+			return data
+
+		base = self.states[texts[0]]
+		states = list(self.states)
+		for index in texts[1:]:
+			ops = patches.diff(base, states[index])
+			if ops is not None:
+				states[index] = ops
+				data = {"states": states, "edges": self.edges, "base": texts[0]}
+
+		return data
 
 
 def explain(component, callback):

@@ -34,6 +34,7 @@ The first big release: Domino becomes a full framework, Meteor-style but all Pyt
 
 ### Server
 - One WebSocket per tab when served over ASGI (uvicorn); plain WSGI still works with HTTP + Server-Sent Events.
+- Less over the wire: the socket sends a re-rendered component as a patch of what changed (a chat message appended to 200: 28 KB to 200 bytes), large predicted states too; hidden tabs pause, and get one update per changed component when shown; `ws_compression` setting.
 - `domino serve --workers N`: every CPU core, with a router that sends each tab to the process that has its page — no sticky sessions.
 - Settings: `settings.json` + `settings.local.json` + `DOMINO_*` environment variables; `public` settings readable in the browser.
 - Development MongoDB started automatically, like `meteor run`.

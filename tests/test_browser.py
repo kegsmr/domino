@@ -1584,3 +1584,287 @@ def test_uploads_through_serve_workers_reach_the_page_worker(serve_workers, brow
 		tab.wait_for_function("document.querySelectorAll('ul img').length === 1", timeout=5000)
 		assert tab.errors == []
 		tab.close()
+
+
+# Patches (a component sent as what changed) and hidden tabs (see domino/patches.py)
+
+
+@pytest.fixture(params=["wsgi", "asgi"])
+def serve_app(request, asgi_server):
+	"""Serves an app made in the test on both transports."""
+
+	servers = []
+
+	def start(app):
+		if request.param == "asgi":
+			return asgi_server(app).url
+		server = make_server("127.0.0.1", 0, app, threaded=True)
+		threading.Thread(target=server.serve_forever, daemon=True).start()
+		servers.append(server)
+		return f"http://127.0.0.1:{server.server_port}/"
+
+	start.transport = request.param
+	yield start
+
+	for server in servers:
+		server.shutdown()
+
+
+def received_frames(page):
+	"""Messages the page's WebSocket receives, parsed."""
+
+	frames = []
+	page.on("websocket", lambda ws: ws.on("framereceived", lambda payload: frames.append(json.loads(payload))))
+
+	return frames
+
+
+# The DOM of an element as a page load would build it: tags, sorted attributes, checked, and
+# text without the whitespace around it (updates are indented differently from the page)
+CANONICAL_DOM = """(selector) => {
+    const walk = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) return node.nodeValue.trim();
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+        const attributes = Array.from(node.attributes).map((a) => a.name + '=' + a.value).sort().join(' ');
+        const children = Array.from(node.childNodes).map(walk).filter(Boolean).join('');
+        return '<' + node.tagName + ' ' + attributes + ' checked:' + !!node.checked + '>' + children + '</' + node.tagName + '>';
+    };
+    return walk(document.querySelector(selector));
+}"""
+
+
+def test_a_long_list_edited_many_times_ends_like_a_fresh_load(serve_app, browser):
+
+	import random
+
+	import domino.tags as t
+	from domino import Collection, Domino
+	from domino.components import Document
+
+	items = Collection()
+	for number in range(100):
+		items.insert({"_id": f"i{number:03}", "text": f"Item {number}, something to do", "done": False, "order": number})
+
+	class Todos(t.div):
+
+		def render(self):
+			documents = items.find(sort="order").fetch()
+			return [
+				t.button(id="add", on_click=self.add) ["Add"],
+				t.ul()([
+					t.li(id=item["_id"], class_="done" if item["done"] else None) [
+						t.input(type="checkbox", checked=item["done"], on_change=lambda event, key=item["_id"]: self.toggle(key)),
+						t.span() [item["text"]],
+						t.button(class_="rename", on_click=lambda event, key=item["_id"]: self.rename(key)) ["Rename"],
+						t.button(class_="remove", on_click=lambda event, key=item["_id"]: self.remove(key)) ["Remove"],
+					]
+					for item in documents
+				]),
+				t.p(id="count") [f"{len(documents)} items, {sum(item['done'] for item in documents)} done"]
+			]
+
+		def add(self):
+			first = items.find(sort="order", limit=1).fetch()
+			items.insert({"text": "Added at the top", "done": False, "order": first[0]["order"] - 1 if first else 0})
+
+		def toggle(self, key):
+			item = items.find_one({"_id": key})
+			items.update({"_id": key}, {"$set": {"done": not item["done"]}})
+
+		def rename(self, key):
+			items.update({"_id": key}, {"$set": {"text": items.find_one({"_id": key})["text"] + " (renamed é 😀)"}})
+
+		def remove(self, key):
+			items.remove({"_id": key})
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Todos(id="todos")]
+
+	url = serve_app(app)
+	page = browser.new_page()
+	frames = received_frames(page)
+	errors = []
+	page.on("pageerror", lambda error: errors.append(str(error)))
+	try:
+		page.goto(url)
+		rng = random.Random(7)
+		for _ in range(40):
+			action = rng.choice(["toggle", "rename", "rename", "remove", "add"])
+			length = page.evaluate("document.querySelector('#todos').outerHTML.length")
+			if action == "add":
+				page.click("#add")
+			else:
+				row = page.locator("li").nth(rng.randrange(page.locator("li").count()))
+				row.locator({"toggle": "input", "rename": ".rename", "remove": ".remove"}[action]).click()
+			# Each action changes the HTML; wait for it before the next
+			page.wait_for_function(f"document.querySelector('#todos').outerHTML.length !== {length}", timeout=5000)
+
+		page.wait_for_function("!document.documentElement.hasAttribute('data-domino-loading')")
+		edited = page.evaluate(CANONICAL_DOM, "#todos")
+
+		fresh = browser.new_page()
+		fresh.goto(url)
+		assert fresh.evaluate(CANONICAL_DOM, "#todos") == edited
+		fresh.close()
+
+		if serve_app.transport == "asgi":
+			assert sum("patch" in frame for frame in frames) >= 30
+		assert errors == []
+	finally:
+		page.close()
+
+
+def chat_app():
+
+	import domino.tags as t
+	from domino import Collection, Domino
+	from domino.components import Document
+
+	messages = Collection()
+	for number in range(200):
+		messages.insert({"text": f"Message {number}", "sent": number})
+
+	class Chat(t.div):
+
+		def render(self):
+			return [
+				t.ul()([t.li() [message["text"]] for message in messages.find(sort="sent")]),
+				t.form(on_submit=self.send) [
+					t.input(name="text"),
+					t.button(type="submit") ["Send"]
+				]
+			]
+
+		def send(self, event):
+			messages.insert({"text": event.form["text"], "sent": len(messages.find().fetch())})
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Chat()]
+
+	return app
+
+
+def send_message(page, text):
+
+	page.fill("input[name=text]", text)
+	page.press("input[name=text]", "Enter")
+
+
+def test_chat_appends_reach_other_windows(serve_app, browser):
+
+	url = serve_app(chat_app())
+	reader, writer = browser.new_page(), browser.new_page()
+	frames = received_frames(reader)
+	try:
+		reader.goto(url)
+		writer.goto(url)
+		for number in range(1, 6):
+			send_message(writer, f"Hello {number}")
+			reader.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=5000)
+
+		assert reader.locator("li").last.inner_text() == "Hello 5"
+		assert reader.locator("li").first.inner_text() == "Message 0"
+		if serve_app.transport == "asgi":
+			updates = [frame for frame in frames if frame.get("type") == "update"]
+			# The first is whole; after it, a line or two each
+			assert all("patch" in update for update in updates[1:])
+			assert all(len(json.dumps(update)) < 300 for update in updates[1:])
+	finally:
+		reader.close()
+		writer.close()
+
+
+HIDE = """(hidden) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+}"""
+
+
+def test_a_hidden_tab_gets_one_update_when_shown(serve_app, browser):
+
+	url = serve_app(chat_app())
+	hidden, writer = browser.new_page(), browser.new_page()
+	frames = received_frames(hidden)
+	try:
+		hidden.goto(url)
+		writer.goto(url)
+		hidden.wait_for_function("!document.documentElement.hasAttribute('data-domino-loading')")
+		hidden.evaluate(HIDE, True)
+		time.sleep(0.3)
+
+		for number in range(1, 4):
+			send_message(writer, f"While hidden {number}")
+			writer.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=5000)
+		time.sleep(0.5)
+
+		if serve_app.transport == "asgi":
+			# Paused: the server sent it nothing, and its page still shows what it had
+			assert [frame for frame in frames if frame.get("type") == "update"] == []
+			assert hidden.locator("li").count() == 200
+
+		hidden.evaluate(HIDE, False)
+		hidden.wait_for_function("document.querySelectorAll('li').length === 203", timeout=5000)
+		assert hidden.locator("li").last.inner_text() == "While hidden 3"
+
+		if serve_app.transport == "asgi":
+			time.sleep(0.3)
+			assert len([frame for frame in frames if frame.get("type") == "update"]) == 1
+
+		# And it's live again
+		send_message(writer, "Shown")
+		hidden.wait_for_function("document.querySelectorAll('li').length === 204", timeout=5000)
+	finally:
+		hidden.close()
+		writer.close()
+
+
+def test_large_predicted_states_arrive_as_patches_and_show_at_once(serve_app, page):
+
+	import domino.tags as t
+	from domino import Domino, State
+	from domino.components import Document
+
+	class Picker(t.div):
+
+		picked = State(0)
+
+		def render(self):
+			return [
+				t.ul()([
+					t.li(class_="picked" if number == self.picked else None) [
+						t.button(on_click=lambda event, number=number: self.pick(number)) [
+							f"Option {number}, with a description long enough to matter"
+						]
+					]
+					for number in range(30)
+				])
+			]
+
+		def pick(self, number):
+			self.picked = number
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Picker()]
+
+	page.goto(serve_app(app))
+	assert '"base":' in page.content()
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	for number in (3, 5):
+		page.get_by_text(f"Option {number},").click()
+		# Well before the 1.5 s round trip: shown from a predicted state sent as a patch
+		page.wait_for_function(f"document.querySelector('li.picked').textContent.includes('Option {number},')", timeout=700)
+		page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=8000)
+
+	assert page.locator("li.picked").count() == 1
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
