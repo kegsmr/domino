@@ -199,6 +199,8 @@ class HotReloader:
 				pages_changed = pages_changed or (page and path not in modules)
 			elif path.suffix == ".html":
 				templates.add(str(path))
+				# A template in pages/ may be a page (see domino.pages): its route may come or go
+				pages_changed = pages_changed or (folder is not None and is_page_file(folder, path.with_suffix(".py")))
 			elif path.suffix == ".css":
 				stylesheets = True
 			elif path.suffix == ".js":
@@ -636,6 +638,15 @@ def forget_caches(app, templates):
 	util._class_attributes.clear()
 	core._component_css.clear()
 	core._paired_templates.clear()
+	core._component_props.clear()
+
+	# Domino templates are parsed again, and the files defining components found again
+	from . import dtemplates
+	dtemplates.forget()
+	dtemplates._class_names.clear()
+	finder = getattr(app, "template_finder", None)
+	if finder is not None and templates:
+		finder.stale = True
 
 	# inspect.getsource() (predictions read handlers' code) goes through linecache
 	linecache.clearcache()

@@ -64,31 +64,64 @@ import domino.tags as t
 from data import tasks
 
 
+# Logic in Python, markup in tasks.html next to this file: <TaskForm>, <TaskList> and <NoTasks>
+# there are the markup of the classes of those names. Tasks only composes, so it has a render()
 class Tasks(t.div):
 
 
 	def render(self):
 
 		# Reading the collection here re-renders this on every open page when it changes
+		found = tasks.find(sort=[("created", -1)]).fetch()
+
 		return [
-			t.form(on_submit=self.add) [
-				t.input(name="text", placeholder="What needs doing?", required=True, autocomplete="off"),
-				t.button(type="submit") [
-					"Add"
-				]
-			],
-			t.ul()([
-				t.li() [
-					task["text"]
-				]
-				for task in tasks.find(sort=[("created", -1)])
-			])
+			TaskForm(on_add=self.add),
+			TaskList(tasks=found) if found else NoTasks(),
 		]
 
 
-	def add(self, event):
+	def add(self, text):
 
-		tasks.insert({"text": event.form.get("text", "").strip()[:200], "created": time.time()})
+		tasks.insert({"text": text[:200], "created": time.time()})
+
+
+class TaskForm(t.form):
+
+	on_add = None  # a prop: the parent's handler, called with the text
+
+
+	def submit(self, event):
+
+		text = event.form.get("text", "").strip()
+		if text:
+			self.on_add(text)
+
+
+class TaskList(t.div):
+
+	tasks = None  # a prop: the tasks to show
+
+
+class NoTasks(t.p):
+
+	pass
+'''
+
+COMPONENT_HTML_TEMPLATE = '''\
+<!-- The markup of the components in tasks.py: each top-level tag is the class of that name -->
+
+<TaskForm on-submit="submit">
+	<input name="text" placeholder="What needs doing?" required autocomplete="off">
+	<button type="submit">Add</button>
+</TaskForm>
+
+<TaskList>
+	<ul>
+		<li each="task in tasks">{{ task.text }}</li>
+	</ul>
+</TaskList>
+
+<NoTasks>Nothing to do yet.</NoTasks>
 '''
 
 DATA_TEMPLATE = '''\
@@ -151,40 +184,23 @@ def layout(content):
 	]
 '''
 
-TAILWIND_COMPONENT_TEMPLATE = '''\
-import time
+# The Python side is the same (components/tasks.py); the markup has Tailwind classes
+TAILWIND_COMPONENT_HTML_TEMPLATE = '''\
+<!-- The markup of the components in tasks.py: each top-level tag is the class of that name -->
 
-import domino.tags as t
+<TaskForm class="flex gap-2" on-submit="submit">
+	<input name="text" placeholder="What needs doing?" required autocomplete="off"
+		class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+	<button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Add</button>
+</TaskForm>
 
-from data import tasks
+<TaskList>
+	<ul class="mt-4 space-y-2">
+		<li each="task in tasks" class="rounded-lg bg-white px-3 py-2 shadow-sm dark:bg-slate-900">{{ task.text }}</li>
+	</ul>
+</TaskList>
 
-
-class Tasks(t.div):
-
-
-	def render(self):
-
-		# Reading the collection here re-renders this on every open page when it changes
-		return [
-			t.form(on_submit=self.add, class_="flex gap-2") [
-				t.input(name="text", placeholder="What needs doing?", required=True, autocomplete="off",
-					class_="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900"),
-				t.button(type="submit", class_="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500") [
-					"Add"
-				]
-			],
-			t.ul(class_="mt-4 space-y-2")([
-				t.li(class_="rounded-lg bg-white px-3 py-2 shadow-sm dark:bg-slate-900") [
-					task["text"]
-				]
-				for task in tasks.find(sort=[("created", -1)])
-			])
-		]
-
-
-	def add(self, event):
-
-		tasks.insert({"text": event.form.get("text", "").strip()[:200], "created": time.time()})
+<NoTasks class="mt-4 text-slate-500">Nothing to do yet.</NoTasks>
 '''
 
 GITIGNORE_TEMPLATE = '''\
@@ -461,7 +477,8 @@ def create(name, with_tailwind=False):
 		"pages/layout.py": TAILWIND_LAYOUT_TEMPLATE if with_tailwind else LAYOUT_TEMPLATE,
 		"pages/index.py": INDEX_TEMPLATE,
 		"pages/index_test.py": INDEX_TEST_TEMPLATE,
-		"components/tasks.py": TAILWIND_COMPONENT_TEMPLATE if with_tailwind else COMPONENT_TEMPLATE,
+		"components/tasks.py": COMPONENT_TEMPLATE,
+		"components/tasks.html": TAILWIND_COMPONENT_HTML_TEMPLATE if with_tailwind else COMPONENT_HTML_TEMPLATE,
 		"data.py": DATA_TEMPLATE,
 		"settings.json": json.dumps(settings, indent=4) + "\n",
 		".gitignore": GITIGNORE_TEMPLATE,
