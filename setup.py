@@ -2,7 +2,7 @@ from setuptools import setup
 
 
 setup(
-	name="domino",
+	name="domino-web",
 	version="0.1.0",
 	description="An experimental Python web framework built on Flask",
 	long_description=open("README.md", encoding="utf-8").read(),
@@ -12,7 +12,7 @@ setup(
 	license="MIT",
 	packages=["domino"],
 	package_data={"domino": ["core.js"]},
-	python_requires=">=3.8",
+	python_requires=">=3.9",
 	install_requires=["Flask>=2.2"],
 	extras_require={"test": ["pytest"]},
 )

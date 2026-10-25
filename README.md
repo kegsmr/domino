@@ -6,6 +6,8 @@ An experimental Python web framework built on Flask. It currently resembles a gl
 
 ## Install
 
+The distribution is named `domino-web`; the import name is `domino`.
+
 ```
 pip install -e .
 ```
