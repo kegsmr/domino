@@ -155,6 +155,8 @@ def test_reactive_chat_updates_other_windows_and_keeps_their_typing(serve, brows
 	first.fill("input[name=text]", "Again")
 	first.press("input[name=text]", "Enter")
 	second.wait_for_function("document.querySelectorAll('.messages li').length === 2", timeout=5000)
+	# The other window can get the push before this one has applied its own response
+	first.wait_for_function("document.querySelector('input[name=text]').value === ''", timeout=5000)
 
 	assert second.input_value("input[name=text]") == "half-typed"
 	assert first.input_value("input[name=name]") == "Ada"
