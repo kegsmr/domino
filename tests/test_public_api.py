@@ -54,7 +54,8 @@ def test_the_public_modules_are_the_only_ones_without_an_underscore():
 def test_flask_and_helpers_dont_leak_in():
 
 	# (Old module paths someone imported, like the pytest plugin of an older install, are set too)
-	names = {name for name in vars(domino) if not name.startswith("_")} - set(MOVED)
+	# (pytest's assertion rewriting adds @py_builtins and @pytest_ar to the package it rewrites)
+	names = {name for name in vars(domino) if not name.startswith(("_", "@"))} - set(MOVED)
 
 	assert names - set(PUBLIC) - set(PUBLIC_MODULES) <= {"Core", "PublicSettings", "PageStore", "MemoryPageStore"}
 	for leaked in ("Blueprint", "os", "json", "render_stack", "worker_prefix", "SESSION_HANDOFF_TTL"):

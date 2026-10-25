@@ -61,8 +61,8 @@ from domino import Component
 from data import tasks
 
 
-# Logic in Python, markup in tasks.html next to this file: <TaskForm>, <TaskList> and <NoTasks>
-# there are the markup of the classes of those names. Tasks only composes, so it has a render()
+# Logic in Python, markup in tasks.html next to this file: the <component> blocks named TaskForm,
+# TaskList and NoTasks are the markup of these classes. Tasks only composes, so it has a render()
 class Tasks(Component):
 
 
