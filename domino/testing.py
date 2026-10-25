@@ -432,6 +432,11 @@ class TestPage:
 
 	def apply(self, payload, reset):
 
+		# Hot reloading sent the whole page again (see domino.hot)
+		if payload.get("type") == "hot" and payload.get("html"):
+			self.root = parse(payload["html"])
+			return
+
 		if not payload.get("id") or not payload.get("html"):
 			return
 

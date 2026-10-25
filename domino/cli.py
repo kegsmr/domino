@@ -287,8 +287,9 @@ def run(args):
 
 	app = load_app(args.app)
 
-	# The reloader runs this again in a child process, which shouldn't repeat it
-	if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+	# The reloader runs this again in a child process, which shouldn't repeat it. With --port 0
+	# the server says which port it picked
+	if os.environ.get("WERKZEUG_RUN_MAIN") != "true" and args.port:
 		print(f"domino: App: http://{args.host}:{args.port}/", file=sys.stderr, flush=True)
 
 	# Domino.run() starts the local MongoDB, once, outside the reloader's child process

@@ -15,6 +15,8 @@ import re
 import sys
 from pathlib import Path
 
+from flask import abort
+
 from . import tags as t
 from .components import Document
 from .core import Element
@@ -29,10 +31,33 @@ class PagesError(Exception):
 	"""A pages/ folder Domino can't turn into routes."""
 
 
-def add_pages(app, folder):
-	"""Add a route for every page in `folder`, once, when the app is created."""
+class PageRoute:
+	"""The view of a page's URL rule. Hot reloading (see domino.hot) gives it a new view when the
+	page changes, since Flask can't replace or remove a rule; with none (the page's file was
+	deleted) it answers 404. `modules` are the names of the page's module and its layouts'."""
+
+
+	def __init__(self):
+
+		self.view = None
+		self.modules = ()
+
+
+	def __call__(self, **params):
+
+		if self.view is None:
+			abort(404)
+
+		return self.view(**params)
+
+
+def add_pages(app, folder, reload=False):
+	"""Add a route for every page in `folder`, when the app is created. Hot reloading calls this
+	again with reload=True, after reloading the modules that changed: pages get their new views,
+	new pages get routes, and the routes of pages deleted since answer 404."""
 
 	folder = Path(folder).resolve()
+	app._pages_folder = folder
 
 	# Pages import the app's own modules (components, data) whatever the current folder is
 	root = os.path.abspath(app.root_path)
@@ -45,36 +70,64 @@ def add_pages(app, folder):
 	def load(path):
 
 		if path not in modules:
-			modules[path] = load_module(path, module_name(prefix, folder, path))
+			name = module_name(prefix, folder, path)
+			# Reloading uses the modules already imported (and reloaded); new pages are imported
+			modules[path] = (reload and sys.modules.get(name)) or load_module(path, name)
 
 		return modules[path]
 
 	existing = {rule.rule: rule.endpoint for rule in app.url_map.iter_rules()}
 
+	# Every view first, so a page that can't be served leaves the routes as they were
+	found = {}
 	for path in find_pages(folder):
 
 		relative = path.relative_to(folder).as_posix()
 		rule = url_rule(path.relative_to(folder))
 
-		if rule in app._page_rules:
-			raise PagesError(f'Two pages for "{rule}": {app._page_rules[rule]} and {relative}')
-		if rule in existing:
+		if rule in found:
+			raise PagesError(f'Two pages for "{rule}": {found[rule][0]} and {relative}')
+		if rule in existing and rule not in app._page_routes:
 			raise PagesError(f'Two handlers for "{rule}": {relative} and the route "{existing[rule]}"')
 
-		view = page_view(load(path), relative, rule, [load(layout) for layout in find_layouts(folder, path)])
-
-		app.add_url_rule(rule, f"pages/{relative[:-3]}", functools.partial(app._render_view, view))
-		app._page_rules[rule] = relative
+		layouts = [load(layout) for layout in find_layouts(folder, path)]
+		view = page_view(load(path), relative, rule, layouts)
+		found[rule] = (relative, view, (load(path).__name__,) + tuple(layout.__name__ for layout in layouts))
 
 	not_found = folder / "404.py"
 	if not_found.is_file():
-		view = page_view(load(not_found), "404.py", "", [load(layout) for layout in find_layouts(folder, not_found)])
+		layouts = [load(layout) for layout in find_layouts(folder, not_found)]
+		view = page_view(load(not_found), "404.py", "", layouts)
+		found[None] = ("404.py", view, (load(not_found).__name__,) + tuple(layout.__name__ for layout in layouts))
 
-		def page_not_found(error):
+	for rule, (relative, view, names) in found.items():
 
-			return app._render_view(view), 404
+		route = app._page_routes.get(rule)
+		if route is None:
+			route = app._page_routes[rule] = PageRoute()
+			if rule is None:
+				app.register_error_handler(404, functools.partial(page_not_found, app, route))
+			else:
+				app.add_url_rule(rule, f"pages/{relative[:-3]}", functools.partial(app._render_view, route))
+		route.view = view
+		route.modules = names
+		if rule is not None:
+			app._page_rules[rule] = relative
 
-		app.register_error_handler(404, page_not_found)
+	# Deleted since the app was created (hot reloading): Flask keeps the rule, which answers 404
+	for rule, route in app._page_routes.items():
+		if rule not in found:
+			route.view = None
+			app._page_rules.pop(rule, None)
+
+
+def page_not_found(app, route, error):
+
+	# Without 404.py (deleted while hot reloading), Flask's own 404
+	if route.view is None:
+		return error
+
+	return app._render_view(route), 404
 
 
 def find_pages(folder):

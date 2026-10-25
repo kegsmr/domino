@@ -10,6 +10,7 @@ import pytest
 # Imported by module path: `from domino import cli` finds flask.cli, which core's
 # `from flask import *` brings into the package namespace
 import domino.asgi
+import domino.hot
 import domino.cli as cli
 from domino import Domino, devmongo
 
@@ -527,6 +528,11 @@ def uvicorn_runs(monkeypatch):
 
 	calls = []
 	monkeypatch.setattr(uvicorn, "run", lambda target, **kwargs: calls.append((target, kwargs)))
+	# Hot reloading serves with uvicorn too, never for real here
+	monkeypatch.setattr(domino.hot, "serve", lambda target, root, **kwargs: calls.append(("hot", target, root, kwargs)))
+	# Recorded as unset, so what serve() sets is undone after the test
+	monkeypatch.setenv("DOMINO_ASGI_HOT", "")
+	monkeypatch.delenv("DOMINO_ASGI_HOT")
 
 	return calls
 
@@ -546,6 +552,8 @@ def test_serve_with_reload_names_the_app_for_new_processes(tmp_path, uvicorn_run
 	path = write_app(tmp_path / "reloading")
 	app = cli.find_app(cli.load_module(path))
 	app.debug = True
+	# Restarting on every change rather than hot reloading (see test_hot_reload.py)
+	app.config["DOMINO_HOT_RELOAD"] = False
 
 	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
@@ -867,6 +875,8 @@ def test_a_folder_with_just_pages_reloads_too(tmp_path, uvicorn_runs, monkeypatc
 	(folder / "pages" / "index.py").write_text("def page():\n\treturn 'hi'\n", encoding="utf-8")
 	app = cli.load_app(folder)
 	app.debug = True
+	# Restarting on every change rather than hot reloading (see test_hot_reload.py)
+	app.config["DOMINO_HOT_RELOAD"] = False
 
 	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
 

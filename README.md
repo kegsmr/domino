@@ -108,7 +108,7 @@ def layout(content):
 - `404.py`'s `page()` is shown, inside the layouts and with status 404, for URLs no page or route serves, and for `abort(404)`.
 - The app's folder is on the import path, whatever the current folder is, so pages can `from components.chat import Chat` and `from data import messages`. Pages are imported while the app is created, so they can't import `app.py`; read settings with `flask.current_app.settings`.
 
-Pages are on when the app's folder (the folder of the module passed to `Domino(__name__)`) has a `pages/` folder. `Domino(__name__, pages="views")` uses another folder and `pages=False` turns them off. `@app.route` keeps working alongside pages; a route for a URL a page already serves is an error, naming both, when the app starts. Pages are found once, when the app is created, and each file is imported once; while debugging, the reloader restarts the server when one changes. Pages render exactly like `@app.route` views, with events, reactive data and server push.
+Pages are on when the app's folder (the folder of the module passed to `Domino(__name__)`) has a `pages/` folder. `Domino(__name__, pages="views")` uses another folder and `pages=False` turns them off. `@app.route` keeps working alongside pages; a route for a URL a page already serves is an error, naming both, when the app starts. Pages are found once, when the app is created, and each file is imported once; while debugging, [hot reloading](#hot-reloading) swaps in pages that change and adds or removes the routes of pages added or deleted. Pages render exactly like `@app.route` views, with events, reactive data and server push.
 
 ### Moving between pages
 
@@ -132,13 +132,32 @@ domino run
 
 `domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, `pages/index.py` and `pages/layout.py`, a component in `components/`, a `Collection` in `data.py`, a test for the page in `pages/index_test.py` (run it with `pytest`; see [Testing your app](#testing-your-app)), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
 
-`domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode with uvicorn's reloader, so it restarts when you save a `.py` file in the app's folder. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `domino --version` prints the version.
+`domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode, with [hot reloading](#hot-reloading): saving a file in the app's folder updates the open pages in place. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `--port 0` picks a free port. `domino --version` prints the version.
 
 `domino serve [folder or app.py] [--workers N] [--port 8000] [--host 127.0.0.1]` serves the app in production, on every CPU core; see [Serving in production](#serving-in-production).
 
 `domino build [folder] [--force]` writes a `Dockerfile` for the app, and `domino deploy fly|render|docker [folder] [--name NAME] [--mongo-url URL] [--force]` deploys it, like `meteor deploy`; see [Deploying](#deploying).
 
-`app.run(debug=True)` (what `python app.py` does in the examples) serves the same way as `domino run`. Reloading starts a new process that loads the app again from its file, so the app must be assigned at the top level of the module (`app = Domino(__name__)`); otherwise it runs without reloading. Without debug mode, `app.run()` serves with uvicorn without reloading.
+`app.run(debug=True)` (what `python app.py` does in the examples) serves the same way as `domino run`. The app is served by a process of its own, which loads it again from its file, so the app must be assigned at the top level of the module (`app = Domino(__name__)`); otherwise it runs without reloading. Without debug mode, `app.run()` serves with uvicorn without reloading.
+
+### Hot reloading
+
+While you work on an app with `domino run` or `app.run(debug=True)`, saving a file updates the open tabs in place, usually within about 100 ms, like React's Fast Refresh: components keep their `State` (the counter's count, which tab is open), and the page keeps what's typed in its fields, focus and scroll position. The server logs a line for each change:
+
+```
+domino: hot reloaded components/counter.py (2 pages) in 12 ms
+```
+
+- A changed module (a component, a page, a layout, `data.py`, ...) is run again in place, and so are the app's modules that import it. Components on open pages switch to the new classes and are rendered again with the state they had: a `State` attribute added since starts at its default, one removed is dropped. The components their `render()` makes are new, as whenever they're rendered.
+- A changed page or layout makes the page again with its new code; components in the same places (the first `Counter`, and so on) take over the state of the old ones. Pages added or deleted get or lose their routes.
+- `State` and `Collection` objects at a module's top level are kept, with their values, when it's run again.
+- Jinja templates and component CSS are updated in place too. Stylesheets in the app's folder are fetched again; a changed `.js` file reloads the page.
+- A syntax error, or any error while reloading, shows in the open tabs (the debug overlay, with the traceback) and the old code keeps running; the next save that works clears it.
+- Pages are made again for the current URL with the cookies they were loaded with, so they work with logins.
+
+Some changes can't be swapped in safely, so the server restarts instead (`domino: restarting: app.py changed`) and the open tabs reload by themselves once it's back: `app.py` (or any module that imports it), `settings.json` and `settings.local.json`, a deleted module, and modules that start threads, processes or apps, or add routes, when they're imported, since running them again would do it twice. That last one is a guess from the module's code (calls such as `threading.Thread(...).start()`, `Domino(...)` or `@app.route` outside functions; see `domino/hot.py`); a module can decide for itself with `__hot_reload__ = False` (always restart) or `__hot_reload__ = True` (always hot reload). Files outside the app's folder (Domino itself, installed packages) aren't watched; restart for those.
+
+`{"domino": {"hot_reload": false}}` in `settings.json` restarts the server on every change instead, as uvicorn's reloader does. Production servers (`domino serve`, `app.run()` without debug mode) never watch files.
 
 ### Development MongoDB
 

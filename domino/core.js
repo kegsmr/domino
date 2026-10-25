@@ -246,6 +246,10 @@ window.Domino = (() => {
             pageExpired();
             return;
         }
+        if (data.type === 'hot') {
+            hot(data);
+            return;
+        }
         const el = request ? request.el : null;
         if (status < 200 || status >= 300) {
             reportError(el, request ? request.eventId : null, data);
@@ -346,9 +350,14 @@ window.Domino = (() => {
         openSocket();
     }
 
-    // Nothing to send or receive (e.g. a static page)
+    // Nothing to send or receive (e.g. a static page that isn't hot reloaded)
     function needsServer() {
-        return !!document.querySelector('[data-event-id], [data-after-id], [data-live]');
+        return !!document.querySelector('[data-event-id], [data-after-id], [data-live], [data-domino-hot]');
+    }
+
+    // Hot reloading (debug mode): the server updates this page when the app's files change
+    function hotReloading() {
+        return !!document.querySelector('[data-domino-hot]');
     }
 
     // The worker process of `domino serve` that has a page ("w3" from "w3-<id>"), or "" with
@@ -432,13 +441,14 @@ window.Domino = (() => {
                 return;
             }
             if (readyAt && Date.now() - readyAt > 30000) failures = 0;
-            if (++failures > RETRIES) {
+            // While hot reloading, the server is restarting for a change: wait for it
+            if (++failures > RETRIES && !hotReloading()) {
                 useHttp = true;
                 connect();
                 return;
             }
             // Meanwhile events go over HTTP, and pushes wait on the server for the new socket
-            setTimeout(connect, 250 * 2 ** (failures - 1));
+            setTimeout(connect, Math.min(250 * 2 ** (failures - 1), 2000));
         };
     }
 
@@ -447,7 +457,40 @@ window.Domino = (() => {
     // event the server doesn't know reloads the page (and events bound globally still work).
     function pageExpired() {
         useHttp = true;
-        if (document.querySelector('[data-live]')) window.location.reload();
+        if (document.querySelector('[data-live]') || hotReloading()) window.location.reload();
+    }
+
+    // While hot reloading (see domino/hot.py), the server sends this when the app's files change:
+    // the whole page to morph into, the component CSS the page now has, stylesheets to fetch
+    // again, a reload, or the error the change hit, shown until a change works.
+    function hot(data) {
+        if (data.reload) {
+            window.location.reload();
+            return;
+        }
+        if (data.html) {
+            // Like moving to another page, but what's typed in fields stays
+            swap(new DOMParser().parseFromString(data.html, 'text/html'), null);
+            if (inFlight === 0) document.documentElement.removeAttribute('data-domino-loading');
+        }
+        if (data.css) {
+            document.querySelectorAll('style[data-domino-css]').forEach((block) => block.remove());
+            addStyles(data.css);
+        }
+        if (data.stylesheets) {
+            for (const link of document.querySelectorAll('link[rel=stylesheet]')) {
+                const url = new URL(link.href, location.href);
+                if (url.origin !== location.origin) continue;
+                url.searchParams.set('domino-hot', String(Date.now()));
+                link.href = url.href;
+            }
+        }
+        const shown = document.getElementById('domino-error');
+        if (shown && shown.dataset.hot && 'error' in data) shown.remove();
+        if (data.error) {
+            showOverlay({ error: data.error, traceback: data.traceback || null });
+            document.getElementById('domino-error').dataset.hot = '1';
+        }
     }
 
     async function sendOverSocket(ws, eventId, payload) {
@@ -497,7 +540,7 @@ window.Domino = (() => {
     let stream = null;
 
     function openStream() {
-        if (stream || !document.querySelector('[data-live]')) return;
+        if (stream || !document.querySelector('[data-live], [data-domino-hot]')) return;
         const id = pageId();
         if (!id) return;
 
@@ -1075,14 +1118,14 @@ window.Domino = (() => {
     }
 
     // Do what a page load does, keeping what's the same: the whole document is morphed into the
-    // new one, its fields taking the new page's values
-    function swap(doc) {
+    // new one, its fields taking the new page's values (unless `reset` is null: see hot)
+    function swap(doc, reset = { root: document.documentElement, submit: true }) {
         const scripts = new Set(document.scripts);
         latest.clear();
         // The new page's components and their states, read from its HTML before it's shown
         const found = readGraphs(doc.documentElement);
 
-        morph(document.documentElement, doc.documentElement, { root: document.documentElement, submit: true });
+        morph(document.documentElement, doc.documentElement, reset);
         graphs.clear();
         deferred.clear();
         found.forEach(installGraph);

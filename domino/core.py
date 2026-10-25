@@ -219,6 +219,7 @@ class Page:
 		self.cookie = None  # the browser's Cookie header once it had this page, if swapped in by core.js
 		self.paused = False  # the tab is hidden, so refresh() leaves this page for resume()
 		self.dirty = {}  # components refresh() skipped while paused -> None, in order
+		self.hot = None  # what made it, to make it again while hot reloading (see domino.hot)
 		self.touch()
 
 
@@ -319,6 +320,20 @@ class Page:
 
 		for component in dirty:
 			component.refresh(only=self)
+
+
+	def notify(self, message):
+		"""Queue a message other than an update for this page's stream, e.g. {"type": "hot"} while
+		hot reloading. It's merged into one of its type the browser hasn't received yet."""
+
+		with self.updates_ready:
+			key = f"domino:{message['type']}"
+			self.updates[key] = dict(self.updates.pop(key, None) or {}, **message)
+			self.updates_ready.notify_all()
+			wake = self.wake
+
+		if wake is not None:
+			wake()
 
 
 	def open_stream(self, wake=None):
@@ -546,6 +561,7 @@ class Domino(Flask):
 
 		# URL rule -> the file in pages/ serving it. Set first: Flask.__init__ adds a route
 		self._page_rules = {}
+		self._page_routes = {}  # URL rule (None for 404.py) -> its domino.pages.PageRoute
 
 		super().__init__(*args, **kwargs)
 
@@ -559,6 +575,7 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_UPLOAD_TTL", 10 * 60)  # seconds an upload waits for its event
 		self.config.setdefault("DOMINO_PATCHES", True)  # the WebSocket sends what changed in a component, not all of it
 		self.config.setdefault("DOMINO_WS_COMPRESSION", True)  # per-message deflate on the WebSocket (uvicorn's)
+		self.config.setdefault("DOMINO_HOT_RELOAD", True)  # debug mode updates pages in place on changes
 
 		# settings.json < settings.local.json < DOMINO_* environment variables
 		self.settings = load_settings(self.root_path, settings)
@@ -570,6 +587,7 @@ class Domino(Flask):
 
 		self.page_store = page_store or MemoryPageStore()
 		self._asgi = None
+		self.hot_reloader = None  # updates open pages when files change, while debugging (see domino.hot)
 
 		# .html templates anywhere in the app's folder, found by file name (see domino.templates)
 		from .templates import TemplateFinder
@@ -699,7 +717,8 @@ class Domino(Flask):
 			serving.serve(app_location(self), host or "127.0.0.1", port or 5000, workers)
 			return
 
-		serve(self, host or "127.0.0.1", port or 5000, reload, **options)
+		# Port 0 picks a free port
+		serve(self, host or "127.0.0.1", 5000 if port is None else port, reload, **options)
 
 
 	@property
@@ -1101,6 +1120,10 @@ class Domino(Flask):
 			# Links then load pages from scratch, as without core.js
 			if not self.config["DOMINO_NAVIGATION"]:
 				result.configure(data_domino_reload=True)
+			# Updated in place when files change, so it's kept even with nothing to handle
+			if self.hot_reloader is not None:
+				result.configure(data_domino_hot=True)
+				self.hot_reloader.remember(page, result, function, args, kwargs)
 			with collect_styles() as styles:
 				html = result._render()
 			html = styles.finish(html)
@@ -1114,7 +1137,7 @@ class Domino(Flask):
 		if self.debug:
 			page.root = result
 		# Don't keep pages that have nothing to handle or refresh
-		elif not page.events and not page.live:
+		elif not page.events and not page.live and page.hot is None:
 			self._drop_page(page)
 
 		return html

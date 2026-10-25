@@ -28,6 +28,9 @@ STREAM_PATH = "/_domino/stream"
 # "path/to/app.py:attribute", for the processes uvicorn's reloader starts
 ENV_APP = "DOMINO_ASGI_APP"
 
+# "1" when those processes hot reload changed files themselves (see domino.hot)
+ENV_HOT = "DOMINO_ASGI_HOT"
+
 # Sent when a newer socket for the same page took over, so the browser doesn't reconnect
 CLOSE_REPLACED = 4001
 
@@ -330,7 +333,8 @@ class Connection:
 				if updates is None or subscription.left:
 					break
 				for update in updates:
-					await self.send(dict(update, type="update"))
+					# Other messages (see Page.notify) have a type of their own
+					await self.send(dict(update, type=update.get("type", "update")))
 			if subscription.left:
 				return
 			if subscription.expired:
@@ -518,10 +522,14 @@ def app_location(app):
 
 
 def serve(app, host="127.0.0.1", port=5000, reload=False, **options):
-	"""Serve `app` with uvicorn. With reload, uvicorn restarts a new process when a file in the
-	app's folder changes; that process finds the app through from_environ()."""
+	"""Serve `app` with uvicorn. With reload, a new process serves it, which finds the app through
+	from_environ(): it hot reloads changed files itself and is restarted for changes it can't swap
+	in (see domino.hot), or, with {"domino": {"hot_reload": false}}, uvicorn restarts it whenever a
+	file in the app's folder changes."""
 
 	import uvicorn
+
+	from . import hot
 
 	target = app.asgi
 	location = None
@@ -530,19 +538,29 @@ def serve(app, host="127.0.0.1", port=5000, reload=False, **options):
 		if location is None:
 			log.warning("Domino: not reloading on changes; the app must be defined at the top level of a module file")
 
-	if location is not None:
-		os.environ[ENV_APP] = location
-		# The new process creates the app again, and reads FLASK_DEBUG when it does
-		if app.debug:
-			os.environ["FLASK_DEBUG"] = "1"
-		target = "domino.asgi:from_environ"
-		options.update(factory=True, reload=True, reload_dirs=[app.root_path])
+	# Server-Sent Event streams only end when their client goes, so don't wait for them
+	# forever when stopping (or restarting on a change)
+	options.setdefault("timeout_graceful_shutdown", 3)
+
+	os.environ.pop(ENV_HOT, None)
 
 	# Server-Sent Event streams only end when their client goes, so don't wait for them
 	# forever when stopping (or restarting on a change)
 	options.setdefault("timeout_graceful_shutdown", 3)
 	# {"domino": {"ws_compression": false}} saves the ~40 KB per socket deflate keeps
 	options.setdefault("ws_per_message_deflate", bool(app.config["DOMINO_WS_COMPRESSION"]))
+
+	if location is not None:
+		os.environ[ENV_APP] = location
+		# The new process creates the app again, and reads FLASK_DEBUG when it does
+		if app.debug:
+			os.environ["FLASK_DEBUG"] = "1"
+		target = "domino.asgi:from_environ"
+		if app.config["DOMINO_HOT_RELOAD"]:
+			os.environ[ENV_HOT] = "1"
+			hot.serve(target, app.root_path, host=host, port=port, **options)
+			return
+		options.update(factory=True, reload=True, reload_dirs=[app.root_path])
 
 	uvicorn.run(target, host=host, port=port, **options)
 
@@ -553,16 +571,23 @@ def from_environ():
 	from .cli import load_app, load_module
 
 	location = os.environ[ENV_APP]
+	path = None
 	if os.path.isdir(location):
-		return load_app(location).asgi
+		app = load_app(location)
+	else:
+		path, _, name = location.rpartition(":")
 
-	path, _, name = location.rpartition(":")
+		# For `python app.py`, the new process has already run app.py as its main module;
+		# loading it again would make a second app (and start its threads twice)
+		module = sys.modules.get("__main__")
+		main_path = getattr(module, "__file__", None)
+		if not main_path or Path(main_path).resolve() != Path(path):
+			module = load_module(path)
+		app = getattr(module, name)
 
-	# For `python app.py`, the new process has already run app.py as its main module;
-	# loading it again would make a second app (and start its threads twice)
-	module = sys.modules.get("__main__")
-	main_path = getattr(module, "__file__", None)
-	if not main_path or Path(main_path).resolve() != Path(path):
-		module = load_module(path)
+	# Changed files are swapped in by this process while it serves (see domino.hot)
+	if os.environ.get(ENV_HOT) == "1":
+		from .hot import HotReloader
+		HotReloader(app, path).start()
 
-	return getattr(module, name).asgi
+	return app.asgi
