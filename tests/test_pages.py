@@ -4,7 +4,6 @@ import uuid
 from pathlib import Path, PurePosixPath
 
 import pytest
-from flask import Flask
 
 import domino.cli as cli
 from domino import Domino, pages
@@ -419,7 +418,8 @@ def served(monkeypatch):
 	"""Records the apps `domino run` would serve, instead of serving them."""
 
 	apps = []
-	monkeypatch.setattr(Flask, "run", lambda self, *args, **kwargs: apps.append(self))
+	# Domino.run() serves through domino.asgi.serve (uvicorn)
+	monkeypatch.setattr("domino.asgi.serve", lambda app, *args, **kwargs: apps.append(app))
 
 	# --no-mongo sets this; set then deleted so it's removed again after the test
 	monkeypatch.setenv("DOMINO_NO_MONGO", "")

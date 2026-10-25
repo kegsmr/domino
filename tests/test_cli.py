@@ -2,13 +2,14 @@ import hashlib
 import io
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
-from flask import Flask
 
 # Imported by module path: `from domino import cli` finds flask.cli, which core's
 # `from flask import *` brings into the package namespace
+import domino.asgi
 import domino.cli as cli
 from domino import Domino, devmongo
 
@@ -17,7 +18,7 @@ from domino import Domino, devmongo
 TEST_MONGO_URL = os.environ.get("DOMINO_MONGO__URL")
 
 # Set by run() and the CLI; set then deleted here so they're removed again after each test
-SET_BY_RUN = ["DOMINO_MONGO__URL", "DOMINO_MONGO__VERSION", "DOMINO_NO_MONGO"]
+SET_BY_RUN = ["DOMINO_MONGO__URL", "DOMINO_MONGO__VERSION", "DOMINO_NO_MONGO", "DOMINO_ASGI_APP", "FLASK_DEBUG"]
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +36,7 @@ def clean_environ(monkeypatch):
 
 @pytest.fixture
 def started(monkeypatch):
-	"""Replaces the MongoDB starter and Flask's server with recorders."""
+	"""Replaces the MongoDB starter and the server (uvicorn) with recorders."""
 
 	calls = {"mongo": [], "run": []}
 
@@ -44,12 +45,12 @@ def started(monkeypatch):
 		calls["mongo"].append((str(app_folder), port, major))
 		return devmongo.mongo_url(port or 27017, devmongo.database_name(app_folder))
 
-	def fake_run(self, *args, **kwargs):
+	def fake_serve(app, host, port, reload, **options):
 
-		calls["run"].append(kwargs)
+		calls["run"].append(dict(host=host, port=port, reload=reload, debug=app.debug, **options))
 
 	monkeypatch.setattr(devmongo, "start", fake_start)
-	monkeypatch.setattr(Flask, "run", fake_run)
+	monkeypatch.setattr(domino.asgi, "serve", fake_serve)
 
 	return calls
 
@@ -229,7 +230,7 @@ def test_run_starts_mongo_and_exports_the_url(tmp_path, started):
 
 	assert started["mongo"] == [(str(path.parent.resolve()), 5101, "7.0")]
 	assert os.environ["DOMINO_MONGO__URL"] == "mongodb://127.0.0.1:5101/myapp?replicaSet=rs0&directConnection=true"
-	assert started["run"] == [{"host": "127.0.0.1", "port": 5100, "debug": True, "load_dotenv": True, "threaded": True}]
+	assert started["run"] == [{"host": "127.0.0.1", "port": 5100, "reload": True, "debug": True}]
 
 
 def test_run_passes_the_mongo_version(tmp_path, started):
@@ -344,6 +345,104 @@ def test_reloader_child_does_not_start_mongo(tmp_path, started, monkeypatch):
 
 	assert started["mongo"] == []
 	assert len(started["run"]) == 1
+
+
+def test_run_without_debug_serves_without_reloading(tmp_path, started):
+
+	make_app(tmp_path / "prod").run(port=8000, threaded=True)
+
+	# threaded is Werkzeug's and means nothing to uvicorn
+	assert started["run"] == [{"host": "127.0.0.1", "port": 8000, "reload": False, "debug": False}]
+
+
+def test_use_reloader_false_turns_reloading_off(tmp_path, started):
+
+	make_app(tmp_path / "still").run(debug=True, use_reloader=False)
+
+	assert started["run"][0]["reload"] is False
+
+
+def test_flask_run_serves_the_app_itself(tmp_path, started, monkeypatch):
+
+	monkeypatch.setenv("FLASK_RUN_FROM_CLI", "true")
+
+	make_app(tmp_path / "flask").run(debug=True)
+
+	assert started["run"] == []
+
+
+# Serving with uvicorn
+
+
+@pytest.fixture
+def uvicorn_runs(monkeypatch):
+
+	import uvicorn
+
+	calls = []
+	monkeypatch.setattr(uvicorn, "run", lambda target, **kwargs: calls.append((target, kwargs)))
+
+	return calls
+
+
+def test_serve_without_reload_runs_the_asgi_app(tmp_path, uvicorn_runs):
+
+	app = cli.find_app(cli.load_module(write_app(tmp_path / "plain")))
+
+	domino.asgi.serve(app, "127.0.0.1", 5000)
+
+	assert uvicorn_runs == [(app.asgi, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3})]
+	assert "DOMINO_ASGI_APP" not in os.environ
+
+
+def test_serve_with_reload_names_the_app_for_new_processes(tmp_path, uvicorn_runs):
+
+	path = write_app(tmp_path / "reloading")
+	app = cli.find_app(cli.load_module(path))
+	app.debug = True
+
+	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+
+	((target, options),) = uvicorn_runs
+	assert target == "domino.asgi:from_environ"
+	assert options["factory"] is True and options["reload"] is True
+	assert options["reload_dirs"] == [app.root_path]
+	assert os.environ["DOMINO_ASGI_APP"] == f"{path.resolve()}:app"
+	# The new process creates the app again, in debug mode too
+	assert os.environ["FLASK_DEBUG"] == "1"
+
+
+def test_serve_reload_needs_a_module_level_app(tmp_path, uvicorn_runs):
+
+	app = make_app(tmp_path / "inline")
+
+	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+
+	assert uvicorn_runs[0][0] is app.asgi
+	assert "reload" not in uvicorn_runs[0][1]
+
+
+def test_from_environ_loads_the_app_from_its_file(tmp_path, monkeypatch):
+
+	path = write_app(tmp_path / "child")
+	monkeypatch.setenv("DOMINO_ASGI_APP", f"{path.resolve()}:app")
+
+	asgi = domino.asgi.from_environ()
+
+	assert asgi.app.root_path == str(tmp_path / "child")
+	assert asgi.app is sys.modules[cli.module_name(path)].app
+
+
+def test_from_environ_reuses_the_main_module(tmp_path, monkeypatch):
+
+	# `python app.py`: the reloader's process has already run app.py as __main__
+	path = write_app(tmp_path / "main")
+	main = cli.load_module(path)
+	monkeypatch.setitem(sys.modules, "__main__", main)
+	monkeypatch.setattr(cli, "load_module", None)
+	monkeypatch.setenv("DOMINO_ASGI_APP", f"{path.resolve()}:app")
+
+	assert domino.asgi.from_environ() is main.app.asgi
 
 
 def test_database_name_is_sanitized():
@@ -613,3 +712,24 @@ def test_real_mongod_with_replica_set_and_change_streams(tmp_path, monkeypatch):
 	assert process.poll() is not None
 	assert not devmongo.pid_alive(process.pid)
 	assert devmongo.port_free(mongo.port)
+
+
+def test_a_folder_with_just_pages_reloads_too(tmp_path, uvicorn_runs, monkeypatch):
+
+	folder = tmp_path / "bare"
+	(folder / "pages").mkdir(parents=True)
+	(folder / "pages" / "index.py").write_text("def page():\n\treturn 'hi'\n", encoding="utf-8")
+	app = cli.load_app(folder)
+	app.debug = True
+
+	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+
+	# The new process makes the app again from the folder, as `domino run` did
+	((target, options),) = uvicorn_runs
+	assert target == "domino.asgi:from_environ" and options["reload"] is True
+	assert os.environ["DOMINO_ASGI_APP"] == str(folder.resolve())
+
+	child = domino.asgi.from_environ()
+	assert child.app is not app
+	assert child.app.root_path == str(folder.resolve())
+	assert child.app.test_client().get("/").get_data(as_text=True) == "hi"

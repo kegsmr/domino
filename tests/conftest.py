@@ -1,6 +1,10 @@
+import asyncio
 import importlib.util
 import os
+import socket
 import sys
+import threading
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -101,3 +105,60 @@ def load_example():
 
 	for folder in loaded:
 		forget(folder)
+
+
+class ASGIServer:
+	"""An app served by uvicorn in a thread, as `uvicorn myapp:app.asgi` would serve it."""
+
+
+	def __init__(self, app):
+
+		import uvicorn
+
+		# Bound here, so the port is known before the server starts
+		self.socket = socket.socket()
+		self.socket.bind(("127.0.0.1", 0))
+		self.port = self.socket.getsockname()[1]
+		self.url = f"http://127.0.0.1:{self.port}/"
+		self.ws_url = f"ws://127.0.0.1:{self.port}/_domino/ws"
+
+		config = uvicorn.Config(app.asgi, loop="asyncio", log_level="warning", lifespan="off", timeout_graceful_shutdown=2)
+		self.server = uvicorn.Server(config)
+		self.loop = asyncio.new_event_loop()
+		self.thread = threading.Thread(target=self.run, daemon=True)
+		self.thread.start()
+
+		deadline = time.monotonic() + 5
+		while not self.server.started:
+			assert time.monotonic() < deadline, "uvicorn didn't start"
+			time.sleep(0.01)
+
+
+	def run(self):
+
+		asyncio.set_event_loop(self.loop)
+		self.loop.run_until_complete(self.server.serve(sockets=[self.socket]))
+
+
+	def stop(self):
+
+		self.server.should_exit = True
+		self.thread.join(5)
+		self.socket.close()
+
+
+@pytest.fixture
+def asgi_server():
+	"""Serves apps with uvicorn: asgi_server(app) returns an ASGIServer, stopped after the test."""
+
+	servers = []
+
+	def start(app):
+		server = ASGIServer(app)
+		servers.append(server)
+		return server
+
+	yield start
+
+	for server in servers:
+		server.stop()

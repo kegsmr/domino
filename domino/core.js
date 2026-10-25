@@ -217,13 +217,181 @@ window.Domino = (() => {
         if (updated) {
             listen(updated);
             scheduleAfterEvents(updated);
-            openStream();
+            connect();
         }
     }
 
-    // Components re-rendered with refresh() arrive over Server-Sent Events. Only pages
-    // showing a live component open the stream. EventSource reconnects by itself after a
-    // dropped connection but gives up on an error status, so an expired page (404) stops.
+    // Every message from the server comes through here, whatever carried it (an event's HTTP
+    // response, a Server-Sent Event, a WebSocket message), so each transport handles it the
+    // same way. `request` is the event it answers, if any.
+    async function handleMessage(data, status = 200, request = null) {
+        if (status === 404) {
+            // The server no longer knows this page (expired or restarted)
+            window.location.reload();
+            return;
+        }
+        if (data.type === 'expired') {
+            pageExpired();
+            return;
+        }
+        const el = request ? request.el : null;
+        if (status < 200 || status >= 300) {
+            reportError(el, request ? request.eventId : null, data);
+            return;
+        }
+        // The handler changed the session (e.g. logged in) while running over the WebSocket,
+        // which can't set cookies: fetch the new cookie before going on
+        if (data.session) {
+            await fetch('/_domino/session/' + encodeURIComponent(data.session), { method: 'POST', credentials: 'same-origin' });
+        }
+        // The handler called domino.redirect(); the server only allows paths on this site
+        if (data.redirect && data.redirect.startsWith('/') && !data.redirect.startsWith('//')) {
+            window.location.assign(data.redirect);
+            return;
+        }
+        // Unmark first, so the server's HTML decides whether the element ends up disabled
+        if (request && request.unmark) request.unmark();
+        apply(data, request ? request.reset : null);
+    }
+
+    // Pages served through app.asgi (marked data-domino-ws) talk to the server over one
+    // WebSocket per tab: events go up, their results and pushed updates come down. Elsewhere,
+    // or when the socket can't stay connected, events are POSTed and pages showing a live
+    // component get pushes over Server-Sent Events.
+    const RETRIES = 3;
+    const CONNECT_TIMEOUT = 5000;
+    const RESULT_TIMEOUT = 60000;
+    // Closed by the server because another socket for this page (e.g. a duplicated tab) took over
+    const CLOSE_REPLACED = 4001;
+
+    let socket = null;
+    let socketReady = null; // resolves to true once the server has bound the socket to this page
+    let failures = 0; // closes in a row, without a connection that lasted
+    let useHttp = false; // for the rest of this page's life
+    let nextRef = 0;
+    const waiting = new Map(); // ref -> the event sent over the socket that awaits its result
+
+    // Open what this page needs to hear from the server: the socket, or else the stream
+    function connect() {
+        if (useHttp || !window.WebSocket || !document.querySelector('[data-domino-ws]')) {
+            openStream();
+            return;
+        }
+        if (socket || !pageId()) return;
+        // Nothing to send or receive (e.g. a static page)
+        if (!document.querySelector('[data-event-id], [data-after-id], [data-live]')) return;
+        openSocket();
+    }
+
+    function openSocket() {
+        const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const ws = new WebSocket(scheme + location.host + '/_domino/ws');
+        let settle;
+        let readyAt = 0;
+        socket = ws;
+        socketReady = new Promise((resolve) => { settle = resolve; });
+
+        // A proxy may hold the handshake forever; events wait for it, so don't wait long
+        const timer = setTimeout(() => ws.close(), CONNECT_TIMEOUT);
+
+        ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+
+        ws.onmessage = async (e) => {
+            let data;
+            try { data = JSON.parse(e.data); } catch (err) { return; }
+
+            if (data.type === 'ready') {
+                clearTimeout(timer);
+                readyAt = Date.now();
+                settle(true);
+            } else if (data.type === 'result') {
+                const request = waiting.get(data.ref);
+                if (!request) return;
+                waiting.delete(data.ref);
+                clearTimeout(request.timer);
+                request.resolve({ status: data.status, data });
+            } else {
+                // Not 'expired', which must be handled before the close that follows it
+                if (data.type === 'update') await wait(latency / 2);
+                handleMessage(data);
+            }
+        };
+
+        ws.onclose = (e) => {
+            clearTimeout(timer);
+            settle(false);
+            if (socket === ws) {
+                socket = null;
+                socketReady = null;
+            }
+            // Whether these were handled is unknown, so report them rather than send them again
+            for (const request of waiting.values()) {
+                clearTimeout(request.timer);
+                request.reject(new Error('Connection to the server lost'));
+            }
+            waiting.clear();
+
+            if (useHttp) return;
+            if (e.code === CLOSE_REPLACED) {
+                // Don't take the page back from the other socket; send events over HTTP
+                useHttp = true;
+                return;
+            }
+            if (readyAt && Date.now() - readyAt > 30000) failures = 0;
+            if (++failures > RETRIES) {
+                useHttp = true;
+                connect();
+                return;
+            }
+            // Meanwhile events go over HTTP, and pushes wait on the server for the new socket
+            setTimeout(connect, 250 * 2 ** (failures - 1));
+        };
+    }
+
+    // The socket found that the server doesn't know this page (it expired, or the server
+    // restarted). Live pages reload to get going again; others carry on over HTTP, where an
+    // event the server doesn't know reloads the page (and events bound globally still work).
+    function pageExpired() {
+        useHttp = true;
+        if (document.querySelector('[data-live]')) window.location.reload();
+    }
+
+    async function sendOverSocket(ws, eventId, payload) {
+        return new Promise((resolve, reject) => {
+            const ref = ++nextRef;
+            const timer = setTimeout(() => {
+                waiting.delete(ref);
+                reject(new Error('No answer from the server'));
+            }, RESULT_TIMEOUT);
+            waiting.set(ref, { resolve, reject, timer });
+            ws.send(JSON.stringify({ type: 'event', ref, page_id: pageId(), event_id: eventId, data: payload }));
+        });
+    }
+
+    async function post(eventId, payload) {
+        const response = await fetch('/_domino/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ page_id: pageId(), event_id: eventId, data: payload })
+        });
+        const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+        return { status: response.status, data };
+    }
+
+    // Send an event over the socket when it's connected (waiting for one that's connecting),
+    // otherwise POST it. Resolves to the server's { status, data }.
+    async function sendEvent(eventId, payload) {
+        const ws = socket;
+        if (ws && await socketReady && socket === ws && ws.readyState === WebSocket.OPEN) {
+            return sendOverSocket(ws, eventId, payload);
+        }
+        return post(eventId, payload);
+    }
+
+    // Components re-rendered with refresh() arrive over Server-Sent Events when there's no
+    // socket. Only pages showing a live component open the stream. EventSource reconnects by
+    // itself after a dropped connection but gives up on an error status, so an expired page
+    // (404) stops.
     let stream = null;
 
     function openStream() {
@@ -234,7 +402,7 @@ window.Domino = (() => {
         stream = new EventSource('/_domino/stream?page=' + encodeURIComponent(id));
         stream.onmessage = async (e) => {
             await wait(latency / 2);
-            apply(JSON.parse(e.data), null);
+            handleMessage(JSON.parse(e.data));
         };
     }
 
@@ -369,30 +537,9 @@ window.Domino = (() => {
         if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
             await wait(latency / 2);
-            const response = await fetch('/_domino/events', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ page_id: pageId(), event_id: eventId, data: payload })
-            });
-            if (response.status === 404) {
-                // The server no longer knows this page (expired or restarted)
-                window.location.reload();
-                return;
-            }
-            const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+            const { status, data } = await sendEvent(eventId, payload);
             await wait(latency / 2);
-            if (!response.ok) {
-                reportError(el, eventId, data);
-                return;
-            }
-            // The handler called domino.redirect(); the server only allows paths on this site
-            if (data.redirect && data.redirect.startsWith('/') && !data.redirect.startsWith('//')) {
-                window.location.assign(data.redirect);
-                return;
-            }
-            // Unmark first, so the server's HTML decides whether the element ends up disabled
-            if (unmark) unmark();
-            apply(data, reset);
+            await handleMessage(data, status, { el, eventId, reset, unmark });
         } catch (err) {
             reportError(el, eventId, { error: String(err) });
         } finally {
@@ -502,7 +649,7 @@ window.Domino = (() => {
         latency = readLatency();
         listen();
         scheduleAfterEvents();
-        openStream();
+        connect();
     });
 
     return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen, enableLatencySim, disableLatencySim };

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import threading
 import time
 import traceback
@@ -43,6 +44,9 @@ _pages_lock = threading.Lock()
 
 # The signed-in user's id in Flask's session cookie (see domino.accounts)
 SESSION_USER_KEY = "domino_user_id"
+
+# Seconds a browser has to claim a session changed over the WebSocket (see session_handoff)
+SESSION_HANDOFF_TTL = 60
 
 
 def render_stack():
@@ -184,6 +188,7 @@ class Page:
 		# request, so events and pushes read this instead of the cookie; reading it subscribes
 		self.user_id = reactive.State(None)
 		self.css = set()  # components whose CSS the browser has (see PageStyles)
+		self.wake = None  # the newest stream's callback for pushes, if it runs in an event loop
 		self.touch()
 
 
@@ -239,17 +244,38 @@ class Page:
 				update["css"] = css
 			self.updates[element_id] = update
 			self.updates_ready.notify_all()
+			wake = self.wake
+
+		if wake is not None:
+			wake()
 
 
-	def open_stream(self):
+	def open_stream(self, wake=None):
+		"""Make a new stream the one that receives pushes. A stream in a thread waits in pull();
+		one in an event loop (a WebSocket) passes `wake`, a thread-safe callback run after each
+		push, and then takes the updates with pull(stream, 0)."""
 
 		token = object()
 
 		with self.updates_ready:
+			replaced = self.wake
 			self.stream = token
+			self.wake = wake
 			self.updates_ready.notify_all()
 
+		# An older socket finds out it was replaced the next time it pulls
+		if replaced is not None:
+			replaced()
+
 		return token
+
+
+	def close_stream(self, stream):
+
+		# Updates keep queueing for the next stream, but there's nothing left to wake
+		with self.updates_ready:
+			if self.stream is stream:
+				self.wake = None
 
 
 	def pull(self, stream, timeout):
@@ -412,6 +438,16 @@ class SessionInterface(SecureCookieSessionInterface):
 	"""Flask's signed cookie session, with SameSite=Lax and Secure outside debug by default."""
 
 
+	def should_set_cookie(self, app, session):
+
+		# The session hand-off sets the cookie it was given; refreshing the request's own
+		# session after it would undo a logout
+		if g.get("domino_session_handoff"):
+			return False
+
+		return super().should_set_cookie(app, session)
+
+
 	def get_cookie_samesite(self, app):
 
 		return app.config["SESSION_COOKIE_SAMESITE"] or "Lax"
@@ -443,6 +479,8 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_PAGE_TTL", 30 * 60)  # seconds of inactivity
 		self.config.setdefault("DOMINO_MAX_PAGES", 1000)
 		self.config.setdefault("DOMINO_KEEPALIVE", 15)  # seconds between stream keepalives
+		self.config.setdefault("DOMINO_WEBSOCKET", True)  # one WebSocket per tab when served over ASGI
+		self.config.setdefault("DOMINO_WORKERS", 32)  # threads for event handlers (and for requests) over ASGI
 
 		# settings.json < settings.local.json < DOMINO_* environment variables
 		self.settings = load_settings(self.root_path, settings)
@@ -453,6 +491,7 @@ class Domino(Flask):
 		mongo.use_app(self)
 
 		self.page_store = page_store or MemoryPageStore()
+		self._asgi = None
 
 		# .html templates anywhere in the app's folder, found by file name (see domino.templates)
 		from .templates import TemplateFinder
@@ -465,6 +504,7 @@ class Domino(Flask):
 		self._add_event_handler('/_domino/events')
 		self._add_stream('/_domino/stream')
 		self._add_oauth_routes('/_domino/accounts/<provider>/<action>')
+		self._add_session_handoff('/_domino/session/<token>')
 
 		# File-based routing, found once here rather than per request
 		self._add_pages(pages)
@@ -553,7 +593,28 @@ class Domino(Flask):
 		if debug_mode and not in_child and not from_flask_cli:
 			self._start_dev_mongo(port or 5000)
 
-		return super().run(host=host, port=port, debug=debug, load_dotenv=load_dotenv, **options)
+		# `flask run` serves the app itself, and Flask's run() knows to do nothing then
+		if from_flask_cli:
+			return super().run(host=host, port=port, debug=debug, load_dotenv=load_dotenv, **options)
+
+		# Served with uvicorn, so pages get the WebSocket; in debug mode it restarts on changes
+		self.debug = debug_mode
+		reload = options.pop("use_reloader", debug_mode)
+		options.pop("threaded", None)  # Werkzeug's; uvicorn needs no thread per request
+
+		from .asgi import serve
+		serve(self, host or "127.0.0.1", port or 5000, reload, **options)
+
+
+	@property
+	def asgi(self):
+		"""This app as an ASGI application, for uvicorn: `uvicorn myapp:app.asgi`."""
+
+		if self._asgi is None:
+			from .asgi import ASGIApp
+			self._asgi = ASGIApp(self)
+
+		return self._asgi
 
 
 	def _start_dev_mongo(self, app_port):
@@ -594,77 +655,86 @@ class Domino(Flask):
 
 			# Access the page_id and event_id sent by the client-side JavaScript
 			page = self._get_page(data.get("page_id")) or DEFAULT_PAGE
-			event_id = data.get("event_id")
 
-			# Reactive changes the callback makes re-render their subscribers once the page
-			# lock is released (updating other pages while holding it could deadlock)
-			with reactive.batch(background=True) as changes, page.lock:
+			payload, status = self.handle_event(page, data.get("event_id"), data.get("data"))
 
-				event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
-				if event is None:
-					return jsonify({"error": "Unknown or expired event"}), 404
-
-				g.domino_page = page
-				g.domino_redirect = None  # set by redirect()
-
-				_, callback = event
-
-				try:
-					if accepts_argument(callback):
-						result = callback(Event.from_request(event_id, data.get("data")))
-					else:
-						result = callback()
-
-					# A handler that returns nothing re-renders the component its changes
-					# affected on this page, or else the component it's a method of
-					if result is None:
-						result = changes.affected_on(page) or getattr(callback, "__self__", None)
-
-					if not isinstance(result, Element):
-						return jsonify(self._event_response({"id": None, "html": None}))
-
-					# Old binds must go before rendering so the new ones register fresh.
-					# If rendering fails the browser still shows the old HTML, so put
-					# the old events back and drop any the failed render added
-					events = dict(page.events)
-					page.unregister_subtree(result)
-					try:
-						with collect_styles() as styles:
-							html = result._render()
-					except Exception:
-						page.events.clear()
-						page.events.update(events)
-						raise
-				except Exception as error:
-					return self._event_error(event_id, error)
-
-				page.version += 1
-
-				# The response carries this render, so it isn't pushed to this page again
-				changes.skip(page, result)
-
-				response = {
-					"id": result.id(),
-					"html": styles.finish(html, fallback=False),
-					"version": page.version
-				}
-
-				# CSS of components this page hasn't shown before; core.js adds it to the head
-				css = styles.new_for(page)
-				if css:
-					response["css"] = css
-
-				return jsonify(self._event_response(response))
+			return jsonify(payload), status
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
 
 
 	def _event_response(self, response):
 
-		if g.domino_redirect:
+		if g.get("domino_redirect"):
 			response["redirect"] = g.domino_redirect
 
 		return response
+
+
+	def handle_event(self, page, event_id, data):
+		"""Run an event's callback and render what it changed. Returns (payload, status) for the
+		browser, the same over every transport (HTTP POST or WebSocket). Call it in a request
+		context. It can block, so the WebSocket runs it in a worker thread."""
+
+		# Reactive changes the callback makes re-render their subscribers once the page
+		# lock is released (updating other pages while holding it could deadlock)
+		with reactive.batch(background=True) as changes, page.lock:
+
+			event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
+			if event is None:
+				return {"error": "Unknown or expired event"}, 404
+
+			g.domino_page = page
+			g.domino_redirect = None  # set by redirect()
+
+			_, callback = event
+
+			try:
+				if accepts_argument(callback):
+					result = callback(Event.from_request(event_id, data))
+				else:
+					result = callback()
+
+				# A handler that returns nothing re-renders the component its changes
+				# affected on this page, or else the component it's a method of
+				if result is None:
+					result = changes.affected_on(page) or getattr(callback, "__self__", None)
+
+				if not isinstance(result, Element):
+					return self._event_response({"id": None, "html": None}), 200
+
+				# Old binds must go before rendering so the new ones register fresh.
+				# If rendering fails the browser still shows the old HTML, so put
+				# the old events back and drop any the failed render added
+				events = dict(page.events)
+				page.unregister_subtree(result)
+				try:
+					with collect_styles() as styles:
+						html = result._render()
+				except Exception:
+					page.events.clear()
+					page.events.update(events)
+					raise
+			except Exception as error:
+				return self._event_error(event_id, error)
+
+			page.version += 1
+
+			# The response carries this render, so it isn't pushed to this page again
+			changes.skip(page, result)
+
+			response = {
+				"id": result.id(),
+				"html": styles.finish(html, fallback=False),
+				"version": page.version
+			}
+
+			# CSS of components this page hasn't shown before; core.js adds it to the head
+			css = styles.new_for(page)
+			if css:
+				response["css"] = css
+
+			return self._event_response(response), 200
 
 
 	def _event_error(self, event_id, error):
@@ -673,13 +743,13 @@ class Domino(Flask):
 
 		# Tracebacks can reveal code and data, so only send them while debugging or testing
 		if not (self.debug or self.testing):
-			return jsonify({"error": "Internal Server Error"}), 500
+			return {"error": "Internal Server Error"}, 500
 
-		return jsonify({
+		return {
 			"error": f"{type(error).__name__}: {error}",
 			"traceback": traceback.format_exc(),
 			"debug": True
-		}), 500
+		}, 500
 
 
 	def _add_stream(self, route):
@@ -717,6 +787,56 @@ class Domino(Flask):
 			})
 
 		self.add_url_rule(route, route, stream, methods=["GET"])
+
+
+	def session_handoff(self, session):
+		"""For events that ran over the WebSocket, which can't set cookies: the Set-Cookie headers
+		for a session the handler changed, kept under a one-time token (or None if unchanged).
+		The browser POSTs the token to /_domino/session/<token> to get the cookie."""
+
+		if not session.modified:
+			return None, []
+
+		response = self.response_class()
+		self.session_interface.save_session(self, session, response)
+		cookies = response.headers.getlist("Set-Cookie")
+		if not cookies:
+			return None, []
+
+		token = secrets.token_urlsafe(32)
+		now = time.monotonic()
+		with self._handoffs_lock:
+			# Unclaimed tokens (the tab closed) expire after a minute
+			for old, (created, _) in list(self._handoffs.items()):
+				if now - created > SESSION_HANDOFF_TTL:
+					del self._handoffs[old]
+			self._handoffs[token] = (now, cookies)
+
+		return token, cookies
+
+
+	def _add_session_handoff(self, route):
+
+		self._handoffs = {}
+		self._handoffs_lock = threading.Lock()
+
+		def handoff(token):
+
+			with self._handoffs_lock:
+				created, cookies = self._handoffs.pop(token, (None, None))
+
+			if cookies is None or time.monotonic() - created > SESSION_HANDOFF_TTL:
+				return jsonify({"error": "Unknown or expired session token"}), 404
+
+			g.domino_session_handoff = True
+			response = self.response_class(status=204)
+			for cookie in cookies:
+				response.headers.add("Set-Cookie", cookie)
+			response.headers["Cache-Control"] = "no-store"
+
+			return response
+
+		self.add_url_rule(route, "domino_session", handoff, methods=["POST"])
 
 
 	def _add_oauth_routes(self, route):
@@ -803,6 +923,9 @@ class Domino(Flask):
 			# Only while debugging, so the latency setting can't slow down production
 			if self.debug and self.config.get("DOMINO_LATENCY"):
 				result.configure(data_domino_latency=int(self.config["DOMINO_LATENCY"]))
+			# Served through app.asgi, so the browser can open a WebSocket instead of POST + SSE
+			if request.environ.get("domino.websocket"):
+				result.configure(data_domino_ws=True)
 			with collect_styles() as styles:
 				html = result._render()
 			html = styles.finish(html)

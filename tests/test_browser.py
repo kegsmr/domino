@@ -1,5 +1,6 @@
 """End-to-end tests of core.js in a real browser. Skipped when Playwright isn't installed."""
 
+import json
 import sys
 import threading
 import time
@@ -21,7 +22,8 @@ def browser():
 
 
 @pytest.fixture
-def serve(load_example):
+def serve_wsgi(load_example):
+	"""Serves an example as plain WSGI (like gunicorn), so pages use POST + Server-Sent Events."""
 
 	servers = []
 
@@ -39,6 +41,45 @@ def serve(load_example):
 
 	for server in servers:
 		server.shutdown()
+
+
+@pytest.fixture
+def serve_asgi(asgi_server, load_example):
+	"""Serves an example with uvicorn (app.asgi), so pages use one WebSocket."""
+
+	def start(name, patch=None):
+		# examples/<name>/app.py, registered in sys.modules so Flask finds its folder
+		module = load_example(name)
+		if patch:
+			patch(module)
+		return asgi_server(module.app).url
+
+	return start
+
+
+@pytest.fixture(params=["wsgi", "asgi"])
+def serve(request, serve_wsgi, serve_asgi):
+	"""Runs the test on both transports."""
+
+	if request.param == "wsgi":
+		return serve_wsgi
+
+	return serve_asgi
+
+
+def sent_events(page):
+	"""Events the page sends to the server, over HTTP or the WebSocket."""
+
+	sent = []
+
+	def on_frame(payload):
+		if isinstance(payload, str) and json.loads(payload).get("type") == "event":
+			sent.append(payload)
+
+	page.on("request", lambda request: request.method == "POST" and "/_domino/events" in request.url and sent.append(request))
+	page.on("websocket", lambda ws: ws.on("framesent", on_frame))
+
+	return sent
 
 
 @pytest.fixture
@@ -105,8 +146,7 @@ def test_debounced_search_keeps_focus_and_typing(serve, page):
 
 		Search.search = delayed
 
-	posts = []
-	page.on("request", lambda request: request.method == "POST" and posts.append(request))
+	sent = sent_events(page)
 	page.goto(serve("search", slow))
 	box = page.locator("input[type=search]")
 
@@ -120,7 +160,7 @@ def test_debounced_search_keeps_focus_and_typing(serve, page):
 	assert page.evaluate("document.activeElement.type") == "search"
 	assert page.evaluate("document.activeElement.selectionStart") == 4
 	assert page.locator("li").all_inner_texts() == ["Rust"]
-	assert len(posts) == 2
+	assert len(sent) == 2
 	assert page.errors == []
 
 
@@ -136,7 +176,12 @@ def test_server_push_updates_the_clock_without_user_action(serve, page):
 @pytest.mark.mongo
 def test_reactive_chat_updates_other_windows_and_keeps_their_typing(serve, browser):
 
-	url = serve("chat")
+	# Each transport's run starts with no messages (the database is shared by the test run)
+	def clear_messages(module):
+		from data import messages
+		messages.remove({})
+
+	url = serve("chat", clear_messages)
 	windows = [browser.new_page(), browser.new_page()]
 	errors = []
 	for window in windows:
@@ -196,10 +241,10 @@ def test_button_is_busy_while_its_event_is_in_flight(serve, page):
 	assert page.errors == []
 
 
-def test_already_disabled_buttons_stay_disabled(serve, page):
+def test_already_disabled_buttons_stay_disabled(serve_wsgi, page):
 
 	# A response that updates nothing, so only the busy marks touch the button
-	page.goto(serve("counter"))
+	page.goto(serve_wsgi("counter"))
 	page.route("**/_domino/events", lambda route: route.fulfill(json={"id": None, "html": None}))
 	page.evaluate("""() => {
 		const button = document.querySelector('button');
@@ -548,4 +593,100 @@ def test_template_string_todo(serve, page):
 
 	assert [text.strip() for text in todo.locator("li").all_inner_texts()] == ["two"]
 	assert todo.locator("input[name=text]").input_value() == ""
+	assert page.errors == []
+
+
+def watch_transport(page):
+	"""What the page opens to talk to the server: WebSockets, event POSTs and SSE streams."""
+
+	seen = {"websockets": [], "posts": [], "streams": []}
+
+	page.on("websocket", lambda ws: seen["websockets"].append(ws))
+	page.on("request", lambda request: "/_domino/events" in request.url and seen["posts"].append(request))
+	page.on("request", lambda request: "/_domino/stream" in request.url and seen["streams"].append(request))
+
+	return seen
+
+
+def test_asgi_events_go_over_one_websocket(serve_asgi, page):
+
+	seen = watch_transport(page)
+	page.goto(serve_asgi("counter"))
+
+	for _ in range(3):
+		page.get_by_text("Increment").click()
+	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 3')")
+
+	assert len(seen["websockets"]) == 1
+	assert seen["websockets"][0].url.endswith("/_domino/ws")
+	assert seen["posts"] == [] and seen["streams"] == []
+	assert page.errors == []
+
+
+def test_asgi_pushes_go_over_the_websocket(serve_asgi, page):
+
+	seen = watch_transport(page)
+	updates = []
+	page.on("websocket", lambda ws: ws.on("framereceived", lambda payload: '"update"' in payload and updates.append(payload)))
+	page.goto(serve_asgi("clock"))
+	first = page.locator("p").inner_text()
+
+	page.wait_for_function(f"document.querySelector('p').textContent.trim() !== {first!r}", timeout=5000)
+	assert updates
+	assert len(seen["websockets"]) == 1
+	assert seen["streams"] == []
+	assert page.errors == []
+
+
+def test_wsgi_pages_never_try_the_websocket(serve_wsgi, page):
+
+	seen = watch_transport(page)
+	page.goto(serve_wsgi("clock"))
+	page.wait_for_timeout(1500)
+
+	assert seen["websockets"] == []
+	assert len(seen["streams"]) == 1
+
+
+def test_falls_back_to_post_and_sse_when_the_websocket_is_blocked(serve_asgi, page):
+
+	# Like a proxy that won't pass WebSockets: every socket closes before it opens
+	page.add_init_script("""window.WebSocket = class {
+		constructor() {
+			window.socketsTried = (window.socketsTried || 0) + 1;
+			setTimeout(() => this.onclose({ code: 1006 }), 10);
+		}
+		send() {}
+		close() {}
+	};""")
+	seen = watch_transport(page)
+
+	page.goto(serve_asgi("counter"))
+	page.get_by_text("Increment").click()
+	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 1')", timeout=5000)
+	assert len(seen["posts"]) == 1
+
+	# A live page gives up on the socket after a few tries, then streams
+	page.goto(serve_asgi("clock"))
+	first = page.locator("p").inner_text()
+	page.wait_for_function(f"document.querySelector('p').textContent.trim() !== {first!r}", timeout=8000)
+	page.wait_for_timeout(3000)
+	assert len(seen["streams"]) == 1
+	# The first try and three retries, then no more
+	assert page.evaluate("window.socketsTried") == 4
+	assert page.errors == []
+
+
+def test_live_page_reloads_when_its_socket_hears_it_expired(serve_asgi, page):
+
+	def quick_keepalive(module):
+		module.app.config["DOMINO_KEEPALIVE"] = 0.1
+
+	page.goto(serve_asgi("clock", quick_keepalive))
+	first = page.get_attribute("[data-domino-page]", "data-domino-page")
+
+	# Gone from the server, e.g. after a restart
+	sys.modules["example_clock"].app.page_store.delete(first)
+
+	page.wait_for_function(f"document.querySelector('[data-domino-page]').dataset.dominoPage !== {first!r}", timeout=5000)
 	assert page.errors == []

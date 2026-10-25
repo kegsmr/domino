@@ -135,3 +135,20 @@ def test_routes_without_events_keep_no_page():
 
 	assert client.get("/plain").get_data(as_text=True) == "plain"
 	assert app.page_store.pages == {}
+
+
+def test_handle_event_returns_the_payload_and_status_for_any_transport():
+
+	app = make_app()
+	client = app.test_client()
+	page_id, event_id = load(client)
+	page = app.page_store.pages[page_id]
+
+	with app.test_request_context():
+		payload, status = app.handle_event(page, event_id, {})
+		missing = app.handle_event(page, "nope", None)
+
+	assert status == 200
+	assert set(payload) == {"id", "html", "version"}
+	assert "Count: 1" in payload["html"]
+	assert missing == ({"error": "Unknown or expired event"}, 404)

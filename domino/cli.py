@@ -209,8 +209,12 @@ def load_app(path):
 	if not (path / "pages").is_dir():
 		raise CliError(f"No app.py or pages/ folder in {path}")
 
-	# No boilerplate needed: an app rooted at the folder, serving its pages/
-	return Domino(module_name(path), root_path=str(path))
+	# No boilerplate needed: an app rooted at the folder, serving its pages/. Remembered so
+	# the reloader's new process can make it again (see domino.asgi.app_location)
+	app = Domino(module_name(path), root_path=str(path))
+	app.domino_folder = str(path)
+
+	return app
 
 
 def run(args):
@@ -229,7 +233,7 @@ def run(args):
 		print(f"domino: App: http://{args.host}:{args.port}/", file=sys.stderr, flush=True)
 
 	# Domino.run() starts the local MongoDB, once, outside the reloader's child process
-	app.run(host=args.host, port=args.port, debug=True, threaded=True)
+	app.run(host=args.host, port=args.port, debug=True)
 
 	return 0
 

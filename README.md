@@ -122,7 +122,9 @@ domino run
 
 `domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, `pages/index.py` and `pages/layout.py`, a component in `components/`, a `Collection` in `data.py`, a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
 
-`domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode with the reloader, so it restarts when you save a file. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `domino --version` prints the version.
+`domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode with uvicorn's reloader, so it restarts when you save a `.py` file in the app's folder. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `domino --version` prints the version.
+
+`app.run(debug=True)` (what `python app.py` does in the examples) serves the same way. Reloading starts a new process that loads the app again from its file, so the app must be assigned at the top level of the module (`app = Domino(__name__)`); otherwise it runs without reloading. Without debug mode, `app.run()` serves with uvicorn without reloading.
 
 ### Development MongoDB
 
@@ -340,7 +342,7 @@ See `examples/loading/`.
 
 ### Server push
 
-`component.refresh()` re-renders a component and sends it to every open page showing it, without waiting for a browser event. It can be called from anywhere, including a background thread. Mark components that will be refreshed with the class attribute `live = True`: pages showing one receive updates over Server-Sent Events from `/_domino/stream`, which keeps one connection (and, on a threaded server, one thread) open per tab, so other pages don't open a stream at all. A component shown on several pages is rendered once per refresh. See `examples/clock/`.
+`component.refresh()` re-renders a component and sends it to every open page showing it, without waiting for a browser event. It can be called from anywhere, including a background thread. Mark components that will be refreshed with the class attribute `live = True`, so pages showing one listen for updates (see [How the browser talks to the server](#how-the-browser-talks-to-the-server)); pages without one don't. A component shown on several pages is rendered once per refresh. See `examples/clock/`.
 
 ### Reactive data
 
@@ -438,7 +440,7 @@ Settings work as a dict or with attributes: `app.settings.mongo.url`, `app.setti
 ```json
 {
     "secret_key": "...",
-    "domino": {"page_ttl": 600, "max_pages": 500, "keepalive": 15},
+    "domino": {"page_ttl": 600, "max_pages": 500, "keepalive": 15, "websocket": true, "workers": 32},
     "public": {"greeting": "Hello"}
 }
 ```
@@ -480,7 +482,26 @@ Find elements with simple CSS selectors (`tag`, `.class`, `#id`, `[attr=value]`,
 
 Outside `pages/`, `app.test_page(path)` gives the same simulated browser for any app. See the examples' `pages/*_test.py`, e.g. [examples/counter/pages/index_test.py](examples/counter/pages/index_test.py).
 
+## How the browser talks to the server
+
+Served through `app.asgi` (with uvicorn, which `app.run()` and `domino run` use), each tab opens **one WebSocket** at `/_domino/ws`. Events go up it and their results come back down, and so do updates pushed by `refresh()` or reactive data, so there's no request per event and no stream per tab. An idle tab costs the server a few KB and no thread.
+
+- Event handlers are still plain (sync) Python. They run in a pool of worker threads (`{"domino": {"workers": 32}}`, the default), so a slow handler never holds up other tabs. A tab's events run one at a time, in the order they were sent, under the page's lock, exactly as over HTTP.
+- Handlers get a request context made from the WebSocket's handshake: `request.cookies`, `session` and `url_for` work. A socket can't set cookies, so when a handler changes the session (logging in, say), the result carries a one-time token that the page exchanges for the new cookie with a quick same-origin POST before it goes on. The socket's later events see the new session too.
+- The handshake is refused when its `Origin` isn't this site, so other sites can't open a socket with your visitors' cookies.
+- An open socket keeps its page alive. If the page is gone (expired, or the server restarted), a page showing a live component reloads; others reload on their next event, as over HTTP.
+- Where the socket can't connect or keeps dropping (some proxies block WebSockets), the page falls back by itself after a few tries to POSTing each event to `/_domino/events` and, if it shows a live component, Server-Sent Events from `/_domino/stream`. That's also what pages use when the app is served as plain WSGI (`gunicorn app:app`, `flask run`), which keeps working as before.
+- `{"domino": {"websocket": false}}` turns the socket off; pages then always use HTTP and Server-Sent Events.
+
 ## Deployment
+
+Serve the ASGI app with uvicorn (installed with Domino):
+
+```
+uvicorn app:app.asgi --host 0.0.0.0 --port 8000
+```
+
+Behind a proxy, let it pass WebSockets for `/_domino/ws` (with nginx: `proxy_http_version 1.1` and the `Upgrade`/`Connection` headers). Plain WSGI servers (`gunicorn app:app`) work too, with the HTTP fallback above, but then each tab showing a live component holds a server thread.
 
 Components and their event handlers live in the memory of the server process that rendered the page. Each page load gets its own state, which expires after `DOMINO_PAGE_TTL` seconds of inactivity (default 1800). At most `DOMINO_MAX_PAGES` pages are kept (default 1000); when a page has expired, the browser reloads it.
 
