@@ -20,7 +20,7 @@ from a2wsgi import WSGIMiddleware
 from werkzeug.test import EnvironBuilder
 
 from . import tailwind
-from .core import DEFAULT_PAGE
+from .core import DEFAULT_PAGE, max_event_bytes
 from .patches import Patcher
 
 
@@ -35,6 +35,13 @@ ENV_HOT = "DOMINO_ASGI_HOT"
 
 # Sent when a newer socket for the same page took over, so the browser doesn't reconnect
 CLOSE_REPLACED = 4001
+
+# A message bigger than DOMINO_MAX_EVENT_MB, or too many waiting to be handled
+CLOSE_TOO_BIG = 1009
+CLOSE_POLICY = 1008
+
+# Messages a socket may have waiting for the ones before them to be handled
+MAX_QUEUED = 100
 
 log = logging.getLogger(__name__)
 
@@ -237,7 +244,8 @@ class Connection:
 		self.subscription = None  # to the page it's bound to
 		self.listening = None  # the task sending that page's pushes
 		self.closed = False
-		self.events = asyncio.Queue()
+		self.events = asyncio.Queue(MAX_QUEUED)
+		self.max_message = max_event_bytes(self.app)
 		self.patcher = None  # what this socket sent, if the browser takes patches
 		self.sending = asyncio.Lock()  # messages are encoded in the order they're sent
 
@@ -261,13 +269,24 @@ class Connection:
 				message = await self.receive()
 				if message["type"] == "websocket.disconnect":
 					break
+				# Events are small; a bigger message (DOMINO_MAX_EVENT_MB) ends the socket
+				if len(message.get("text") or message.get("bytes") or "") > self.max_message:
+					await self.close(CLOSE_TOO_BIG)
+					break
 				data = parse(message)
 				# Hellos go in line with events, so a page's last events reach it before the
 				# socket moves on to the next page
 				if data.get("type") in ("event", "hello", "leave", "pause", "resume"):
-					self.events.put_nowait(data)
+					try:
+						self.events.put_nowait(data)
+					except asyncio.QueueFull:
+						# Far more than a tab sends while its events are handled: a flood
+						await self.close(CLOSE_POLICY)
+						break
 				elif data.get("type") == "resend":
-					tasks.append(asyncio.ensure_future(self.resend(data.get("id"))))
+					tasks = [task for task in tasks if not task.done()]
+					if len(tasks) <= MAX_QUEUED:
+						tasks.append(asyncio.ensure_future(self.resend(data.get("id"))))
 		finally:
 			self.closed = True
 			for task in tasks:
@@ -470,7 +489,7 @@ def parse(message):
 
 	try:
 		data = json.loads(message.get("text") or message.get("bytes") or "")
-	except ValueError:
+	except (ValueError, RecursionError):
 		return {}
 
 	if not isinstance(data, dict):

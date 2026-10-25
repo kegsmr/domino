@@ -67,6 +67,12 @@ SESSION_HANDOFF_TTL = 60
 WORKER_ID_ENV = "DOMINO_WORKER_ID"
 
 
+def max_event_bytes(app):
+	"""The largest event (its JSON) the app accepts: DOMINO_MAX_EVENT_MB."""
+
+	return int(float(app.config["DOMINO_MAX_EVENT_MB"]) * 1024 * 1024)
+
+
 def worker_prefix():
 	""""w3-" in worker 3 of `domino serve`, else "". Page ids and session tokens start with it,
 	so the router in front of the workers sends their requests to the process that has them."""
@@ -672,7 +678,9 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_WORKERS", 32)  # threads for event handlers (and for requests) over ASGI
 		self.config.setdefault("DOMINO_NAVIGATION", True)  # links to other pages swap them in without reloading
 		self.config.setdefault("DOMINO_MAX_UPLOAD_MB", 16)  # per upload request (all its files)
+		self.config.setdefault("DOMINO_MAX_PENDING_UPLOADS_MB", 256)  # uploads waiting for their event, all pages together
 		self.config.setdefault("DOMINO_UPLOAD_TTL", 10 * 60)  # seconds an upload waits for its event
+		self.config.setdefault("DOMINO_MAX_EVENT_MB", 1)  # per event sent (its JSON), over HTTP or the WebSocket
 		self.config.setdefault("DOMINO_PATCHES", True)  # the WebSocket sends what changed in a component, not all of it
 		self.config.setdefault("DOMINO_WS_COMPRESSION", True)  # per-message deflate on the WebSocket (uvicorn's)
 		self.config.setdefault("DOMINO_HOT_RELOAD", True)  # debug mode updates pages in place on changes
@@ -888,8 +896,21 @@ class Domino(Flask):
 			if not request.is_json:
 				return jsonify({"error": "Expected application/json"}), 415
 
+			# Read at most DOMINO_MAX_EVENT_MB, so a huge body can't take the server's memory
+			limit = max_event_bytes(self)
+			if (request.content_length or 0) > limit:
+				return jsonify({"error": "Event too large"}), 413
+			body = request.stream.read(limit + 1)
+			if len(body) > limit:
+				return jsonify({"error": "Event too large"}), 413
+
 			# Retrieve the event data from the incoming JSON payload
-			data = request.get_json(silent=True) or {}
+			try:
+				data = json.loads(body) if body else {}
+			except (ValueError, RecursionError):
+				data = {}
+			if not isinstance(data, dict):
+				data = {}
 
 			# Access the page_id and event_id sent by the client-side JavaScript
 			page = self._get_page(data.get("page_id")) or DEFAULT_PAGE
@@ -963,7 +984,9 @@ class Domino(Flask):
 		# Files the event uploaded first, by token; deleted once it's handled
 		with reactive.batch(background=True) as changes, page.lock, self.uploads.claim(page, data) as files:
 
-			event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
+			event = None
+			if isinstance(event_id, str):
+				event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
 			if event is None:
 				return {"error": "Unknown or expired event"}, 404
 			if files is None:
@@ -1182,7 +1205,8 @@ class Domino(Flask):
 
 		self._prune_pages()
 
-		return self.page_store.load(page_id) if page_id else None
+		# Ids come from the browser, which may send anything
+		return self.page_store.load(page_id) if page_id and isinstance(page_id, str) else None
 
 
 	def _drop_page(self, page):
