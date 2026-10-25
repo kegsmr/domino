@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from flask import *
+from markupsafe import Markup, escape
 
 from .util import *
 
@@ -12,6 +13,9 @@ VOID_TAGS = [
 	"area", "base", "br", "col", "embed", "hr", "img",
 	"input", "link", "meta", "source", "track", "wbr"
 ]
+
+# Elements whose text content is not HTML and must not be escaped
+RAW_TEXT_TAGS = ["script", "style"]
 
 
 class Domino(Flask):
@@ -260,10 +264,14 @@ class Element:
 			if key.startswith('_'):
 				continue
 			key = key.replace("_", "-")
-			if value:
-				if callable(value):
-					value = url_for(value.__name__)
-				html += f" {key}=\"{value}\""
+			if value is None or value is False:
+				continue
+			if value is True:
+				html += f" {key}"
+				continue
+			if callable(value):
+				value = url_for(value.__name__)
+			html += f" {key}=\"{escape(value)}\""
 
 		html += f">{end}"
 
@@ -271,8 +279,14 @@ class Element:
 		if void or (void is None and tag in VOID_TAGS):
 			return html
 
+		# Escape text unless it's marked safe with Markup or inside <script>/<style>
+		raw = tag in RAW_TEXT_TAGS
+		text = (lambda value: str(value)) if raw else (lambda value: str(escape(value)))
+
 		# Process inner content and children
 		if inner:
+
+			inner = text(inner)
 	
 			# Add indentation to the inner content
 			inner = inner.replace("\n", f"{end}{indentation}{indent}")  # Ensure proper indentation for inner content
@@ -289,7 +303,7 @@ class Element:
 			if isinstance(child, Element):
 				inner += child._render(level + 1, indent)
 			elif isinstance(child, str):
-				inner += f"{indentation}{indent}{child}{end}"
+				inner += f"{indentation}{indent}{text(child)}{end}"
 			else:
 				raise ValueError(f"Invalid child: {child!r}")
 
