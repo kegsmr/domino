@@ -1,25 +1,29 @@
 # Examples
 
-Run any example from the repository root, then open http://127.0.0.1:5000:
+Each example is a folder: a small `app.py`, its pages in `pages/` (`pages/index.py` is the page at `/`), and, where it helps, its components in `components/` and its data in `data.py`. Run one from the repository root, without installing Domino, then open http://127.0.0.1:5000:
 
 ```
-python examples/counter.py
+python examples/counter/app.py
 ```
+
+or, with Domino installed (`pip install -e .`), `domino run examples/counter`. `app.py` finds the repository's `domino` package by its own path, so it also works from any other folder.
+
+The examples run in debug mode. Only `chat` stores data in MongoDB, so the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it; running `chat` starts one, as `domino run` does.
 
 | Example | Shows |
 |---|---|
-| `hello_world.py` | A page built from tag classes, with an app-wide stylesheet served at `/style.css` |
-| `functional.py` | Several pages linking to each other by passing view functions as `href` |
-| `counter.py` | A component with state, re-rendered by `bind("click", ...)` |
-| `random_number.py` | `after(ms, ...)` updating a component on a timer |
-| `clock.py` | `refresh()` pushing a component to the browser from a background thread |
-| `todo.py` | Form submits handled in Python with `event.form`, without reloading the page |
-| `forms.py` | Form controls (`select`, range, checkbox), `event.value`, and re-rendering only part of a component |
-| `search.py` | Search as you type: `bind("input", ..., debounce=250)`, with the input keeping focus and caret while results update |
-| `chat.py` | Meteor-style reactivity: a shared `Collection`; every open window re-renders live when a message is inserted |
-| `accounts.py` | Sign-up, login and logout with `domino.accounts`: a `UserMenu` that updates when you log in or out, and a `login_required` page with notes only their owner sees. Needs MongoDB (started for you in debug mode) |
-| `loading.py` | Styling a slow event's loading state with `[data-loading]`, and the debug error overlay when a callback raises |
-| `attributes.py` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
-| `bootstrap.py` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
-| `settings/app.py` | `app.settings` from `settings.json`, the `domino` block, and `public` settings read in the browser as `Domino.settings`. Run with `python examples/settings/app.py`; copy `settings.local.json.example` to `settings.local.json` to override locally |
-| `showcase.py` | A full landing page using the imperative style (`t.h1(parent, "text")`) and a contact form event |
+| `hello_world/` | A page built from tag classes, with an app-wide stylesheet served at `/style.css` |
+| `functional/` | Several pages in `pages/`, a shared `layout.py` with the navigation, a page with a URL parameter (`hello/[name].py`) and a `404.py` |
+| `counter/` | A component with `State`, re-rendered by `on_click=` |
+| `random_number/` | `after(ms, ...)` updating a component on a timer |
+| `clock/` | `refresh()` pushing a component to the browser from a background thread |
+| `todo/` | Form submits handled in Python with `event.form`, without reloading the page |
+| `forms/` | Form controls (`select`, range, checkbox), `event.value`, and re-rendering only part of a component |
+| `search/` | Search as you type: `on_input=..., debounce=250`, with the input keeping focus and caret while results update |
+| `chat/` | Meteor-style reactivity: a shared `Collection` in `data.py`; every open window re-renders live when a message is inserted |
+| `accounts/` | Sign-up, login and logout with `domino.accounts`: a `UserMenu` that updates when you log in or out, and a `login_required` page with notes only their owner sees. Needs MongoDB (started for you in debug mode) |
+| `loading/` | Styling a slow event's loading state with `[data-loading]`, and the debug error overlay when a callback raises |
+| `attributes/` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
+| `bootstrap/` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
+| `settings/` | `app.settings` from `settings.json`, the `domino` block, and `public` settings read in the browser as `Domino.settings`. Copy `settings.local.json.example` to `settings.local.json` to override locally |
+| `showcase/` | A full landing page using the imperative style (`t.h1(parent, "text")`), written as a `Page` class, and a contact form event |

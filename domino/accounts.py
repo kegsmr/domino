@@ -366,7 +366,7 @@ def current_user():
 
 
 def login_required(function):
-	"""For route functions: visitors who aren't signed in are sent to the login page
+	"""For route functions and page() functions: visitors who aren't signed in are sent to the login page
 	(the accounts.login_url setting, default /login) with ?next= pointing back here."""
 
 	@functools.wraps(function)

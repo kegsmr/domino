@@ -14,13 +14,101 @@ pip install -e .
 
 ## Run an example
 
-From the repository root:
-
 ```
-python examples/counter.py
+python examples/counter/app.py
 ```
 
-Then open http://127.0.0.1:5000.
+Then open http://127.0.0.1:5000. Each example is a folder with a small `app.py` and its pages in `pages/`; see [examples/README.md](examples/README.md).
+
+## Pages
+
+Each Python file in the app's `pages/` folder is a page, and its path is the URL:
+
+```
+myapp/
+  app.py                 app = Domino(__name__)
+  pages/
+    index.py             /
+    about.py             /about
+    users/
+      index.py           /users
+      [id].py            /users/<id>
+      [id]/posts.py      /users/<id>/posts
+    docs/[...path].py    /docs/<path:path>, the rest of the URL
+    layout.py            wraps every page in its folder and below
+    404.py               the page for URLs no page serves
+    _helpers.py          not a page: names starting with _ are private
+  components/            components the pages import
+  data.py                Collections the pages import
+  settings.json
+```
+
+A page file defines `page()`, returning anything a route can: a component, a `Document`, a string or a Flask response. The parts of the URL in brackets arrive as keyword arguments. `[int:id].py` uses Flask's `int` converter (`float`, `uuid` and `path` work too), and `[...path].py` matches the rest of the URL, slashes included (at least one segment: `/docs` itself needs `docs/index.py`).
+
+```python
+# pages/users/[int:id].py  ->  /users/42
+import domino.tags as t
+
+
+def page(id):
+
+	return t.h1() [
+		f"User {id}"
+	]
+```
+
+A page can also be a component class named `Page`. Each visit gets a new one, and the URL's parameters are passed to its `init(self, ...)`:
+
+```python
+# pages/counter.py  ->  /counter
+from domino import State
+import domino.tags as t
+
+
+class Page(t.div):
+
+	count = State(0)
+
+
+	def render(self):
+
+		return [
+			t.button(on_click=self.increment) [
+				f"Clicked {self.count} times"
+			]
+		]
+
+
+	def increment(self):
+
+		self.count += 1
+```
+
+`layout.py` defines `layout(content)` and returns the page wrapped in whatever every page shares, usually a `Document` with the navigation. Layouts nest: the `pages/` folder's own layout is the outermost, then each subfolder's, down to the page's own folder. A layout that names URL parameters (`layout(content, id)`) receives them.
+
+```python
+# pages/layout.py
+import domino.tags as t
+from domino.components import Document
+
+
+def layout(content):
+
+	return Document(title="My site") [
+		t.nav() [
+			t.a(href="/") ["Home"],
+			t.a(href="/about") ["About"]
+		],
+		content
+	]
+```
+
+- A page that returns a whole document (a `Document`, or any `t.html`) or a Flask response is used as it is, without layouts.
+- A component that no layout puts in a document is put in a plain `Document()`, which loads Domino's script, so its events work.
+- `404.py`'s `page()` is shown, inside the layouts and with status 404, for URLs no page or route serves, and for `abort(404)`.
+- The app's folder is on the import path, whatever the current folder is, so pages can `from components.chat import Chat` and `from data import messages`. Pages are imported while the app is created, so they can't import `app.py`; read settings with `flask.current_app.settings`.
+
+Pages are on when the app's folder (the folder of the module passed to `Domino(__name__)`) has a `pages/` folder. `Domino(__name__, pages="views")` uses another folder and `pages=False` turns them off. `@app.route` keeps working alongside pages; a route for a URL a page already serves is an error, naming both, when the app starts. Pages are found once, when the app is created, and each file is imported once; while debugging, the reloader restarts the server when one changes. Pages render exactly like `@app.route` views, with events, reactive data and server push.
 
 ## Command line
 
@@ -32,9 +120,9 @@ cd myapp
 domino run
 ```
 
-`domino create <name>` makes a folder with a small reactive app (`app.py`), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
+`domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, `pages/index.py` and `pages/layout.py`, a component in `components/`, a `Collection` in `data.py`, a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
 
-`domino run [app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default `app.py` in the current folder) in debug mode with the reloader, so it restarts when you save a file. `domino --version` prints the version.
+`domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode with the reloader, so it restarts when you save a file. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `domino --version` prints the version.
 
 ### Development MongoDB
 
@@ -100,9 +188,9 @@ class Counter(t.div):
 - `event.value`: the element's value (`True`/`False` for checkboxes)
 - `event.form`: the surrounding `<form>`'s fields as a dict (repeated names become lists)
 
-Submit events don't reload the page. See `examples/todo.py`.
+Submit events don't reload the page. See `examples/todo/`.
 
-`bind(event, callback, debounce=ms)` waits until the user pauses before sending, which suits `"input"` events (see `examples/search.py`). An element can have several events.
+`bind(event, callback, debounce=ms)` waits until the user pauses before sending, which suits `"input"` events (see `examples/search/`). An element can have several events.
 
 Updates are patched into the page in place rather than replacing the component's HTML, so focus, the caret and anything the user is typing survive a re-render. Form fields keep what the user entered unless the server changes their value, or they belong to the element whose event was just handled (a submitted form is reset to what the server renders).
 
@@ -124,11 +212,11 @@ document.addEventListener('domino:error', (e) => {
 });
 ```
 
-See `examples/loading.py`.
+See `examples/loading/`.
 
 ### Server push
 
-`component.refresh()` re-renders a component and sends it to every open page showing it, without waiting for a browser event. It can be called from anywhere, including a background thread. Mark components that will be refreshed with the class attribute `live = True`: pages showing one receive updates over Server-Sent Events from `/_domino/stream`, which keeps one connection (and, on a threaded server, one thread) open per tab, so other pages don't open a stream at all. A component shown on several pages is rendered once per refresh. See `examples/clock.py`.
+`component.refresh()` re-renders a component and sends it to every open page showing it, without waiting for a browser event. It can be called from anywhere, including a background thread. Mark components that will be refreshed with the class attribute `live = True`: pages showing one receive updates over Server-Sent Events from `/_domino/stream`, which keeps one connection (and, on a threaded server, one thread) open per tab, so other pages don't open a stream at all. A component shown on several pages is rendered once per refresh. See `examples/clock/`.
 
 ### Reactive data
 
@@ -140,21 +228,20 @@ from domino import Collection, State
 messages = Collection("messages")   # shared by everyone
 online = State(0)
 
-class Chat(t.div):
+class Chat(t.ul):
 
 	def render(self):
-		self([t.li() [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)])
+		return [t.li() [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)]
 
 	def send(self, event):
 		messages.insert({"text": event.form["text"], "sent": time.time()})  # every Chat updates
-		return self
 ```
 
 - `State(value)`: `.value` reads (and subscribes), `.value = x` changes it.
 - `Collection(name)`: `insert(doc)` (returns the `_id`), `find(query, sort=..., limit=...)` (a cursor you iterate or `.fetch()`), `find_one`, `count`, `update(query, {"$set": ...}, multi=False)` and `remove(query)`, with MongoDB-style queries (`$gt`, `$in`, `$or`, dotted paths, ...). Documents come back as copies.
 - Changes made while handling an event re-render each subscriber once, in the background, so the user who made the change gets their response straight away. Use `with batch():` to group changes made elsewhere, and `domino.wait()` in tests to let background updates finish.
 
-See `examples/chat.py`.
+See `examples/chat/`.
 
 ### MongoDB
 
@@ -178,7 +265,7 @@ def login():
 	return Document() [accounts.LoginForm()]       # also SignupForm(), LogoutButton(), OAuthButton("github")
 
 @app.route("/private")
-@accounts.login_required                           # under @app.route
+@accounts.login_required                           # under @app.route, or on a page's page()
 def private():
 	user = accounts.current_user()
 	return Document() [t.p() [f"Hello {user['email']}"]]
@@ -266,7 +353,7 @@ def test_todo():
 	assert page.value("input[name=text]") == ""
 ```
 
-Each test page is its own browser tab. Find elements with simple CSS selectors (`tag`, `.class`, `#id`, `[attr=value]`, and descendants like `form input`), optionally narrowed with `text=`. Pages can be driven with `click`, `fill` (set a value without firing events), `type` (fires `input`), `select`, `check`, and `submit`. Inspect them with `text`, `value`, `find`/`find_all` and `html`. `sync()` applies changes other pages pushed to this one, and `run_timers()` fires pending `after()` timers right away. A failing handler, or a selector that matches nothing, fails the test with the traceback and the page's text. See [examples/test_examples_headless.py](examples/test_examples_headless.py).
+Each test page is its own browser tab. Find elements with simple CSS selectors (`tag`, `.class`, `#id`, `[attr=value]`, and descendants like `form input`), optionally narrowed with `text=`. Pages can be driven with `click`, `fill` (set a value without firing events), `type` (fires `input`), `select`, `check`, and `submit`. Inspect them with `text`, `value`, `find`/`find_all` and `html`. `sync()` applies changes other pages pushed to this one, and `run_timers()` fires pending `after()` timers right away. A failing handler, or a selector that matches nothing, fails the test with the traceback and the page's text. See [tests/test_testing.py](tests/test_testing.py).
 
 ## Deployment
 

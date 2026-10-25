@@ -1,19 +1,13 @@
 """End-to-end tests of core.js in a real browser. Skipped when Playwright isn't installed."""
 
-import importlib.util
-import sys
 import threading
 import time
-from pathlib import Path
 
 import pytest
 
 playwright = pytest.importorskip("playwright.sync_api")
 
 from werkzeug.serving import make_server
-
-
-EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
 @pytest.fixture(scope="module")
@@ -26,20 +20,13 @@ def browser():
 
 
 @pytest.fixture
-def serve():
+def serve(load_example):
 
 	servers = []
 
 	def start(name, patch=None):
-		# Examples with their own folder keep their app in <name>/app.py
-		path = EXAMPLES / f"{name}.py"
-		if not path.exists():
-			path = EXAMPLES / name / "app.py"
-		spec = importlib.util.spec_from_file_location(f"example_{name}", path)
-		module = importlib.util.module_from_spec(spec)
-		# Flask finds the app's folder (for settings.json) through sys.modules
-		sys.modules[spec.name] = module
-		spec.loader.exec_module(module)
+		# examples/<name>/app.py, registered in sys.modules so Flask finds its folder
+		module = load_example(name)
 		if patch:
 			patch(module)
 		server = make_server("127.0.0.1", 0, module.app, threaded=True)
@@ -107,13 +94,15 @@ def test_partial_update_keeps_other_fields(serve, page):
 def test_debounced_search_keeps_focus_and_typing(serve, page):
 
 	def slow(module):
-		search = module.Search.search
+		# The example's own components package, just imported with its app
+		from components.search import Search
+		search = Search.search
 
 		def delayed(self, event):
 			time.sleep(0.3)
 			return search(self, event)
 
-		module.Search.search = delayed
+		Search.search = delayed
 
 	posts = []
 	page.on("request", lambda request: request.method == "POST" and posts.append(request))
@@ -226,13 +215,14 @@ def test_already_disabled_buttons_stay_disabled(serve, page):
 def test_debounced_input_is_marked_but_not_disabled(serve, page):
 
 	def slow(module):
-		search = module.Search.search
+		from components.search import Search
+		search = Search.search
 
 		def delayed(self, event):
 			time.sleep(0.5)
 			return search(self, event)
 
-		module.Search.search = delayed
+		Search.search = delayed
 
 	page.goto(serve("search", slow))
 	box = page.locator("input[type=search]")
@@ -311,13 +301,14 @@ def test_cancelled_error_event_shows_nothing(serve, page):
 def test_submit_marks_the_form_and_its_submit_button(serve, page):
 
 	def slow(module):
-		add = module.TodoList.add
+		from components.todo_list import TodoList
+		add = TodoList.add
 
 		def delayed(self, event):
 			time.sleep(0.5)
 			return add(self, event)
 
-		module.TodoList.add = delayed
+		TodoList.add = delayed
 
 	page.goto(serve("todo", slow))
 	page.fill("input[name=text]", "one")
@@ -338,7 +329,8 @@ def test_latency_simulator_delays_round_trips(serve, page):
 
 	# Without predictions, so the click shows only once the server answers
 	def no_predictions(module):
-		module.CounterComponent.optimistic = False
+		from components.counter import CounterComponent
+		CounterComponent.optimistic = False
 
 	page.goto(serve("counter", no_predictions))
 	page.evaluate("Domino.enableLatencySim(600)")
@@ -439,3 +431,25 @@ def test_accounts_sign_up_log_out_log_in_and_keep_private_notes(serve, page):
 	page.wait_for_function("document.querySelectorAll('.Notes li').length === 1", timeout=5000)
 	assert page.locator(".Notes li").inner_text() == "Buy milk"
 	assert page.errors == []
+
+
+def test_file_routed_pages_share_a_layout(serve, page):
+
+	url = serve("functional")
+	page.goto(url)
+
+	page.get_by_role("link", name="About").click()
+	page.wait_for_url("**/about")
+	assert page.locator("h1").inner_text() == "About"
+	assert page.locator("nav a[aria-current=page]").inner_text() == "About"
+
+	page.get_by_role("link", name="Home").click()
+	page.get_by_role("link", name="Grace").click()
+	page.wait_for_url("**/hello/Grace")
+	assert page.locator("h1").inner_text() == "Hello, Grace!"
+	assert page.errors == []
+
+	response = page.goto(url + "nowhere")
+	assert response.status == 404
+	assert page.locator("h1").inner_text() == "Page not found"
+	assert page.locator("nav a").count() == 3
