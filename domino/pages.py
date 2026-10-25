@@ -24,7 +24,8 @@ from .templates import JinjaTemplate
 
 
 # [id], [int:id] and [...rest]
-PARAM = re.compile(r"^\[(\.\.\.)?(?:(\w+):)?(\w+)\]$")
+# [name], [converter:name], [name=converter] (colons can't be in Windows file names) or [...name]
+PARAM = re.compile(r"^\[(\.\.\.)?(?:(\w+):)?(\w+)(?:=(\w+))?\]$")
 
 
 class PagesError(Exception):
@@ -182,9 +183,12 @@ def url_segment(segment, relative):
 
 	match = PARAM.match(segment)
 	if not match:
-		raise PagesError(f"{relative.as_posix()}: {segment!r} isn't a URL parameter; use [name], [converter:name] or [...name]")
+		raise PagesError(f"{relative.as_posix()}: {segment!r} isn't a URL parameter; use [name], [converter:name], [name=converter] or [...name]")
 
-	catch_all, converter, name = match.groups()
+	catch_all, converter, name, after = match.groups()
+	if converter and after:
+		raise PagesError(f"{relative.as_posix()}: {segment!r} names two converters; use [{converter}:{name}] or [{name}={after}]")
+	converter = converter or after
 	if catch_all:
 		converter = "path"
 	if converter:

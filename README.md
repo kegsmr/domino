@@ -45,7 +45,7 @@ myapp/
   settings.json
 ```
 
-A page file defines `page()`, returning anything a route can: a component, a `Document`, a string or a Flask response. The parts of the URL in brackets arrive as keyword arguments. `[int:id].py` uses Flask's `int` converter (`float`, `uuid` and `path` work too), and `[...path].py` matches the rest of the URL, slashes included (at least one segment: `/docs` itself needs `docs/index.py`).
+A page file defines `page()`, returning anything a route can: a component, a `Document`, a string or a Flask response. The parts of the URL in brackets arrive as keyword arguments. `[int:id].py` uses Flask's `int` converter (`float`, `uuid` and `path` work too; on Windows, where file names can't have colons, write `[id=int].py`), and `[...path].py` matches the rest of the URL, slashes included (at least one segment: `/docs` itself needs `docs/index.py`).
 
 ```python
 # pages/users/[int:id].py  ->  /users/42

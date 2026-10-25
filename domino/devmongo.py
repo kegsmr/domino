@@ -266,7 +266,7 @@ def fetch_index():
 
 def binary_name():
 
-	if os.name == "nt":
+	if platform.system() == "Windows":
 		return "mongod.exe"
 
 	return "mongod"

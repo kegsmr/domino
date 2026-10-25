@@ -61,6 +61,7 @@ TEXT_LAYOUT = (
 	("users/index.py", "/users"),
 	("users/[id].py", "/users/<id>"),
 	("users/[int:id].py", "/users/<int:id>"),
+	("users/[id=int].py", "/users/<int:id>"),
 	("files/[...rest].py", "/files/<path:rest>"),
 	("users/[id]/posts.py", "/users/<id>/posts"),
 	("users/[id]/index.py", "/users/<id>"),
@@ -69,6 +70,12 @@ TEXT_LAYOUT = (
 def test_url_rules(path, rule):
 
 	assert pages.url_rule(PurePosixPath(path)) == rule
+
+
+def test_two_converters_are_a_clear_error():
+
+	with pytest.raises(PagesError, match=r"names two converters"):
+		pages.url_rule(PurePosixPath("[int:id=uuid].py"))
 
 
 def test_a_bad_parameter_name_is_a_clear_error():
@@ -83,7 +90,7 @@ def test_files_become_routes_and_private_files_are_skipped(tmp_path):
 		"pages/index.py": text_page("home"),
 		"pages/about.py": text_page("about"),
 		"pages/users/index.py": text_page("users"),
-		"pages/users/[int:id].py": text_page("user {id}"),
+		"pages/users/[id=int].py": text_page("user {id}"),
 		"pages/users/[id]/posts.py": text_page("posts of {id}"),
 		"pages/files/[...rest].py": text_page("file {rest}"),
 		"pages/_helpers.py": "raise RuntimeError('a private helper is not a page')\n",
@@ -105,7 +112,7 @@ def test_files_become_routes_and_private_files_are_skipped(tmp_path):
 def test_url_parameters_arrive_as_keyword_arguments(tmp_path):
 
 	app = make_app(tmp_path, {
-		"pages/users/[int:id].py": "def page(id):\n\treturn f'{type(id).__name__} {id}'\n",
+		"pages/users/[id=int].py": "def page(id):\n\treturn f'{type(id).__name__} {id}'\n",
 	})
 
 	assert get(app, "/users/42") == (200, "int 42")

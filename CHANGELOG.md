@@ -6,6 +6,7 @@
 - Hot reload that keeps state, like React Fast Refresh: save a component, page or template and open pages update in place in about 100 ms, keeping State, typed text and focus. Changes that can't be swapped safely (app.py, settings) restart the server.
 - Developer tools (debug mode only): an error page for pages that fail to render (source around each frame, the component stack, hints); a richer event error overlay; a component inspector (Alt+Shift+D or `Domino.inspect()`) with live State, events and why a handler isn't instant; an event log with timings. Production pages are unchanged, byte for byte.
 - `python -m domino` runs the `domino` command (handy on Windows). CI also runs on Windows.
+- Windows fixes: `[id=int].py` page files (colons can't be in Windows file names), hot reload restarts after `app.py` changes, client components on another drive, and paths in error pages.
 
 ### Deploying
 - `domino build` writes a Dockerfile (non-root, health check, `domino serve`), `.dockerignore` and `requirements.txt`.

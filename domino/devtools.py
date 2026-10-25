@@ -96,15 +96,21 @@ def short_path(path, root):
 
 	path = os.path.abspath(path)
 	if path.startswith(root + os.sep):
-		return path[len(root) + 1:]
+		return as_posix(path[len(root) + 1:])
 	if path.startswith(DOMINO_DIR + os.sep):
-		return "domino/" + path[len(DOMINO_DIR) + 1:]
+		return "domino/" + as_posix(path[len(DOMINO_DIR) + 1:])
 	for folder in ("site-packages", "dist-packages"):
 		marker = os.sep + folder + os.sep
 		if marker in path:
-			return path.split(marker, 1)[1]
+			return as_posix(path.split(marker, 1)[1])
 
 	return path
+
+
+def as_posix(path):
+	"""components\\crash.py -> components/crash.py, so paths read the same on Windows."""
+
+	return path.replace(os.sep, "/")
 
 
 def source_lines(filename, line, around):
@@ -602,7 +608,7 @@ def global_names(app):
 		path = getattr(module, "__file__", None)
 		if not path or not is_app_file(path, root):
 			continue
-		short = os.path.splitext(short_path(path, root))[0].replace(os.sep, ".")
+		short = os.path.splitext(short_path(path, root))[0].replace("/", ".")
 		for name, value in list(vars(module).items()):
 			if isinstance(value, (State, Collection)):
 				names.setdefault(id(value), f"{short}.{name}")

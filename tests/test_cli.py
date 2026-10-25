@@ -602,7 +602,7 @@ def test_from_environ_reuses_the_main_module(tmp_path, monkeypatch):
 def test_database_name_is_sanitized():
 
 	assert devmongo.database_name("/srv/My App.v2") == "MyAppv2"
-	assert devmongo.database_name("/srv/...") == "domino"
+	assert devmongo.database_name("/srv/@@@") == "domino"
 
 
 # Choosing a MongoDB build

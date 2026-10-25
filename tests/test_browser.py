@@ -834,7 +834,8 @@ def test_accounts_forgot_password_email_and_reset(serve, page, mail_outbox):
 	page.fill("input[name=password]", "a new password")
 	page.get_by_role("button", name="Log in").click()
 	page.locator(".LoginForm").get_by_text("Signed in as").wait_for()
-	assert "Signed in as" in menu.inner_text()
+	# The menu updates by itself, a moment later
+	menu.get_by_text("Signed in as").wait_for()
 
 	# The link was used up
 	page.goto(message.links[0])

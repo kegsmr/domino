@@ -554,12 +554,16 @@ def domino_run(tmp_path):
 	for process, log in processes:
 		if process.poll() is None:
 			# The supervisor and the server process it started
-			os.killpg(process.pid, 15)
-			try:
-				process.wait(15)
-			except subprocess.TimeoutExpired:
-				os.killpg(process.pid, 9)
+			if os.name == "nt":
+				subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True)
 				process.wait()
+			else:
+				os.killpg(process.pid, 15)
+				try:
+					process.wait(15)
+				except subprocess.TimeoutExpired:
+					os.killpg(process.pid, 9)
+					process.wait()
 		log.close()
 
 

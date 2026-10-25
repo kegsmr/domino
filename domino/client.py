@@ -144,7 +144,7 @@ def check_module(cls):
 		if known is not None and known.path == path and known.source == source:
 			return known
 
-	label = f"{cls.__name__} has client = True, so all of {os.path.relpath(path)} is sent to the browser"
+	label = f"{cls.__name__} has client = True, so all of {display_path(path)} is sent to the browser"
 	tree = ast.parse(source, path)
 	for node in ast.walk(tree):
 		problem = None
@@ -422,3 +422,11 @@ def check_integrity(path, integrity):
 	if base64.b64encode(digest.digest()).decode() != expected:
 		raise ClientComponentError(f"Checksum mismatch for {path.name}: expected {integrity}")
 
+
+def display_path(path):
+	"""`path` relative to the current folder, or as it is when it's on another drive (Windows)."""
+
+	try:
+		return os.path.relpath(path)
+	except ValueError:
+		return path

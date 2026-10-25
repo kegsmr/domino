@@ -17,6 +17,15 @@ from pathlib import Path
 from .settings import SettingsError, read_file
 
 
+def shell_quote(path):
+	"""A path to paste into a shell: quoted for sh, or for cmd and PowerShell on Windows."""
+
+	if os.name == "nt":
+		return subprocess.list2cmdline([str(path)])
+
+	return shlex.quote(str(path))
+
+
 PORT = 8000
 
 HEALTH_PATH = "/_domino/health"
@@ -464,7 +473,7 @@ def deploy_fly(path, name=None, mongo_url=None, force=False, environ=None):
 		say(f"flyctl, Fly.io's command, isn't installed. To deploy:\n\n"
 			f"1. Install it: {FLY_INSTALL_URL}\n"
 			f"2. Run `domino deploy fly` again, or run these yourself:\n\n"
-			f"    cd {shlex.quote(str(folder))}\n{commands}\n\n{MONGO_NOTE}")
+			f"    cd {shell_quote(folder)}\n{commands}\n\n{MONGO_NOTE}")
 		return 0
 
 	cwd = str(folder)
@@ -589,7 +598,7 @@ def deploy_docker(path, name=None, mongo_url=None, force=False, environ=None):
 		say()
 	else:
 		reason = "isn't running" if docker else "isn't installed (https://docs.docker.com/get-docker/)"
-		say(f"Docker {reason}. Build the image with:\n\n    docker build -t {image} {shlex.quote(str(folder))}\n")
+		say(f"Docker {reason}. Build the image with:\n\n    docker build -t {image} {shell_quote(folder)}\n")
 
 	mongo_value = shlex.quote(mongo) if mongo else "'mongodb+srv://...'"
 	say("Run it, with your MongoDB:\n\n"
@@ -599,7 +608,7 @@ def deploy_docker(path, name=None, mongo_url=None, force=False, environ=None):
 		f"Over plain HTTP (http://localhost:{PORT}) add -e DOMINO_DOMINO__SECURE_COOKIES=false, or logins won't stick;\n"
 		"-e WEB_CONCURRENCY=2 sets the number of worker processes. Keep the same secret key between runs.\n\n"
 		"Or run it with a MongoDB of its own (a single-node replica set, data in a Docker volume):\n\n"
-		f"    cd {shlex.quote(str(folder))}\n"
+		f"    cd {shell_quote(folder)}\n"
 		"    export DOMINO_SECRET_KEY=...   (as above)\n"
 		"    docker compose up -d\n\n"
 		f"{MONGO_NOTE}")

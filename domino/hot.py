@@ -41,6 +41,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 from flask import g, request
+from uvicorn._subprocess import get_subprocess
 from uvicorn.supervisors.basereload import BaseReload
 
 from . import core, optimistic, util
@@ -930,6 +931,15 @@ class Supervisor(BaseReload):
 			self.restart()
 
 		self.shutdown()
+
+
+	def restart(self):
+		"""Start a new server process. The old one has already exited, so unlike uvicorn's this
+		sends it no signal (on Windows that's a Ctrl+C to the whole console, the supervisor too)."""
+
+		self.process.join()
+		self.process = get_subprocess(config=self.config, target=self.target, sockets=self.sockets)
+		self.process.start()
 
 
 def serve(target, root, host="127.0.0.1", port=5000, **options):

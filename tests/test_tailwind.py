@@ -74,8 +74,14 @@ if "--watch" in args:
 '''
 
 
+# The fake CLI is a Python script run through its #! line, which Windows can't do
+needs_scripts = pytest.mark.skipif(os.name == "nt", reason="runs a fake Tailwind CLI with a #! line, which Windows can't")
+
+
 def write_fake_cli(folder):
 
+	if os.name == "nt":
+		pytest.skip("runs a fake Tailwind CLI with a #! line, which Windows can't")
 	path = Path(folder) / "fake-tailwindcss"
 	path.write_text(f"#!{sys.executable}\n" + FAKE_CLI, encoding="utf-8")
 	path.chmod(0o755)
@@ -181,11 +187,12 @@ def test_generated_input_is_only_written_when_it_changes(tmp_path):
 
 	options = tailwind.options({"tailwind": True}, tmp_path)
 	path = tailwind.input_file(tmp_path, options)
-	os.utime(path, ns=(1, 1))
+	# A whole second: Windows keeps times to 100 ns
+	os.utime(path, (1, 1))
 
 	tailwind.input_file(tmp_path, options)
 
-	assert path.stat().st_mtime_ns == 1
+	assert path.stat().st_mtime == 1
 
 
 def test_the_app_input_is_used_as_it_is(tmp_path):
@@ -412,6 +419,7 @@ def test_build_minifies_for_production(tmp_path, fake_cli):
 	assert '@import "tailwindcss" source(none);' in output.read_text()
 
 
+@needs_scripts
 def test_build_errors_show_the_cli_output(tmp_path, monkeypatch):
 
 	broken = tmp_path / "broken"
@@ -542,6 +550,7 @@ def serve_release(monkeypatch, binary, sums=None):
 	return urls
 
 
+@needs_scripts
 def test_download_checks_the_checksum_and_that_it_runs_then_caches_it(home, monkeypatch, capsys):
 
 	binary = f"#!{sys.executable}\nprint('tailwindcss v4 (fake)')\n".encode()
