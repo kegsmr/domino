@@ -168,6 +168,7 @@ def test_create_scaffolds_an_app(tmp_path, capsys):
 	assert "domino run" in capsys.readouterr().out
 
 
+@pytest.mark.mongo
 def test_created_app_renders(tmp_path, monkeypatch):
 
 	monkeypatch.setattr(devmongo, "start", None)
