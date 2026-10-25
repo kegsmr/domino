@@ -433,6 +433,23 @@ class Collection:
 		return removed
 
 
+	def raw_collection(self):
+		"""The pymongo collection behind a named Collection, like Meteor's rawCollection(): for
+		what Collection doesn't do, such as indexes and aggregation. Writes made through it still
+		update open pages, since MongoDB's change stream reports them."""
+
+		if self.name is None:
+			raise TypeError('Collection() without a name lives in memory, so it has no MongoDB collection; name it: Collection("tasks")')
+
+		return self.store().collection
+
+
+	def raw_database(self):
+		"""The pymongo database a named Collection is in, like Meteor's rawDatabase()."""
+
+		return self.raw_collection().database
+
+
 	def _fetch(self, query, sort, limit):
 
 		store = self.store()

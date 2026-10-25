@@ -667,6 +667,7 @@ class Chat(t.ul):
 
 - `State(value)`: `.value` reads (and subscribes), `.value = x` changes it.
 - `Collection(name)`: `insert(doc)` (returns the `_id`), `find(query, sort=..., limit=...)` (a cursor you iterate or `.fetch()`), `find_one`, `count`, `update(query, {"$set": ...}, multi=False)` and `remove(query)`, with MongoDB-style queries (`$gt`, `$in`, `$or`, dotted paths, ...). Documents come back as copies.
+- `raw_collection()` and `raw_database()` (named collections only, like Meteor's `rawCollection()`): the pymongo collection and database, for what `Collection` doesn't do, such as indexes and aggregation (`tasks.raw_collection().create_index("created")`). Writes made through them still update open pages, through MongoDB's change stream.
 - Changes made while handling an event re-render each subscriber once, in the background, so the user who made the change gets their response straight away. Use `with batch():` to group changes made elsewhere, and `domino.wait()` in tests to let background updates finish.
 
 See `examples/chat/`.

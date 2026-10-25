@@ -9,6 +9,7 @@
 - Windows fixes: `[id=int].py` page files (colons can't be in Windows file names), hot reload restarts after `app.py` changes, client components on another drive, and paths in error pages.
 - Text typed into a form while its submit is on its way is no longer cleared when the answer arrives (the next chat message, say).
 - Editors know the type of `State`: with `count = State(0)`, `self.count` is an `int`, so Pylance accepts `self.count += 1` and autocompletes its methods.
+- `Collection.raw_collection()` and `raw_database()`, like Meteor's: the pymongo collection and database behind a named collection, for indexes, aggregation and the like.
 - The license is now MIT (it was MIT-0): copies must keep the copyright notice.
 
 ### Deploying
