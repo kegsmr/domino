@@ -43,7 +43,8 @@ def test_readme_links_lead_to_the_docs_or_github(open_page):
 
 	# [Testing your app](#testing-your-app) in the Command line section
 	assert "/guide/testing#testing-your-app" in hrefs
-	assert "/guide/deployment#deployment" in hrefs
+	assert "/guide/deployment#deploying" in hrefs
+	assert "/guide/deployment#serving-in-production" in hrefs
 
 	installation = open_page(topic="installation")
 	hrefs = [link.attrs.get("href") for link in installation.find_all("article a")]
