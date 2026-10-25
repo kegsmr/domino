@@ -207,7 +207,7 @@ class Served:
 
 		env = dict(os.environ, PYTHONPATH=str(ROOT))
 		env.pop("DOMINO_WORKER_ID", None)
-		command = "import sys; from domino.cli import main; sys.exit(main(sys.argv[1:]))"
+		command = "import sys; from domino._cli import main; sys.exit(main(sys.argv[1:]))"
 		self.process = subprocess.Popen([sys.executable, "-c", command, "serve", str(app), "--workers", str(count), "--port", "0"],
 			stdout=self.log, stderr=subprocess.STDOUT, env=env, cwd=str(self.log_path.parent))
 		self.pids = {}

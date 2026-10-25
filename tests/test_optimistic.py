@@ -1,9 +1,10 @@
 import json
 
 import domino.tags as t
-from domino import Collection, Domino, State, optimistic
-from domino.components import Document
-from domino.optimistic import predictable_methods
+from domino import Collection, Domino, State
+from domino import _optimistic as optimistic
+from domino import Document
+from domino._optimistic import predictable_methods
 
 
 notes = Collection()

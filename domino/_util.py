@@ -1,3 +1,4 @@
+import functools
 import inspect
 from urllib.parse import urlsplit
 
@@ -6,6 +7,10 @@ from urllib.parse import urlsplit
 # every render was the biggest cost of rendering
 _class_attributes = {}
 
+# Class attributes that are Domino settings: never props, never HTML attributes
+SETTINGS = frozenset({
+	"attrs", "css", "live", "optimistic", "optimistic_states", "client", "tag", "submit_text",
+})
 
 def get_class_attributes(obj):
     """Returns a dictionary of all class attributes, including inherited ones, 
@@ -26,6 +31,15 @@ def get_class_attributes(obj):
 
     # Callers change the result, so hand out a copy
     return dict(cached)
+
+
+def handler_owner(callback):
+	"""The object a handler is a method of, also through `(self.remove, i)` (a functools.partial)."""
+
+	while isinstance(callback, functools.partial):
+		callback = callback.func
+
+	return getattr(callback, "__self__", None)
 
 
 def accepts_argument(func):

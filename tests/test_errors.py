@@ -2,7 +2,7 @@ import logging
 
 import domino.tags as t
 from domino import Domino
-from domino.components import Document
+from domino import Document
 
 
 class Flaky(t.div):

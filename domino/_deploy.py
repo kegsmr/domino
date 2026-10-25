@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .settings import SettingsError, read_file
+from ._settings import SettingsError, read_file
 
 
 def shell_quote(path):
@@ -367,7 +367,7 @@ def check_app(folder, mongo_configured, note=""):
 def domino_requirement():
 	"""domino-web pinned to the version running, so the image gets the same one."""
 
-	from .cli import get_version
+	from ._cli import get_version
 
 	version = get_version()
 	if version == "unknown" or "+" in version:
@@ -399,8 +399,8 @@ def write_file(path, text, force=False, keep=False):
 def tailwind_step(folder):
 	"""The Dockerfile lines that build the app's Tailwind CSS into the image, if it uses Tailwind."""
 
-	from . import tailwind
-	from .settings import load_settings
+	from . import _tailwind as tailwind
+	from ._settings import load_settings
 
 	if not tailwind.options(load_settings(str(folder)), str(folder)):
 		return ""

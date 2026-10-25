@@ -1,8 +1,8 @@
 from flask import current_app, has_app_context
 
 from . import tags as t
-from .core import Style
-from .settings import script_json
+from ._core import Style
+from ._settings import script_json
 
 
 class Core(t.script):

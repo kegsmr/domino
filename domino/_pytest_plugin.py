@@ -86,7 +86,7 @@ def load_app(folder):
 
 	app = _apps.get(folder)
 	if app is None:
-		from .cli import load_app as load
+		from ._cli import load_app as load
 
 		app = _apps[folder] = load(folder)
 		# Handler errors come back to the test with their traceback
@@ -184,7 +184,7 @@ class TestMongo:
 		"""The server to use: DOMINO_TEST_MONGO_URL, mongo.connect()'s or the app's mongo.url,
 		or else a mongod started now, the first time a test needs one."""
 
-		from . import devmongo, mongo
+		from . import _devmongo as devmongo, mongo
 
 		url = os.environ.get(ENV_TEST_URL) or (previous if isinstance(previous, str) else None)
 		settings = app.settings if app is not None else {}
@@ -212,7 +212,7 @@ class TestMongo:
 
 	def start(self, settings):
 
-		from . import devmongo
+		from . import _devmongo as devmongo
 
 		version = str((settings.get("mongo") or {}).get("version") or devmongo.DEFAULT_VERSION)
 		self.folder = tempfile.mkdtemp(prefix="domino-test-mongo-")
@@ -400,7 +400,7 @@ def mail_outbox():
 
 def page_url(pages, page_file, params):
 
-	from .pages import url_rule
+	from ._pages import url_rule
 
 	rule = url_rule(page_file.relative_to(pages))
 	names = re.findall(r"<(?:\w+:)?(\w+)>", rule)

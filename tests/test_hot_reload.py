@@ -1,4 +1,4 @@
-"""Hot reloading (domino.hot): changed files are swapped into the running app and open pages are
+"""Hot reloading (domino._hot): changed files are swapped into the running app and open pages are
 updated in place, keeping their components' State; what can't be swapped restarts the server."""
 
 import os
@@ -10,10 +10,10 @@ import time
 
 import pytest
 
-import domino.asgi
-import domino.cli as cli
-from domino import hot
-from domino.hot import HotReloader, restart_only
+import domino._asgi
+import domino._cli as cli
+from domino import _hot as hot
+from domino._hot import HotReloader, restart_only
 
 from conftest import ROOT, wait_until
 
@@ -49,7 +49,7 @@ class Counter(t.div):
 
 INDEX = '''\
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 from components.counter import Counter
 
@@ -492,9 +492,9 @@ def test_debug_serving_hot_reloads(make_app, served):
 
 	app, reloader = make_app()
 
-	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+	domino._asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
-	assert served == [("hot", "domino.asgi:from_environ", app.root_path, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3, "ws_per_message_deflate": True})]
+	assert served == [("hot", "domino._asgi:from_environ", app.root_path, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3, "ws_per_message_deflate": True})]
 	assert os.environ["DOMINO_ASGI_HOT"] == "1"
 
 
@@ -502,7 +502,7 @@ def test_hot_reload_setting_false_restarts_on_changes(make_app, served):
 
 	app, reloader = make_app({"settings.json": '{"domino": {"hot_reload": false}}'})
 
-	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+	domino._asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
 	(call,) = served
 	assert call[0] == "uvicorn" and call[2]["reload"] is True
@@ -513,7 +513,7 @@ def test_production_never_watches(make_app, served):
 
 	app, reloader = make_app()
 
-	domino.asgi.serve(app, "127.0.0.1", 5000)
+	domino._asgi.serve(app, "127.0.0.1", 5000)
 
 	assert served[0][0] == "uvicorn" and "reload" not in served[0][2]
 	assert "DOMINO_ASGI_HOT" not in os.environ
@@ -527,7 +527,7 @@ def test_the_server_process_starts_the_reloader(make_app, monkeypatch):
 	monkeypatch.setenv("DOMINO_ASGI_APP", f"{reloader.folder / 'app.py'}:app")
 	monkeypatch.setenv("DOMINO_ASGI_HOT", "1")
 
-	asgi = domino.asgi.from_environ()
+	asgi = domino._asgi.from_environ()
 
 	assert [reloader.app for reloader in started] == [asgi.app]
 	assert started[0].app_file == (reloader.folder / "app.py").resolve()
@@ -555,7 +555,7 @@ def domino_run(tmp_path):
 		log = open(log_path, "w")
 		env = dict(os.environ, PYTHONPATH=str(ROOT), DOMINO_NO_MONGO="1")
 		env.pop("DOMINO_ASGI_HOT", None)
-		command = "import sys; from domino.cli import main; sys.exit(main(sys.argv[1:]))"
+		command = "import sys; from domino._cli import main; sys.exit(main(sys.argv[1:]))"
 		process = subprocess.Popen([sys.executable, "-c", command, "run", str(folder), "--port", "0"],
 			stdout=log, stderr=subprocess.STDOUT, env=env, cwd=str(tmp_path), start_new_session=True)
 		processes.append((process, log))

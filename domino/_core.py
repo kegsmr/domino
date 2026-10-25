@@ -5,16 +5,20 @@ import re
 import secrets
 import sys
 import threading
+import functools
 import time
 import traceback
+import types
 import uuid
+import warnings
 import weakref
 from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, TypeVar
 
 import flask
-from flask import *
+from flask import Flask, Response, current_app, g, has_app_context, has_request_context, json, jsonify, request, session, url_for
 from flask.cli import load_dotenv as load_env_files
 from flask.helpers import get_debug_flag, get_load_dotenv
 from flask.sessions import SecureCookieSessionInterface
@@ -22,10 +26,12 @@ from jinja2 import ChoiceLoader
 from markupsafe import Markup, escape
 from werkzeug.datastructures import MultiDict
 
-from .settings import Settings, load_settings
-from .util import *
-from . import css, optimistic, reactive
-from .uploads import Uploads
+from ._settings import Settings, load_settings
+from ._util import (
+	SETTINGS, accepts_argument, css_class_name, get_class_attributes, handler_owner, is_local_url,
+)
+from . import _css as css, _optimistic as optimistic, _reactive as reactive
+from ._uploads import Uploads
 
 
 VOID_TAGS = [
@@ -48,10 +54,21 @@ _attribute_names = set()
 # What would end a <script> or <style> element early, wherever it is in its text
 RAW_TEXT_END = {tag: re.compile(f"</(?={tag})", re.IGNORECASE) for tag in RAW_TEXT_TAGS}
 
+# Elements that flow inside text, so whitespace around and inside them shows as spaces. Their
+# content is written on one line (<a href="/">Domino</a>), and so is the content of any element
+# that mixes text with inline-level elements ("Built with ", <a>, "."), so no space appears
+# before the period
+INLINE_TAGS = frozenset({
+	"a", "abbr", "b", "bdi", "bdo", "button", "cite", "code", "data", "dfn", "em", "i", "kbd",
+	"label", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var",
+	"output",
+})
+INLINE_LEVEL_TAGS = INLINE_TAGS | {"br", "wbr", "img", "input", "select", "textarea", "svg", "canvas", "meter", "progress"}
+
 
 _render_state = threading.local()
 
-# Component class -> its paired Jinja template's path, or None (see domino.templates)
+# Component class -> its paired Jinja template's path, or None (see domino._templates)
 _paired_templates = {}
 
 # Guards Element.__pages__, which request threads add to while refresh() reads it
@@ -63,7 +80,7 @@ SESSION_USER_KEY = "domino_user_id"
 # Seconds a browser has to claim a session changed over the WebSocket (see session_handoff)
 SESSION_HANDOFF_TTL = 60
 
-# Set in each worker process by `domino serve --workers N` (see domino.workers)
+# Set in each worker process by `domino serve --workers N` (see domino._workers)
 WORKER_ID_ENV = "DOMINO_WORKER_ID"
 
 
@@ -93,7 +110,7 @@ def render_stack():
 
 def note_render_error(error, element):
 	"""Remember the components a render error passed through, innermost first, for the debug
-	error page's component stack (see domino.devtools)."""
+	error page's component stack (see domino._devtools)."""
 
 	try:
 		components = error.__dict__.setdefault("domino_components", [])
@@ -104,11 +121,182 @@ def note_render_error(error, element):
 		components.append(element)
 
 
+# This package's folder, to point warnings at the user's code rather than Domino's
+_PACKAGE = os.path.dirname(os.path.abspath(__file__)) + os.sep
+
+
+def user_stacklevel():
+	"""The stacklevel for warnings.warn() (called in the function calling this) that points at
+	the first frame outside Domino: the user's line, however many Domino frames are in between."""
+
+	frame = sys._getframe(1)
+	level = 1
+	while frame is not None and frame.f_code.co_filename.startswith(_PACKAGE):
+		frame = frame.f_back
+		level += 1
+
+	return level
+
+
+def flatten_children(children):
+	"""Children as elements and text: lists, tuples, generators and other iterables (a Cursor)
+	are flattened, None, True and False skipped, numbers made text. Callables and classes are
+	kept, to be called when rendered."""
+
+	# Most children are elements and text already
+	if type(children) is list:
+		for child in children:
+			if not isinstance(child, (str, Element)):
+				break
+		else:
+			return children
+
+	flat = []
+	for child in children:
+		if isinstance(child, (str, Element)):
+			flat.append(child)
+		elif child is None or child is True or child is False:
+			continue
+		elif isinstance(child, (int, float)):
+			flat.append(str(child))
+		elif isinstance(child, (list, tuple, types.GeneratorType)) or (
+			hasattr(child, "__iter__") and not isinstance(child, (dict, bytes, type))
+		):
+			flat.extend(flatten_children(child))
+		else:
+			flat.append(child)
+
+	return flat
+
+
+def is_handler(value):
+	"""Whether an on_<event>= value is a handler: a callable, or (callable, *args)."""
+
+	return callable(value) or (isinstance(value, tuple) and len(value) > 0 and callable(value[0]))
+
+
+def as_callback(value):
+	"""on_click=(self.remove, index) as a callable: functools.partial(self.remove, index)."""
+
+	if isinstance(value, tuple):
+		return functools.partial(value[0], *value[1:])
+
+	return value
+
+
+# What's worked out once per component class (hot reloading forgets it): whether it's refreshed,
+# its HTML attributes
+_refreshed = {}
+_html_attributes = {}
+
+
+def refreshed(cls):
+	"""Whether components of `cls` get refresh()ed: refresh() was called on one, or the module that
+	defines the class calls it on one, so that pages showing one keep a channel open from the first
+	page on, before the first refresh() (see refresh_in_source()). Worked out once per class."""
+
+	found = _refreshed.get(cls)
+	if found is None:
+		found = _refreshed[cls] = refresh_in_source(cls)
+
+	return found
+
+
+def refresh_in_source(cls):
+	"""Whether the module defining `cls` (at its top level) calls refresh() on one: self.refresh()
+	in the class's methods, or name.refresh() for a name the module sets to one (clock = Clock())."""
+
+	if "<locals>" in cls.__qualname__ or "." in cls.__qualname__:
+		return False
+	module = sys.modules.get(cls.__module__)
+	filename = getattr(module, "__file__", None)
+	if not filename or os.path.abspath(filename).startswith(_PACKAGE):
+		return False
+
+	import ast
+	import linecache
+	source = "".join(linecache.getlines(filename))
+	if ".refresh(" not in source:
+		return False
+	try:
+		tree = ast.parse(source)
+	except (SyntaxError, ValueError):
+		return False
+
+	def refreshes(node, names):
+		return any(
+			isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "refresh"
+			and isinstance(call.func.value, ast.Name) and call.func.value.id in names
+			for call in ast.walk(node)
+		)
+
+	instances = set()
+	for node in tree.body:
+		if isinstance(node, ast.ClassDef) and node.name == cls.__name__ and refreshes(node, {"self"}):
+			return True
+		if (
+			isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+			and isinstance(node.value.func, ast.Name) and node.value.func.id == cls.__name__
+		):
+			instances.update(target.id for target in node.targets if isinstance(target, ast.Name))
+
+	return bool(instances) and refreshes(tree, instances)
+
+
+# Values a keyword argument has when it's meant as an HTML attribute (Markup is a str)
+HTML_VALUE_TYPES = (str, int, float, bool)
+
+# (class, keyword) already warned about by warn_html_attribute()
+_warned_attributes = set()
+
+
+def warn_html_attribute(element, key, value):
+	"""While debugging, warn (once per class and name) that a keyword argument that isn't a string,
+	number or bool became an HTML attribute: TaskList(taks=found), a typo for tasks."""
+
+	if not (has_app_context() and current_app.debug):
+		return
+
+	cls = type(element)
+	if (cls, key) in _warned_attributes:
+		return
+	_warned_attributes.add((cls, key))
+
+	import difflib
+	text = repr(value)
+	if len(text) > 40:
+		text = text[:39] + "…"
+	name = class_label(cls)
+	message = (
+		f"{name} got {key}={text}, which isn't an attribute of {name}, so it was written as an "
+		f"HTML attribute."
+	)
+	known = sorted(component_props(cls))
+	match = difflib.get_close_matches(key, known, n=1)
+	if match:
+		message += f" Did you mean {match[0]}?"
+	elif cls.__module__ != "domino.tags":
+		message += f" Declare it on the class ({key} = ...) to make it a prop."
+	current_app.logger.warning(message)
+
+
+def class_label(cls):
+	"""How code names a class: t.ul for tags, the class's name otherwise."""
+
+	return f"t.{cls.__name__}" if cls.__module__ == "domino.tags" else cls.__name__
+
+
+def _framework_class(base):
+	"""Whether a class in a component's hierarchy is Domino's (Element, a tag, Component)."""
+
+	return base is object or base is Element or base.__module__ == "domino.tags"
+
+
 # Component class -> {name: kind} of the props it declares (see component_props)
 _component_props = {}
 
-# Settings a component class can have that are never props
-NOT_PROPS = ("css", "live", "optimistic", "optimistic_states", "client")
+# Settings a component class can have that are never props (attrs, tag, css, live, ...)
+NOT_PROPS = SETTINGS
 
 
 def component_props(cls):
@@ -182,9 +370,32 @@ class Callback:
 		return getattr(self.function, name)
 
 
+	@property
+	def __signature__(self):
+
+		# The function's, so (self.on_add, value) passes the event only if it takes one
+		import inspect
+		return inspect.signature(self.function)
+
+
 	def __repr__(self):
 
 		return f"Callback({self.function!r})"
+
+
+def class_html_attributes(cls):
+	"""The HTML attributes a component class declares in `attrs`, merged down its hierarchy (the
+	subclass's win). Its other class attributes are Python: settings and props. Worked out once."""
+
+	found = _html_attributes.get(cls)
+	if found is None:
+		found = {}
+		for base in reversed(cls.__mro__):
+			if not _framework_class(base) and "attrs" in vars(base):
+				found.update(vars(base)["attrs"] or {})
+		_html_attributes[cls] = found
+
+	return found
 
 
 # CSS of each component class (its own `css`, scoped to its class name), made once
@@ -239,7 +450,7 @@ class PageStyles:
 
 		# The app's Tailwind CSS, if it uses it, goes first: it's all in cascade layers, so the
 		# component CSS and the page's own rules win anyway
-		from .tailwind import link
+		from ._tailwind import link
 
 		return self.slot(lambda: link(level, indent) + self.component_style(level, indent))
 
@@ -325,7 +536,7 @@ class Page:
 		self.cookie = None  # the browser's Cookie header once it had this page, if swapped in by core.js
 		self.paused = False  # the tab is hidden, so refresh() leaves this page for resume()
 		self.dirty = {}  # components refresh() skipped while paused -> None, in order
-		self.hot = None  # what made it, to make it again while hot reloading (see domino.hot)
+		self.hot = None  # what made it, to make it again while hot reloading (see domino._hot)
 		self.touch()
 
 
@@ -354,7 +565,7 @@ class Page:
 			if isinstance(element, Element) and id(element) not in elements:
 				elements.add(id(element))
 				stack.extend(element.__children__)
-				# Components a Jinja template rendered inline (see domino.templates)
+				# Components a Jinja template rendered inline (see domino._templates)
 				stack.extend(getattr(element, "__embedded__", ()))
 
 		return {event_id: event for event_id, event in self.events.items() if id(event[0]) in elements}
@@ -425,7 +636,7 @@ class Page:
 			self.dirty.clear()
 
 		for component in dirty:
-			component.refresh(only=self)
+			component._refresh(only=self)
 
 
 	def notify(self, message):
@@ -684,7 +895,7 @@ class Domino(Flask):
 
 		# URL rule -> the file in pages/ serving it. Set first: Flask.__init__ adds a route
 		self._page_rules = {}
-		self._page_routes = {}  # URL rule (None for 404.py) -> its domino.pages.PageRoute
+		self._page_routes = {}  # URL rule (None for 404.py) -> its domino._pages.PageRoute
 
 		super().__init__(*args, **kwargs)
 
@@ -715,10 +926,10 @@ class Domino(Flask):
 
 		self.page_store = page_store or MemoryPageStore()
 		self._asgi = None
-		self.hot_reloader = None  # updates open pages when files change, while debugging (see domino.hot)
+		self.hot_reloader = None  # updates open pages when files change, while debugging (see domino._hot)
 
-		# .html templates anywhere in the app's folder, found by file name (see domino.templates)
-		from .templates import TemplateFinder
+		# .html templates anywhere in the app's folder, found by file name (see domino._templates)
+		from ._templates import TemplateFinder
 		self.template_finder = TemplateFinder(
 			self.root_path, self.template_folder,
 			pages=None if pages is False else (pages or "pages"), setting=self.settings.get("templates")
@@ -736,15 +947,15 @@ class Domino(Flask):
 		self._add_health_check('/_domino/health')
 
 		# The inspector's script and data; they answer 404 unless the app is in debug mode
-		from .devtools import add_routes
+		from ._devtools import add_routes
 		add_routes(self)
 
-		# Client components' loader, modules and runtime (see domino.client)
-		from . import client
+		# Client components' loader, modules and runtime (see domino._client)
+		from . import _client as client
 		client.add_routes(self)
 
 		# {"tailwind": true} or a tailwind.css in the app's folder: every page links its CSS
-		from . import tailwind
+		from . import _tailwind as tailwind
 		self.tailwind = tailwind.options(self.settings, self.root_path)
 		if self.tailwind:
 			tailwind.add_routes(self)
@@ -755,7 +966,7 @@ class Domino(Flask):
 
 	def _add_pages(self, pages):
 
-		from .pages import PagesError, add_pages
+		from ._pages import PagesError, add_pages
 
 		# pages=None uses the app's pages/ folder if there is one; False turns pages off
 		if pages is False:
@@ -775,7 +986,7 @@ class Domino(Flask):
 		# Two handlers for one URL is a mistake, and Flask would quietly use the first
 		page = self._page_rules.get(rule)
 		if page:
-			from .pages import PagesError
+			from ._pages import PagesError
 			name = endpoint or getattr(view_func, "__name__", view_func)
 			raise PagesError(f'Two handlers for "{rule}": {page} and the route "{name}"')
 
@@ -789,7 +1000,7 @@ class Domino(Flask):
 
 	def create_jinja_environment(self):
 
-		from .templates import component, on
+		from ._templates import component, on
 
 		environment = super().create_jinja_environment()
 		environment.globals.update(component=component, on=on)
@@ -838,7 +1049,7 @@ class Domino(Flask):
 
 		# Tailwind's CSS too: rebuilt as files change while debugging, built once in production
 		if self.tailwind and not in_child and not from_flask_cli:
-			from . import tailwind
+			from . import _tailwind as tailwind
 			if debug_mode:
 				tailwind.watch(self.root_path, self.tailwind)
 			else:
@@ -853,7 +1064,7 @@ class Domino(Flask):
 		reload = options.pop("use_reloader", debug_mode)
 		options.pop("threaded", None)  # Werkzeug's; uvicorn needs no thread per request
 
-		from .asgi import app_location, serve
+		from ._asgi import app_location, serve
 
 		# Like `domino serve --workers N`: processes that each load the app from its file
 		workers = options.pop("workers", None) or 1
@@ -862,7 +1073,7 @@ class Domino(Flask):
 		elif workers > 1 and app_location(self) is None:
 			self.logger.warning("Domino: serving one process; for workers the app must be defined at the top level of a module file")
 		elif workers > 1:
-			from . import workers as serving
+			from . import _workers as serving
 			serving.serve(app_location(self), host or "127.0.0.1", port or 5000, workers)
 			return
 
@@ -875,7 +1086,7 @@ class Domino(Flask):
 		"""This app as an ASGI application, for uvicorn: `uvicorn myapp:app.asgi`."""
 
 		if self._asgi is None:
-			from .asgi import ASGIApp
+			from ._asgi import ASGIApp
 			self._asgi = ASGIApp(self)
 
 		return self._asgi
@@ -883,7 +1094,7 @@ class Domino(Flask):
 
 	def _start_dev_mongo(self, app_port):
 
-		from . import devmongo
+		from . import _devmongo as devmongo
 
 		reason = devmongo.disabled_reason(self.settings)
 		if reason == "settings mongo.url":
@@ -943,7 +1154,7 @@ class Domino(Flask):
 	def _add_upload_handler(self, route):
 
 		from werkzeug.exceptions import RequestEntityTooLarge
-		from .uploads import parse
+		from ._uploads import parse
 
 		self.uploads = Uploads(self.config)
 
@@ -985,7 +1196,7 @@ class Domino(Flask):
 		# For the inspector's event log (see handle_event)
 		debug = g.get("domino_debug")
 		if debug:
-			from .devtools import describe_callback
+			from ._devtools import describe_callback
 			response["debug_ms"] = round((time.perf_counter() - debug[0]) * 1000, 1)
 			response["debug_handler"] = describe_callback(debug[1])
 
@@ -1021,11 +1232,14 @@ class Domino(Flask):
 			g.domino_redirect = None  # set by redirect()
 			g.domino_called = None  # a parent whose handler the callback called (see Callback)
 
-			_, callback = event
+			element, callback = event
 
-			# Only while debugging: the handler and the time it took, for the inspector's event log
+			# Only while debugging: the handler and the time it took, for the inspector's event log,
+			# and what its component looked like, to say when a change to it can't show
 			if self.debug:
 				g.domino_debug = (time.perf_counter(), callback)
+				from ._devtools import PlainChanges
+				plain = PlainChanges(page, event_id, element, callback)
 
 			try:
 				if accepts_argument(callback):
@@ -1037,7 +1251,10 @@ class Domino(Flask):
 				# affected on this page, or else the parent whose handler it called, or else the
 				# component it's a method of
 				if result is None:
-					result = changes.affected_on(page) or g.domino_called or getattr(callback, "__self__", None)
+					result = changes.affected_on(page) or g.domino_called or handler_owner(callback)
+
+				if self.debug:
+					plain.check(self.logger, result if isinstance(result, Element) else None)
 
 				if not isinstance(result, Element):
 					return self._event_response({"id": None, "html": None}), 200
@@ -1092,7 +1309,7 @@ class Domino(Flask):
 
 		# The frames with their source, the component stack and hints, for debug.js's overlay
 		if self.debug:
-			from .devtools import error_details
+			from ._devtools import error_details
 			debug = g.get("domino_debug")
 			payload.update(error_details(self, error, debug[1] if debug else None))
 			if debug:
@@ -1295,7 +1512,7 @@ class Domino(Flask):
 		result = function(*args, **kwargs)
 
 		# A layout component returned as it is (Layout(title="About") [...]) is the whole page
-		from .dtemplates import whole_page
+		from ._dtemplates import whole_page
 		result = whole_page(result)
 
 		# Check if the result has a `render` method
@@ -1342,7 +1559,7 @@ class Domino(Flask):
 		# socket's events on this page
 		page = g.get("domino_page")
 		if page is not None and request.headers.get("X-Domino-Navigate") and request.environ.get("domino.websocket"):
-			from .asgi import with_cookies
+			from ._asgi import with_cookies
 			page.cookie = with_cookies(request.headers.get("Cookie", ""), response.headers.getlist("Set-Cookie"))
 
 		# Another site can't show the app's pages in a frame and trick visitors into clicking its
@@ -1365,7 +1582,7 @@ class Domino(Flask):
 		if not self.debug or self.testing or request.environ.get("werkzeug.debug.preserve_context"):
 			return super().handle_exception(e)
 
-		from .devtools import error_page
+		from ._devtools import error_page
 
 		self.log_exception(sys.exc_info())
 		response = self.response_class(error_page(self, e), status=500, mimetype="text/html")
@@ -1380,7 +1597,21 @@ class Domino(Flask):
 		return self.stylesheet
 
 
-class Element:
+_E = TypeVar("_E", bound="Element")
+
+
+class ElementType(type):
+	"""The type of element classes: t.div [child, ...] needs no call when there are no attributes,
+	it's t.div() [child, ...]. A metaclass's __getitem__, so editors read it as making an element
+	(they take __class_getitem__ for generic type arguments)."""
+
+
+	def __getitem__(cls: "type[_E]", children: Any) -> "_E":
+
+		return cls()[children]
+
+
+class Element(metaclass=ElementType):
 
 
 	def __init__(self, tag=None, parent=None, inner=None, void=None, **kwargs):
@@ -1400,10 +1631,21 @@ class Element:
 		self.__pages__ = None  # live pages this component was rendered on (components only)
 		self.__dependencies__ = set()  # reactive data its last render read
 
-		self.tag(tag)
-		self.parent(parent)
+		self.__binds__ = None  # event id -> callback, for the events bound to this element
+
+		if tag is not None:
+			self.__tag__ = tag
+		if parent is not None:
+			# Imperative style: t.h1(parent, "text") adds itself to `parent`
+			warnings.warn(
+				f"{class_label(type(self))}(parent, ...) is deprecated: put the element in its parent's "
+				f"children instead (parent [t.h1 [\"text\"]]), or return it from render()",
+				DeprecationWarning, stacklevel=user_stacklevel()
+			)
+			self.parent(parent)
 		self.inner(inner)
 		self.void(void)
+
 		self.configure(**kwargs)
 
 		self.content_root: Element = self
@@ -1417,19 +1659,19 @@ class Element:
 		super().__init_subclass__(**kwargs)
 
 		# `client = True` runs the component in the browser; its module is checked now, so a
-		# mistake stops the app at startup (see domino.client)
+		# mistake stops the app at startup (see domino._client)
 		if getattr(cls, "client", False) is True:
-			from . import client
+			from . import _client as client
 			client.register(cls)
 
 
 	def add_children(self, children: list[Element | str]):
-		self.content_root.__children__.extend(children)
+		self.content_root.__children__.extend(flatten_children(children))
 		return self
 
 
 	def set_children(self, children: list[Element | str]):
-		self.content_root.__children__ = children
+		self.content_root.__children__ = flatten_children(children)
 		return self
 
 
@@ -1442,6 +1684,14 @@ class Element:
 	
 
 	def __call__(self, children: list[Element | str]):
+
+		stack = render_stack()
+		if stack and stack[-1][0] is self:
+			advice = "return the children from render() instead"
+		else:
+			advice = f"write {class_label(type(self))}(...) [children] instead"
+		warnings.warn(f"element([children]) is deprecated: {advice}", DeprecationWarning, stacklevel=user_stacklevel())
+
 		return self.set_children(children)
 
 
@@ -1503,6 +1753,10 @@ class Element:
 			if self.__attributes__.get('id'):
 				return str(self.__attributes__['id'])
 			if self.__id__ is None:
+				# attrs = {"id": "contact"} on the class
+				declared = class_html_attributes(type(self)).get('id')
+				if declared:
+					return str(declared)
 				self.__id__ = uuid.uuid4()
 			return str(self.__id__)
 		self.__attributes__['id'] = id_
@@ -1518,13 +1772,20 @@ class Element:
 			for key in [key for key in kwargs if key in props]:
 				set_prop(self, key, props[key], kwargs.pop(key))
 
-		# on_click=handler binds the event like bind("click", handler); debounce= applies to them
-		handlers = [key for key in kwargs if key.startswith("on_") and callable(kwargs[key])]
+		# on_click=handler binds the event; debounce= applies to them. on_click=(handler, *args)
+		# calls handler(*args), with the event after them if it takes one: for loops, where a
+		# lambda would see the loop variable's last value
+		handlers = [key for key in kwargs if key.startswith("on_") and is_handler(kwargs[key])]
 		debounce = None
 		if handlers:
 			debounce = kwargs.pop("debounce", None)
 		for key in handlers:
-			self.bind(key[3:], kwargs.pop(key), debounce=debounce)
+			self._bind(key[3:], as_callback(kwargs.pop(key)), debounce=debounce)
+
+		# A list, dict or object is never meant for HTML: most likely a misspelled prop
+		for key, value in kwargs.items():
+			if value is not None and type(value) not in HTML_VALUE_TYPES and key not in ("style", "class_", "class"):
+				warn_html_attribute(self, key, value)
 
 		self.__attributes__.update(kwargs)
 		return self
@@ -1545,6 +1806,17 @@ class Element:
 
 
 	def bind(self, event, callback, debounce=None):
+		"""Deprecated: pass on_<event>=callback (to the constructor, or to configure())."""
+
+		warnings.warn(
+			f'element.bind("{event}", callback) is deprecated: write on_{event.lower()}=callback instead',
+			DeprecationWarning, stacklevel=user_stacklevel()
+		)
+
+		return self._bind(event, callback, debounce)
+
+
+	def _bind(self, event, callback, debounce=None):
 
 		event = event.lower()
 		event_id = self._event_id("event", event)
@@ -1559,9 +1831,21 @@ class Element:
 		if debounce:
 			self.configure(**{f"data_debounce_{event}": int(debounce)})
 
-		Page.current().register(event_id, self, callback)
+		self._remember(event_id, callback)
 
 		return self
+
+
+	def _remember(self, event_id, callback):
+
+		Page.current().register(event_id, self, callback)
+
+		# Kept on the element too: a re-render drops the events bound in its subtree, and those
+		# its render() binds again come back that way, but not those bound when it was made (in
+		# init(), or as on_click= by the component that made it), which _render() puts back
+		if self.__binds__ is None:
+			self.__binds__ = {}
+		self.__binds__[event_id] = callback
 
 
 	def after(self, delay: int, func):
@@ -1569,16 +1853,17 @@ class Element:
 		event_id = self._event_id("after", delay)
 
 		self.configure(data_after_id=event_id)
-		Page.current().register(event_id, self, func)
+		self._remember(event_id, func)
 
 		return self
 
 
 	def _predict(self, page, indent, bound):
 		"""The states this component's predictable handlers lead to, each rendered once, and
-		which event leads where (see domino.optimistic.graph), or None. `bound` are the events
+		which event leads where (see domino._optimistic.graph), or None. `bound` are the events
 		its real render() just bound. Rendering the predictions changes nothing the real render
-		made: its children, the events it bound, its subscriptions."""
+		made: its children, its attributes (render() may configure() them), the events it bound,
+		its subscriptions."""
 
 		cls = type(self)
 		if getattr(cls, "optimistic", True) is False:
@@ -1593,6 +1878,8 @@ class Element:
 		children = self.__children__
 		content = self.content_root.__children__
 		embedded = self.__embedded__
+		binds = dict(self.__binds__) if self.__binds__ is not None else None
+		bound_by_render = self.__bound__
 		events = dict(page.events)
 		# A Domino template sets attributes of the component's element as it renders (see
 		# dtemplates._root); the real render's stay
@@ -1615,19 +1902,37 @@ class Element:
 			self.__attributes__ = attributes
 			if root is not None:
 				self.__dict__["_domino_root"] = root
+			self.__binds__ = binds
+			self.__bound__ = bound_by_render
 			page.events.clear()
 			page.events.update(events)
 
 
 	def is_live(self):
-		"""Whether pages showing this component need a stream for refresh()."""
+		"""Whether pages showing this component need a stream for refresh(): it reads reactive
+		data, or says `live = True`, or refresh() is called on it (see refreshed())."""
 
-		return getattr(type(self), "live", False) is True or bool(self.__dependencies__)
+		live = getattr(type(self), "live", None)
+		if live is True or self.__dependencies__:
+			return True
+
+		return live is None and refreshed(type(self))
 
 
 	def refresh(self, skip=None, only=None):
 		"""Re-render this component and push it to every live page showing it (except `skip`;
-		or just to `only`)."""
+		or just to `only`). Pages showing a component of this class from now on keep a channel
+		open for it, with nothing to mark."""
+
+		# Pages that show this class before its module calls refresh() know from its source
+		_refreshed[type(self)] = True
+
+		return self._refresh(skip, only)
+
+
+	def _refresh(self, skip=None, only=None):
+		"""refresh() for Domino's own re-renders (reactive changes, hot reloading, tabs shown
+		again), which don't make the class live."""
 
 		with _pages_lock:
 			pages = [page for page in self.__pages__ or () if page is not skip and (only is None or page is only)]
@@ -1663,18 +1968,38 @@ class Element:
 		return self
 
 
+	def _inline_content(self, tag, inner):
+		"""Whether this element's content is written on one line: an inline element's, or text
+		mixed with inline-level elements."""
+
+		if tag in INLINE_TAGS:
+			return True
+
+		text = bool(inner)
+		inline = False
+		for child in self.__children__:
+			if isinstance(child, str):
+				text = True
+			elif isinstance(child, Element) and child.__tag__ in INLINE_LEVEL_TAGS:
+				inline = True
+			if text and inline:
+				return True
+
+		return False
+
+
 	def _paired_render(self):
 
 		cls = type(self)
 		path = _paired_templates.get(cls, False)
 		if path is False:
-			from .templates import paired_template
+			from ._templates import paired_template
 			path = paired_template(cls)
 			_paired_templates[cls] = path
 		if path is None:
 			return None
 
-		from .templates import render_paired
+		from ._templates import render_paired
 
 		return lambda: render_paired(self, path)
 
@@ -1689,9 +2014,9 @@ class Element:
 				html = Element._render(self, level, indent)
 			return styles.finish(html)
 
-		# Rendered by the code the browser will run it with (see domino.client)
+		# Rendered by the code the browser will run it with (see domino._client)
 		if getattr(type(self), "client", False) is True:
-			from . import client
+			from . import _client as client
 			return client.render(self, level, indent, styles)
 
 		# A component without render() may have a paired Jinja template instead
@@ -1726,11 +2051,11 @@ class Element:
 				render_stack().pop()
 			self.__bound__ = frame[2]
 
-			# render() may return its children instead of calling self([...])
+			# render() returns its children (or calls self([...]) and returns self, the old style)
 			if children is not None and children is not self:
 				if not isinstance(children, (list, tuple)):
 					children = [children]
-				self.set_children(list(children))
+				self.set_children(children)
 
 			if page is not DEFAULT_PAGE and self.is_live():
 				page.live = True
@@ -1741,6 +2066,15 @@ class Element:
 				predictions = self._predict(page, indent, frame[2])
 		else:
 			predictions = None
+
+		# Events bound when this element was made (in init(), or on_click= by whoever made it)
+		# are dropped with its subtree when it re-renders; put them back
+		binds = self.__binds__
+		if binds:
+			events = Page.current().events
+			for event_id, callback in binds.items():
+				if event_id not in events:
+					events[event_id] = (self, callback)
 
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):
@@ -1786,27 +2120,13 @@ class Element:
 		for base in reversed(styled):
 			styles.add(base)
 
-		# Add attributes
-		attributes = get_class_attributes(self)
-		if "class" in attributes:
-			attributes.pop("class")
-		attributes.pop("css", None)
-		# A prop the parent passed (see component_props) shows its value, not the class's; a list,
-		# dict or object isn't an HTML attribute
-		for key, value in list(attributes.items()):
-			value = self.__dict__.get(key, value)
-			if value is None or isinstance(value, (str, int, float)) or key in ("style", "class_"):
-				attributes[key] = value
-			else:
-				del attributes[key]
+		# HTML attributes: the class's `attrs`, then keyword arguments and configure(). Other class
+		# attributes are Python (css, live, props), never HTML attributes
+		attributes = dict(class_html_attributes(type(self)))
 		attributes.update(self.__attributes__)
 
-		# `live = True` is a framework setting, not an HTML attribute; mark live
-		# components so the browser knows to open a stream
-		attributes.pop("live", None)
-		attributes.pop("optimistic", None)
-		attributes.pop("optimistic_states", None)
-		if self.is_live():
+		# Mark live components so the browser knows to open a stream (plain tags never are)
+		if type(self).__module__ != "domino.tags" and self.is_live():
 			attributes["data_live"] = True
 
 		# Extra classes from class_="a b" (or a list) come after the component's own
@@ -1857,12 +2177,14 @@ class Element:
 			return element_style(level) + html
 
 		# Whitespace inside <pre> and <textarea> is part of what they show (a textarea's value),
-		# so their content is written as it is, without the indentation added elsewhere
+		# so their content is written as it is, without the indentation added elsewhere. So is
+		# inline content, where it would show as spaces (see INLINE_TAGS)
 		closing = f"{indentation}</{tag}>{end}"
-		# A Domino template's markup (see domino.dtemplates) is written as its author laid it out,
+		# A Domino template's markup (see domino._dtemplates) is written as its author laid it out,
 		# so nothing is added around it either
 		verbatim = len(self.__children__) == 1 and getattr(self.__children__[0], "verbatim", False) is True
-		if tag in PREFORMATTED_TAGS or verbatim:
+		compact = not verbatim and bool(end) and tag not in RAW_TEXT_TAGS and (inner or self.__children__) and self._inline_content(tag, inner)
+		if tag in PREFORMATTED_TAGS or verbatim or compact:
 			if end:
 				html = html[:-len(end)]
 			closing = f"</{tag}>{end}"
@@ -1882,7 +2204,7 @@ class Element:
 			inner = text(inner)
 	
 			# Add indentation to the inner content
-			if tag not in PREFORMATTED_TAGS:
+			if tag not in PREFORMATTED_TAGS and not compact:
 				inner = inner.replace("\n", f"{end}{indentation}{indent}")  # Ensure proper indentation for inner content
 			inner = f"{indentation}{indent}{inner}{end}"
 
@@ -1949,7 +2271,7 @@ class Style:
 
 	def style(self, target, rules=None, /, **kwargs):
 		"""Add rules for `target` (a selector, a class or one element), as keywords
-		(font_size="2rem") and/or a dict that can nest (see domino.css):
+		(font_size="2rem") and/or a dict that can nest (see domino._css):
 		style(".card", {":hover": {...}, "h3": {...}, "@media (max-width: 600px)": {...}})."""
 
 		rules = dict(rules or {}, **kwargs)
@@ -2016,7 +2338,11 @@ class Style:
 		if not href:
 			href = self.href
 
-		return Element("link", head, rel="stylesheet", href=href)
+		link = Element("link", rel="stylesheet", href=href)
+		if head is not None:
+			link.parent(head)
+
+		return link
 
 
 class StyleBlock(Element):
@@ -2028,7 +2354,9 @@ class StyleBlock(Element):
 
 		self.stylesheet = stylesheet
 
-		super().__init__("style", parent)
+		super().__init__("style")
+		if parent is not None:
+			self.parent(parent)
 
 
 	def inner(self, inner=None):

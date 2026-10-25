@@ -1,4 +1,4 @@
-from .core import Element
+from ._core import Element
 
 TAGS: list[str]
 
@@ -285,4 +285,8 @@ class dialog(Element):
     def __init__(self, parent: Element | None = ..., inner: str | None = ..., *args, **kwargs) -> None: ...
 
 class caption(Element):
+    def __init__(self, parent: Element | None = ..., inner: str | None = ..., *args, **kwargs) -> None: ...
+
+class Component(Element):
+    tag: str
     def __init__(self, parent: Element | None = ..., inner: str | None = ..., *args, **kwargs) -> None: ...

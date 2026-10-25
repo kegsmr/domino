@@ -1,5 +1,6 @@
 import domino.tags as t
-from domino import Domino, Style
+from domino import Domino
+from domino._core import Style
 
 
 def test_element_styles_do_not_accumulate_in_shared_stylesheet():

@@ -5,8 +5,9 @@ import json
 import pytest
 
 import domino.tags as t
-from domino import Domino, Element, Markup, State, TemplateError, html, templates, wait
-from domino.components import Document
+from domino import Domino, Element, Markup, State, TemplateError, html, wait
+from domino import _templates as templates
+from domino import Document
 
 
 def render(element):

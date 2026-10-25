@@ -7,9 +7,11 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 import domino
+import domino._core
+import domino._util
 import domino.tags as t
 from domino import Collection, Domino, accounts, wait
-from domino.components import Document
+from domino import Document
 
 
 PASSWORD = "correct horse"
@@ -221,7 +223,7 @@ def test_login_starts_a_fresh_session(users):
 
 	with client.session_transaction() as session:
 		assert "planted" not in session
-		assert session[domino.SESSION_USER_KEY] == accounts.users.find_one()["_id"]
+		assert session[domino._core.SESSION_USER_KEY] == accounts.users.find_one()["_id"]
 		assert session.permanent
 
 	# HttpOnly and SameSite=Lax always; Secure outside debug
@@ -268,7 +270,7 @@ def test_logging_in_re_renders_the_user_menu_on_that_page_only(users):
 	html = rendered(app, page_id, response)
 	assert re.search(r'class="UserMenu".*?Log in', html, re.S)
 	with client.session_transaction() as session:
-		assert domino.SESSION_USER_KEY not in session
+		assert domino._core.SESSION_USER_KEY not in session
 	assert "Signed in as" not in load(client)[2]
 
 
@@ -336,7 +338,7 @@ def test_login_ignores_next_pointing_at_another_site(users, next_url):
 ])
 def test_is_local_url(url, local):
 
-	assert domino.is_local_url(url) is local
+	assert domino._util.is_local_url(url) is local
 
 
 def test_redirect_from_an_event_handler():
@@ -520,7 +522,7 @@ def test_oauth_links_to_an_existing_user_with_the_same_verified_email(users, mon
 	assert users.count() == 1
 	assert users.find_one({"_id": existing["_id"]})["services"]["github"]["id"] == "42"
 	with client.session_transaction() as session:
-		assert session[domino.SESSION_USER_KEY] == existing["_id"]
+		assert session[domino._core.SESSION_USER_KEY] == existing["_id"]
 
 
 def test_oauth_with_an_unverified_email_does_not_take_over_an_account(users, monkeypatch):
@@ -535,7 +537,7 @@ def test_oauth_with_an_unverified_email_does_not_take_over_an_account(users, mon
 	assert response.headers["Location"] == "/login"
 	assert users.count() == 1 and "github" not in users.find_one()["services"]
 	with client.session_transaction() as session:
-		assert domino.SESSION_USER_KEY not in session
+		assert domino._core.SESSION_USER_KEY not in session
 
 	# The login form shows why, once
 	html = client.get("/").get_data(as_text=True)

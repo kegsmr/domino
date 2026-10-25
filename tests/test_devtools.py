@@ -11,9 +11,10 @@ import types
 import pytest
 
 import domino.tags as t
-from domino import Collection, Domino, State, optimistic, template
-from domino.components import Document
-from domino.devtools import startup_warnings
+from domino import Collection, Domino, State, template
+from domino import _optimistic as optimistic
+from domino import Document
+from domino._devtools import startup_warnings
 from domino.mongo import MongoNotConfigured
 
 

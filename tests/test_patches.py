@@ -8,9 +8,10 @@ import time
 import pytest
 
 import domino.tags as t
-from domino import Collection, Domino, State, patches
-from domino.components import Document
-from domino.patches import Patcher, apply, diff
+from domino import Collection, Domino, State
+from domino import _patches as patches
+from domino import Document
+from domino._patches import Patcher, apply, diff
 
 
 def rendered_list(count, prefix="item"):
@@ -73,13 +74,13 @@ def test_random_edits_to_rendered_html_roundtrip():
 def test_one_changed_line_is_a_small_patch():
 
 	old = rendered_list(100)
-	new = old.replace("item 50\n", "changed 50\n")
+	new = old.replace(">item 50<", ">changed 50<")
 
 	ops = roundtrip(old, new)
 
 	assert len(ops) == 3
-	assert ops[1] == "                changed 50"
-	assert len(json.dumps(ops)) < 60
+	assert ops[1] == "            <span>changed 50</span>"
+	assert len(json.dumps(ops)) < 70
 
 
 def test_an_appended_item_and_a_shifted_list():
@@ -231,7 +232,7 @@ def test_one_diff_for_the_same_html_on_many_sockets(monkeypatch):
 	assert all(result["patch"] == results[0]["patch"] for result in results)
 
 
-# Predicted states (see domino.optimistic): large ones are patches against the first
+# Predicted states (see domino._optimistic): large ones are patches against the first
 
 
 class Picker(t.div):
@@ -369,7 +370,7 @@ def make_app(**config):
 @pytest.fixture(autouse=True)
 def fresh_feed():
 
-	from domino import reactive
+	from domino import _reactive as reactive
 
 	messages.remove({})
 	for number in range(40):
@@ -383,7 +384,7 @@ def fresh_feed():
 
 def say(number):
 
-	from domino import reactive
+	from domino import _reactive as reactive
 
 	messages.insert({"name": "bob", "text": f"Message number {number}", "sent": number})
 	reactive.wait()
@@ -689,7 +690,7 @@ def test_compression_setting_reaches_uvicorn(monkeypatch, tmp_path):
 
 	import uvicorn
 
-	from domino import asgi
+	from domino import _asgi as asgi
 
 	calls = []
 	monkeypatch.setattr(uvicorn, "run", lambda target, **options: calls.append(options))

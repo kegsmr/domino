@@ -16,8 +16,8 @@ setup(
 	install_requires=["Flask>=2.2", "pymongo>=4", "uvicorn[standard]>=0.24", "a2wsgi>=1.7"],
 	extras_require={"test": ["pytest", "websockets"]},
 	entry_points={
-		"console_scripts": ["domino=domino.cli:main"],
+		"console_scripts": ["domino=domino._cli:main"],
 		# pytest finds tests next to their page (pages/about_test.py) with a `page` fixture
-		"pytest11": ["domino=domino.pytest_plugin"],
+		"pytest11": ["domino=domino._pytest_plugin"],
 	},
 )

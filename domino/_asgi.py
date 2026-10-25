@@ -3,7 +3,7 @@
 Each tab opens one WebSocket at /_domino/ws, which carries its events up and their results and
 pushed updates down, so an idle tab costs a coroutine instead of a thread. /_domino/stream (the
 Server-Sent Events fallback) is served here too, without a thread, as is /_domino/tailwind/watch
-while debugging (see domino.tailwind). Every other request goes to
+while debugging (see domino._tailwind). Every other request goes to
 the Flask app, as WSGI, in a thread pool.
 """
 
@@ -19,9 +19,9 @@ from urllib.parse import parse_qs, urlsplit
 from a2wsgi import WSGIMiddleware
 from werkzeug.test import EnvironBuilder
 
-from . import tailwind
-from .core import DEFAULT_PAGE, max_event_bytes
-from .patches import Patcher
+from . import _tailwind as tailwind
+from ._core import DEFAULT_PAGE, max_event_bytes
+from ._patches import Patcher
 
 
 WS_PATH = "/_domino/ws"
@@ -30,7 +30,7 @@ STREAM_PATH = "/_domino/stream"
 # "path/to/app.py:attribute", for the processes uvicorn's reloader starts
 ENV_APP = "DOMINO_ASGI_APP"
 
-# "1" when those processes hot reload changed files themselves (see domino.hot)
+# "1" when those processes hot reload changed files themselves (see domino._hot)
 ENV_HOT = "DOMINO_ASGI_HOT"
 
 # Sent when a newer socket for the same page took over, so the browser doesn't reconnect
@@ -65,7 +65,7 @@ class ASGIApp:
 
 		# Made once in the process that serves, so a debug server warns here, once
 		if app.debug:
-			from .devtools import startup_warnings
+			from ._devtools import startup_warnings
 			startup_warnings(app)
 
 
@@ -227,7 +227,7 @@ class Connection:
 		{"type": "ready"} once bound to the page, or {"type": "expired"} if it's unknown,
 		{"type": "result", "ref", "status", ...} with what POST /_domino/events would answer,
 		{"type": "update", "id", "html", "version"} for each pushed update, as over SSE.
-	With "patch" in the hello, a result or update may carry "patch" (see domino.patches) instead
+	With "patch" in the hello, a result or update may carry "patch" (see domino._patches) instead
 	of "html", and "base": the version of the last HTML this socket sent for that component.
 	"""
 
@@ -547,12 +547,12 @@ def app_location(app):
 def serve(app, host="127.0.0.1", port=5000, reload=False, **options):
 	"""Serve `app` with uvicorn. With reload, a new process serves it, which finds the app through
 	from_environ(): it hot reloads changed files itself and is restarted for changes it can't swap
-	in (see domino.hot), or, with {"domino": {"hot_reload": false}}, uvicorn restarts it whenever a
+	in (see domino._hot), or, with {"domino": {"hot_reload": false}}, uvicorn restarts it whenever a
 	file in the app's folder changes."""
 
 	import uvicorn
 
-	from . import hot
+	from . import _hot as hot
 
 	target = app.asgi
 	location = None
@@ -578,7 +578,7 @@ def serve(app, host="127.0.0.1", port=5000, reload=False, **options):
 		# The new process creates the app again, and reads FLASK_DEBUG when it does
 		if app.debug:
 			os.environ["FLASK_DEBUG"] = "1"
-		target = "domino.asgi:from_environ"
+		target = "domino._asgi:from_environ"
 		if app.config["DOMINO_HOT_RELOAD"]:
 			os.environ[ENV_HOT] = "1"
 			hot.serve(target, app.root_path, host=host, port=port, **options)
@@ -591,7 +591,7 @@ def serve(app, host="127.0.0.1", port=5000, reload=False, **options):
 def from_environ():
 	"""The app named by DOMINO_ASGI_APP, as ASGI. uvicorn's reloader calls this in each new process."""
 
-	from .cli import load_app, load_module
+	from ._cli import load_app, load_module
 
 	location = os.environ[ENV_APP]
 	path = None
@@ -608,9 +608,9 @@ def from_environ():
 			module = load_module(path)
 		app = getattr(module, name)
 
-	# Changed files are swapped in by this process while it serves (see domino.hot)
+	# Changed files are swapped in by this process while it serves (see domino._hot)
 	if os.environ.get(ENV_HOT) == "1":
-		from .hot import HotReloader
+		from ._hot import HotReloader
 		HotReloader(app, path).start()
 
 	return app.asgi

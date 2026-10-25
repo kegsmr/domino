@@ -5,8 +5,8 @@ import pytest
 
 import domino.tags as t
 from domino import Domino
-from domino.components import Document, PublicSettings
-from domino.settings import SettingsError
+from domino import Document, PublicSettings
+from domino._settings import SettingsError
 
 
 @pytest.fixture(autouse=True)
@@ -240,7 +240,7 @@ def test_attribute_access(tmp_path):
 def test_navigation_setting_off_marks_pages_to_load_as_usual(tmp_path):
 
 	import domino.tags as t
-	from domino.components import Document
+	from domino import Document
 
 	write(tmp_path / "settings.json", {"domino": {"navigation": False}})
 	app = make_app(tmp_path)
@@ -260,7 +260,7 @@ def test_latency_setting_only_applies_while_debugging():
 
 	import domino.tags as t
 	from domino import Domino
-	from domino.components import Document
+	from domino import Document
 
 	app = Domino(__name__)
 	app.config["DOMINO_LATENCY"] = 300

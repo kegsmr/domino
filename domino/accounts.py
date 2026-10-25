@@ -34,9 +34,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import forms, mail, mongo
 from . import tags as t
-from .core import DEFAULT_PAGE, SESSION_USER_KEY, Page, redirect
-from .reactive import Collection, State
-from .util import is_local_url
+from ._core import DEFAULT_PAGE, SESSION_USER_KEY, Page, redirect
+from ._reactive import Collection, State
+from ._util import is_local_url
 
 
 log = logging.getLogger(__name__)
