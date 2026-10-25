@@ -10,7 +10,7 @@ or, with Domino installed (`pip install -e .`), `domino run examples/counter`. `
 
 The examples run in debug mode. Only `chat` stores data in MongoDB, so the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it; running `chat` starts one, as `domino run` does.
 
-Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search` and `functional`. Run them all with `python -m pytest examples`.
+Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms` and `functional`. Run them all with `python -m pytest examples`.
 
 | Example | Shows |
 |---|---|
@@ -20,7 +20,7 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `random_number/` | `after(ms, ...)` updating a component on a timer |
 | `clock/` | `refresh()` pushing a component to the browser from a background thread |
 | `todo/` | Form submits handled in Python with `event.form`, without reloading the page |
-| `forms/` | Form controls (`select`, range, checkbox), `event.value`, and re-rendering only part of a component |
+| `forms/` | A sign-up form declared with `forms.Form`: browser and server validation, errors inline, a live email check, a password confirmation across fields and a success view with the typed values; plus a raw range input whose `event.value` re-renders only part of the page |
 | `search/` | Search as you type: `on_input=..., debounce=250`, with the input keeping focus and caret while results update |
 | `chat/` | Meteor-style reactivity: a shared `Collection` in `data.py`; every open window re-renders live when a message is inserted |
 | `accounts/` | Sign-up, login and logout with `domino.accounts`: a `UserMenu` that updates when you log in or out, and a `login_required` page with notes only their owner sees. Needs MongoDB (started for you in debug mode) |

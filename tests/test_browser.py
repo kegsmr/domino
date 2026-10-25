@@ -133,6 +133,47 @@ def test_partial_update_keeps_other_fields(serve, page):
 	assert page.input_value("select[name=plan]") == "Team"
 
 
+def test_form_checks_in_the_browser_then_on_the_server(serve, page):
+
+	page.goto(serve("forms"))
+	sent = sent_events(page)
+
+	# The browser's own check stops an empty required field; nothing is sent
+	page.click("button[type=submit]")
+	page.wait_for_timeout(300)
+	assert sent == []
+	assert page.evaluate("document.querySelector('input[name=name]').validity.valueMissing")
+
+	# Only the server knows the email is taken
+	page.fill("input[name=name]", "Ada")
+	page.fill("input[name=email]", "taken@example.com")
+	page.fill("input[name=age]", "36")
+	page.select_option("select[name=plan]", "Pro")
+	page.check("input[name=newsletter]")
+	page.fill("input[name=password]", "analytical")
+	page.fill("input[name=confirm]", "analytical")
+	page.click("button[type=submit]")
+
+	page.wait_for_selector("[role=alert]:has-text('That email is already registered.')")
+	assert page.get_attribute("input[name=email]", "aria-invalid") == "true"
+	assert page.input_value("input[name=name]") == "Ada"
+	assert page.input_value("input[name=email]") == "taken@example.com"
+	assert page.input_value("input[name=age]") == "36"
+	assert page.input_value("select[name=plan]") == "Pro"
+	assert page.is_checked("input[name=newsletter]")
+	assert len(sent) >= 1
+
+	page.fill("input[name=email]", "ada@example.com")
+	page.fill("input[name=password]", "analytical")
+	page.fill("input[name=confirm]", "analytical")
+	page.click("button[type=submit]")
+
+	page.wait_for_selector("h2:has-text('Welcome, Ada!')")
+	assert "36 (int)" in page.inner_text("dl")
+	assert "True (bool)" in page.inner_text("dl")
+	assert page.errors == []
+
+
 def test_debounced_search_keeps_focus_and_typing(serve, page):
 
 	def slow(module):
