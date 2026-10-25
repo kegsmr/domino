@@ -579,6 +579,8 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_PATCHES", True)  # the WebSocket sends what changed in a component, not all of it
 		self.config.setdefault("DOMINO_WS_COMPRESSION", True)  # per-message deflate on the WebSocket (uvicorn's)
 		self.config.setdefault("DOMINO_HOT_RELOAD", True)  # debug mode updates pages in place on changes
+		self.config.setdefault("DOMINO_CLIENT_RUNTIME", None)  # client components' runtime: a URL, "local" or "cdn"
+		self.config.setdefault("DOMINO_CLIENT_PYTHON", "micropython")  # or "pyodide"
 
 		# settings.json < settings.local.json < DOMINO_* environment variables
 		self.settings = load_settings(self.root_path, settings)
@@ -610,6 +612,10 @@ class Domino(Flask):
 		# The inspector's script and data; they answer 404 unless the app is in debug mode
 		from .devtools import add_routes
 		add_routes(self)
+
+		# Client components' loader, modules and runtime (see domino.client)
+		from . import client
+		client.add_routes(self)
 
 		# File-based routing, found once here rather than per request
 		self._add_pages(pages)
@@ -1216,6 +1222,17 @@ class Element:
 			self.init()
 
 
+	def __init_subclass__(cls, **kwargs):
+
+		super().__init_subclass__(**kwargs)
+
+		# `client = True` runs the component in the browser; its module is checked now, so a
+		# mistake stops the app at startup (see domino.client)
+		if getattr(cls, "client", False) is True:
+			from . import client
+			client.register(cls)
+
+
 	def add_children(self, children: list[Element | str]):
 		self.content_root.__children__.extend(children)
 		return self
@@ -1464,6 +1481,11 @@ class Element:
 			with collect_styles() as styles:
 				html = Element._render(self, level, indent)
 			return styles.finish(html)
+
+		# Rendered by the code the browser will run it with (see domino.client)
+		if getattr(type(self), "client", False) is True:
+			from . import client
+			return client.render(self, level, indent, styles)
 
 		# A component without render() may have a paired Jinja template instead
 		render = getattr(self, "render", None)

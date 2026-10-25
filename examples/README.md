@@ -10,7 +10,7 @@ or, with Domino installed (`pip install -e .`), `domino run examples/counter`. `
 
 The examples run in debug mode. Only `chat` stores data in MongoDB, so the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it; running `chat` starts one, as `domino run` does.
 
-Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms`, `functional`, `uploads` and `instant`. Run them all with `python -m pytest examples`.
+Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms`, `functional`, `uploads`, `instant` and `client`. Run them all with `python -m pytest examples`.
 
 | Example | Shows |
 |---|---|
@@ -18,6 +18,7 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `functional/` | Several pages in `pages/`, a shared `layout.py` with the navigation, a page with a URL parameter (`hello/[name].py`), a `Page` class with `State` (`counter.py`) and a `404.py`. Links swap pages in without reloading (the navigation stays put and the counter works at once); the About page has a link that opts out with `data_domino_reload` |
 | `counter/` | A component with `State`, re-rendered by `on_click=` |
 | `instant/` | Tabs, an accordion, a dropdown menu, a stepper and a carousel whose clicks all show at once, any number in a row, even with 1 s of simulated latency (button on the page): the server ships every state they can reach |
+| `client/` | Experimental client components (`client = True`): a Game of Life computed in the browser in Python, 30 generations a second, that keeps running offline, inside a server component it saves patterns to with `self.emit()`; and one text-statistics component run both in the browser and on the server. The first visit while debugging downloads the MicroPython runtime (about 0.5 MB) into `~/.domino/client-runtime` |
 | `random_number/` | `after(ms, ...)` updating a component on a timer |
 | `clock/` | `refresh()` pushing a component to the browser from a background thread |
 | `todo/` | Form submits handled in Python with `event.form`, without reloading the page |

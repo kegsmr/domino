@@ -140,6 +140,15 @@ window.Domino = (() => {
 
         let current = from.firstChild;
         for (const next of Array.from(to.childNodes)) {
+            // A client component running in the browser (see domino/client.js) keeps what it
+            // shows when the server re-renders what's around it
+            if (current && current.dominoIsland && next.nodeType === Node.ELEMENT_NODE
+                && next.getAttribute('data-domino-client') === current.getAttribute('data-domino-client')) {
+                if (current.id) keyed.delete(current.id);
+                current = current.nextSibling;
+                continue;
+            }
+
             let match = null;
             if (next.nodeType === Node.ELEMENT_NODE && next.id && keyed.has(next.id)) {
                 match = keyed.get(next.id);
@@ -990,7 +999,19 @@ window.Domino = (() => {
         return found;
     }
 
+    // Client components run in Python in the browser; their loader comes only to pages with one
+    let clientLoader = null;
+
+    function hydrateClients() {
+        clientLoader = clientLoader || import('/_domino/client/loader.js');
+        clientLoader.then((loader) => loader.hydrate()).catch((err) => {
+            clientLoader = null; // try again with the next page or update
+            console.error('Domino: client components failed to load', err);
+        });
+    }
+
     function listen(root = document) {
+        if (within(root, '[data-domino-client]').length) hydrateClients();
         for (const el of within(root, '[data-event-id]')) {
             for (const eventId of el.getAttribute('data-event-id').split(' ')) {
                 const type = eventId.split('-').pop();

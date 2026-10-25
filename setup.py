@@ -11,7 +11,7 @@ setup(
 	url="https://github.com/kegsmr/domino",
 	license="MIT",
 	packages=["domino"],
-	package_data={"domino": ["core.js", "debug.js", "tags.pyi"]},
+	package_data={"domino": ["core.js", "debug.js", "client.js", "client_shim/domino/*.py", "tags.pyi"]},
 	python_requires=">=3.9",
 	install_requires=["Flask>=2.2", "pymongo>=4", "uvicorn[standard]>=0.24", "a2wsgi>=1.7"],
 	extras_require={"test": ["pytest", "websockets"]},
