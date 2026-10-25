@@ -29,3 +29,9 @@ def accepts_argument(func):
 		parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD, parameter.VAR_POSITIONAL)
 		for parameter in parameters
 	)
+
+
+def css_class_name(cls):
+	"""The CSS class a Python class renders as: underscores become hyphens (col_6 -> col-6)."""
+
+	return cls.__name__.replace("_", "-")

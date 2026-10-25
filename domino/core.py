@@ -500,11 +500,15 @@ class Element:
 
 		html = f"{indentation}<{tag}"
 
-		# Handle class names
+		# Handle class names: every class in the hierarchy except the tag itself,
+		# so mixins and parent components (e.g. col_6 -> col-6) are kept
 		class_names = []
-		for base in (self.__class__,) + self.__class__.__bases__:
-			if base.__name__ not in ["object", "Element"] and tag != base.__name__:
-				class_names.append(base.__name__)
+		for base in self.__class__.__mro__:
+			if base in (object, Element) or base.__name__ == tag or base.__module__ == "domino.tags":
+				continue
+			name = css_class_name(base)
+			if name not in class_names:
+				class_names.append(name)
 		class_attr = " ".join(class_names)
 		if len(class_names) > 0:
 			html += f" class=\"{class_attr}\""
@@ -601,7 +605,7 @@ class Style:
 		if isinstance(target, str):
 			selector = target
 		elif isinstance(target, type):
-			selector = f'.{target.__name__}'
+			selector = f'.{css_class_name(target)}'
 		elif isinstance(target, Element):
 			# Rules for one element travel with that element instead of piling
 			# up in this (possibly app-wide) stylesheet
