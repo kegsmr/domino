@@ -42,6 +42,9 @@ def test_example_home_page_renders(path):
 	sys.modules[spec.name] = module
 	spec.loader.exec_module(module)
 
+	# Examples with accounts sign their session cookie with it
+	module.app.secret_key = "test"
+
 	response = module.app.test_client().get("/")
 
 	assert response.status_code == 200

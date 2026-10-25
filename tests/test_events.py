@@ -110,7 +110,7 @@ def test_unknown_event_is_404():
 	page_id, _ = load(client)
 
 	assert click(client, page_id, "nope").status_code == 404
-	assert client.post("/_domino/events").status_code == 404
+	assert client.post("/_domino/events", json={}).status_code == 404
 
 
 def test_pages_expire_and_are_capped():

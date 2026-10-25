@@ -9,9 +9,11 @@ import weakref
 from collections import OrderedDict
 from pathlib import Path
 
+import flask
 from flask import *
 from flask.cli import load_dotenv as load_env_files
 from flask.helpers import get_debug_flag, get_load_dotenv
+from flask.sessions import SecureCookieSessionInterface
 from markupsafe import Markup, escape
 
 from .settings import Settings, load_settings
@@ -33,6 +35,9 @@ _render_state = threading.local()
 
 # Guards Element.__pages__, which request threads add to while refresh() reads it
 _pages_lock = threading.Lock()
+
+# The signed-in user's id in Flask's session cookie (see domino.accounts)
+SESSION_USER_KEY = "domino_user_id"
 
 
 def render_stack():
@@ -59,6 +64,9 @@ class Page:
 		self.updates = {}  # element id -> html not yet sent to the browser
 		self.updates_ready = threading.Condition()
 		self.stream = None  # the newest stream; older ones stop
+		# Who's signed in on this page, from the session when it was made. Pages outlive their
+		# request, so events and pushes read this instead of the cookie; reading it subscribes
+		self.user_id = reactive.State(None)
 		self.touch()
 
 
@@ -259,7 +267,44 @@ class Event:
 		return f"Event(type={self.type!r}, value={self.value!r}, form={self.form!r})"
 
 
+def redirect(location, code=302):
+	"""Send the browser to `location`. In an event handler the browser goes there once the
+	response arrives, and `location` must be a path on this site; elsewhere (e.g. in a route)
+	this is Flask's redirect()."""
+
+	if not (has_request_context() and "domino_redirect" in g):
+		return flask.redirect(location, code)
+
+	# Event handlers often pass on a ?next= from the query string, so refuse other sites
+	if not is_local_url(location):
+		raise ValueError(f"Can only redirect to a path on this site, not {location!r}")
+
+	g.domino_redirect = location
+
+
+class SessionInterface(SecureCookieSessionInterface):
+	"""Flask's signed cookie session, with SameSite=Lax and Secure outside debug by default."""
+
+
+	def get_cookie_samesite(self, app):
+
+		return app.config["SESSION_COOKIE_SAMESITE"] or "Lax"
+
+
+	def get_cookie_secure(self, app):
+
+		# The debug server is usually plain http://127.0.0.1; {"domino": {"secure_cookies": false}}
+		# turns this off for an HTTP-only deployment
+		secure = app.config.get("DOMINO_SECURE_COOKIES")
+		if secure is None:
+			return app.config["SESSION_COOKIE_SECURE"] or not app.debug
+
+		return bool(secure)
+
+
 class Domino(Flask):
+
+	session_interface = SessionInterface()
 
 
 	def __init__(self, *args, page_store: PageStore = None, settings: str = None, **kwargs):
@@ -286,6 +331,7 @@ class Domino(Flask):
 		self._add_static_route('/_domino/core', CORE_JS)
 		self._add_event_handler('/_domino/events')
 		self._add_stream('/_domino/stream')
+		self._add_oauth_routes('/_domino/accounts/<provider>/<action>')
 
 
 	def _apply_settings(self):
@@ -358,6 +404,11 @@ class Domino(Flask):
 
 		def event_handler():
 
+			# Only JSON: a cross-site form can't send it, and a cross-site fetch can't
+			# without a CORS preflight, which is never granted. That makes this CSRF-safe
+			if not request.is_json:
+				return jsonify({"error": "Expected application/json"}), 415
+
 			# Retrieve the event data from the incoming JSON payload
 			data = request.get_json(silent=True) or {}
 
@@ -374,6 +425,7 @@ class Domino(Flask):
 					return jsonify({"error": "Unknown or expired event"}), 404
 
 				g.domino_page = page
+				g.domino_redirect = None  # set by redirect()
 
 				_, callback = event
 
@@ -389,7 +441,7 @@ class Domino(Flask):
 						result = changes.affected_on(page) or getattr(callback, "__self__", None)
 
 					if not isinstance(result, Element):
-						return jsonify({"id": None, "html": None})
+						return jsonify(self._event_response({"id": None, "html": None}))
 
 					# Old binds must go before rendering so the new ones register fresh.
 					# If rendering fails the browser still shows the old HTML, so put
@@ -410,13 +462,21 @@ class Domino(Flask):
 				# The response carries this render, so it isn't pushed to this page again
 				changes.skip(page, result)
 
-				return jsonify({
+				return jsonify(self._event_response({
 					"id": result.id(),
 					"html": html,
 					"version": page.version
-				})
+				}))
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
+
+
+	def _event_response(self, response):
+
+		if g.domino_redirect:
+			response["redirect"] = g.domino_redirect
+
+		return response
 
 
 	def _event_error(self, event_id, error):
@@ -471,9 +531,22 @@ class Domino(Flask):
 		self.add_url_rule(route, route, stream, methods=["GET"])
 
 
+	def _add_oauth_routes(self, route):
+
+		def oauth(provider, action):
+
+			# Imported here so apps without accounts don't load it
+			from . import accounts
+
+			return accounts.oauth_view(provider, action)
+
+		self.add_url_rule(route, "domino_oauth", oauth, methods=["GET"])
+
+
 	def _new_page(self):
 
 		page = Page()
+		page.user_id.set(session.get(SESSION_USER_KEY))
 
 		self.page_store.save(page)
 		self._prune_pages()

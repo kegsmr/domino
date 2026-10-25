@@ -1,4 +1,5 @@
 import inspect
+from urllib.parse import urlsplit
 
 
 # Class attributes per class, computed once: walking the hierarchy for every element on
@@ -45,3 +46,19 @@ def css_class_name(cls):
 	"""The CSS class a Python class renders as: underscores become hyphens (col_6 -> col-6)."""
 
 	return cls.__name__.replace("_", "-")
+
+
+def is_local_url(url):
+	"""Whether `url` is a path on this site ("/notes?page=2"), not a link to another site
+	("//evil.com", "https://evil.com", "/\\evil.com", which browsers treat as "//evil.com")."""
+
+	if not isinstance(url, str) or not url.startswith("/") or url.startswith("//"):
+		return False
+
+	# Browsers read backslashes as slashes and drop tabs and newlines, so "/\t/evil.com" is "//evil.com"
+	if "\\" in url or any(ord(character) < 32 or ord(character) == 127 for character in url):
+		return False
+
+	parts = urlsplit(url)
+
+	return not parts.scheme and not parts.netloc

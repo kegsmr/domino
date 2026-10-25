@@ -392,3 +392,50 @@ def test_wrong_prediction_is_corrected_by_the_server(serve, page):
 	assert not page.evaluate("document.querySelector('.CounterComponent').hasAttribute('data-predicted')")
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []
+
+
+@pytest.mark.mongo
+def test_accounts_sign_up_log_out_log_in_and_keep_private_notes(serve, page):
+
+	def configure(module):
+		module.app.secret_key = "test"
+
+	email = f"ada-{time.time_ns()}@example.com"
+	home = serve("accounts", configure)
+	page.goto(home)
+	menu = page.locator(".UserMenu")
+
+	menu.get_by_role("link", name="Sign up").click()
+	page.fill("input[name=name]", "Ada")
+	page.fill("input[name=email]", email)
+	page.fill("input[name=password]", "correct horse")
+	page.get_by_role("button", name="Sign up").click()
+
+	# Back where the sign-up link was clicked, signed in
+	page.wait_for_url(home)
+	assert "Signed in as Ada" in menu.inner_text()
+
+	menu.get_by_role("button", name="Log out").click()
+	menu.get_by_role("link", name="Log in").wait_for()
+
+	menu.get_by_role("link", name="Log in").click()
+	page.fill("input[name=email]", email)
+	page.fill("input[name=password]", "wrong password")
+	page.get_by_role("button", name="Log in").click()
+	page.get_by_role("alert").wait_for()
+	assert page.get_by_role("alert").inner_text() == "Wrong email or password"
+	assert page.input_value("input[name=email]") == email
+	assert page.input_value("input[name=password]") == ""
+
+	page.fill("input[name=password]", "correct horse")
+	page.get_by_role("button", name="Log in").click()
+	page.wait_for_url(home)
+	assert "Signed in as Ada" in menu.inner_text()
+
+	page.get_by_role("link", name="Private").click()
+	page.wait_for_url(home + "private")
+	page.fill("input[name=text]", "Buy milk")
+	page.press("input[name=text]", "Enter")
+	page.wait_for_function("document.querySelectorAll('.Notes li').length === 1", timeout=5000)
+	assert page.locator(".Notes li").inner_text() == "Buy milk"
+	assert page.errors == []

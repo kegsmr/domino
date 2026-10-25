@@ -358,6 +358,11 @@ window.Domino = (() => {
                 reportError(el, eventId, data);
                 return;
             }
+            // The handler called domino.redirect(); the server only allows paths on this site
+            if (data.redirect && data.redirect.startsWith('/') && !data.redirect.startsWith('//')) {
+                window.location.assign(data.redirect);
+                return;
+            }
             // Unmark first, so the server's HTML decides whether the element ends up disabled
             if (unmark) unmark();
             apply(data, reset);

@@ -162,6 +162,54 @@ Like Meteor, named collections live in MongoDB: `Collection("messages")` is the 
 
 The database comes from the `mongo.url` setting (e.g. `DOMINO_MONGO__URL=mongodb://db:27017/myapp?replicaSet=rs0`), with the database name taken from the URL (default `domino`); `MONGO_URL` works too, and `domino.mongo.connect(url)` sets it in code. When MongoDB runs as a replica set, a change stream per collection re-renders subscribers when *any* process changes the collection — another server process, a script, or `mongosh` — so it also works with several server processes. Without a replica set only this process's own writes update pages live.
 
+## Accounts
+
+`domino.accounts` adds sign-up, login and logout, like Meteor's accounts packages. Users are documents in the `users` collection (MongoDB):
+
+```python
+from domino import accounts
+
+@app.route("/")
+def index():
+	return Document() [accounts.UserMenu()]        # "Signed in as …" + Log out, or Log in / Sign up links
+
+@app.route("/login")
+def login():
+	return Document() [accounts.LoginForm()]       # also SignupForm(), LogoutButton(), OAuthButton("github")
+
+@app.route("/private")
+@accounts.login_required                           # under @app.route
+def private():
+	user = accounts.current_user()
+	return Document() [t.p() [f"Hello {user['email']}"]]
+```
+
+- `accounts.current_user()` is the signed-in user's document (without its password hash), or None; `accounts.user_id()` is just the id. Both are reactive: a component that reads them in `render()` re-renders when the user logs in or out on that page.
+- `accounts.create_user(email, password, name=None)`, `accounts.login(email, password)` and `accounts.logout()` can be called from your own event handlers. Bad input raises `accounts.AccountError`, whose message is meant for the user (a wrong email and a wrong password both give "Wrong email or password"). Passwords need at least 8 characters and are hashed with werkzeug's `generate_password_hash`; emails are stored lowercased and must be unique (a unique index is created in MongoDB).
+- The forms show errors inline, keep the typed email, and after logging in go to `?next=` if the page has one (only paths on this site are followed). `login_required` sends visitors who aren't signed in to the `accounts.login_url` setting (default `/login`) with `?next=` set to the page they asked for.
+- After 5 failed logins for an email within a minute, it's locked until that minute has passed; one IP address gets 20. Change these with the `accounts.max_attempts` and `accounts.lockout_seconds` settings. The counts are kept in the server process's memory, so each process (and a restart) counts on its own. Behind a proxy, every client shares the proxy's address unless you set up Werkzeug's `ProxyFix`.
+- `domino.redirect(url)` in any event handler sends the browser to `url` when the response arrives. It only accepts paths on this site (`/notes`, not `//evil.com` or `https://...`); outside event handlers it's Flask's `redirect()`.
+
+**Sessions.** The signed-in user's id is kept in Flask's signed session cookie, which needs the `secret_key` setting: put a long random string in `settings.local.json` or `DOMINO_SECRET_KEY`. In debug mode an app without one gets a random key per process, with a warning, so logins don't survive a restart; outside debug mode accounts refuse to work without it. Domino pages outlive their request (events and pushes from other users' changes run later), so each page remembers who was signed in when it was loaded, and login and logout update the page as well as the cookie. Other open tabs of the same browser notice on their next page load, not live. Logging in starts a fresh session (nothing from the old cookie is kept) and lasts 31 days (Flask's `PERMANENT_SESSION_LIFETIME`); logging out clears the cookie in that browser. Since the session lives in the cookie, there's no server-side list of sessions to revoke.
+
+**Cookies.** Domino apps send the session cookie with `HttpOnly` (Flask's default), `SameSite=Lax`, and, outside debug mode, `Secure`, so in production it's only sent over HTTPS. For an HTTP-only deployment set `{"domino": {"secure_cookies": false}}`.
+
+**Events and CSRF.** The event endpoint accepts only `application/json` requests (anything else gets 415). A form on another site can't send JSON, and another site's script can't send it without a CORS preflight, which Domino never allows, so a malicious page can't fire events with the user's cookie. Events also need the page's random id, which only the page itself has.
+
+**Keep the users collection on the server.** Domino has no client-side database: the browser only sees what components render. Render fields you choose (`user["name"]`), never whole user documents, and don't build components that list `accounts.users` for everyone. `current_user()` leaves out the password hash, but `accounts.users.find()` doesn't.
+
+### GitHub and Google
+
+Add a provider's OAuth app credentials to the settings, for example in `settings.local.json`:
+
+```json
+{"accounts": {"github": {"client_id": "...", "client_secret": "..."}, "google": {"client_id": "...", "client_secret": "..."}}}
+```
+
+The callback URL to register with the provider is `https://<your site>/_domino/accounts/github/callback` (or `google`). `LoginForm` and `SignupForm` then show a "Continue with GitHub" link, and `OAuthButton("github")` adds one anywhere; providers that aren't configured render nothing. Signing in uses the authorization-code flow with a random `state` kept in the session, so a callback this browser didn't start is refused. The user is found by their provider account id, or else linked to an existing user with the same email if the provider says it's verified, or else created; an unverified email never links to an existing account. Provider details are kept in `user["services"]["github"]`; access tokens aren't stored.
+
+See `examples/accounts.py`.
+
 ## Settings
 
 `app.settings` holds the app's settings, merged from (later wins):
