@@ -11,7 +11,7 @@ setup(
 	url="https://github.com/kegsmr/domino",
 	license="MIT",
 	packages=["domino"],
-	package_data={"domino": ["core.js"]},
+	package_data={"domino": ["core.js", "tags.pyi"]},
 	python_requires=">=3.9",
 	install_requires=["Flask>=2.2"],
 	extras_require={"test": ["pytest"]},
