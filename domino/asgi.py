@@ -2,7 +2,8 @@
 
 Each tab opens one WebSocket at /_domino/ws, which carries its events up and their results and
 pushed updates down, so an idle tab costs a coroutine instead of a thread. /_domino/stream (the
-Server-Sent Events fallback) is served here too, without a thread. Every other request goes to
+Server-Sent Events fallback) is served here too, without a thread, as is /_domino/tailwind/watch
+while debugging (see domino.tailwind). Every other request goes to
 the Flask app, as WSGI, in a thread pool.
 """
 
@@ -18,6 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 from a2wsgi import WSGIMiddleware
 from werkzeug.test import EnvironBuilder
 
+from . import tailwind
 from .core import DEFAULT_PAGE
 from .patches import Patcher
 
@@ -68,6 +70,8 @@ class ASGIApp:
 			await Connection(self, scope, receive, send).run()
 		elif scope["type"] == "http" and path == STREAM_PATH:
 			await self.stream(scope, receive, send)
+		elif path == tailwind.WATCH_URL and self.app.tailwind and self.app.debug:
+			await tailwind.serve_watch(self.app, scope, receive, send)
 		else:
 			# a2wsgi refuses other WebSockets and answers lifespan messages
 			await self.wsgi(scope, receive, send)

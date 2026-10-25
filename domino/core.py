@@ -138,7 +138,11 @@ class PageStyles:
 			return ""
 		self.placed = True
 
-		return self.slot(lambda: self.component_style(level, indent))
+		# The app's Tailwind CSS, if it uses it, goes first: it's all in cascade layers, so the
+		# component CSS and the page's own rules win anyway
+		from .tailwind import link
+
+		return self.slot(lambda: link(level, indent) + self.component_style(level, indent))
 
 
 	def component_style(self, level, indent):
@@ -617,6 +621,12 @@ class Domino(Flask):
 		from . import client
 		client.add_routes(self)
 
+		# {"tailwind": true} or a tailwind.css in the app's folder: every page links its CSS
+		from . import tailwind
+		self.tailwind = tailwind.options(self.settings, self.root_path)
+		if self.tailwind:
+			tailwind.add_routes(self)
+
 		# File-based routing, found once here rather than per request
 		self._add_pages(pages)
 
@@ -703,6 +713,14 @@ class Domino(Flask):
 
 		if debug_mode and not in_child and not from_flask_cli:
 			self._start_dev_mongo(port or 5000)
+
+		# Tailwind's CSS too: rebuilt as files change while debugging, built once in production
+		if self.tailwind and not in_child and not from_flask_cli:
+			from . import tailwind
+			if debug_mode:
+				tailwind.watch(self.root_path, self.tailwind)
+			else:
+				tailwind.prepare(self.root_path, self.tailwind)
 
 		# `flask run` serves the app itself, and Flask's run() knows to do nothing then
 		if from_flask_cli:

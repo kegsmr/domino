@@ -1,0 +1,32 @@
+<div class="mx-auto max-w-6xl px-6 py-20">
+	<div class="text-center">
+		<h1 class="text-4xl font-extrabold tracking-tight sm:text-5xl">Simple pricing</h1>
+		<p class="mt-4 text-lg text-slate-600 dark:text-slate-400">A Jinja template paired with its component, styled with Tailwind too.</p>
+	</div>
+
+	<div class="mx-auto mt-10 flex w-fit gap-1 rounded-full bg-slate-100 p-1 dark:bg-slate-800" role="group" aria-label="Billing period">
+		<button {{ on(click=show_monthly) }} aria-pressed="{{ 'false' if yearly else 'true' }}"
+			class="rounded-full px-4 py-1.5 text-sm font-semibold {% if yearly %}text-slate-500 dark:text-slate-400{% else %}bg-white text-slate-900 shadow-sm dark:bg-slate-950 dark:text-white{% endif %}">Monthly</button>
+		<button {{ on(click=show_yearly) }} aria-pressed="{{ 'true' if yearly else 'false' }}"
+			class="rounded-full px-4 py-1.5 text-sm font-semibold {% if yearly %}bg-white text-slate-900 shadow-sm dark:bg-slate-950 dark:text-white{% else %}text-slate-500 dark:text-slate-400{% endif %}">Yearly <span class="text-emerald-600 dark:text-emerald-400">-20%</span></button>
+	</div>
+
+	<div class="mt-12 grid gap-6 lg:grid-cols-3">
+		{% for plan in plans() %}
+		<div class="flex flex-col rounded-2xl p-8 {% if plan.featured %}bg-indigo-600 text-white shadow-xl shadow-indigo-600/20{% else %}bg-white ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800{% endif %}">
+			<h2 class="text-lg font-semibold">{{ plan.name }}</h2>
+			<p class="mt-1 text-sm {% if plan.featured %}text-indigo-100{% else %}text-slate-500 dark:text-slate-400{% endif %}">{{ plan.text }}</p>
+			<p class="mt-6 flex items-baseline gap-1">
+				<span class="price text-4xl font-bold tracking-tight">${{ (plan.monthly * 12 * 0.8) | round | int if yearly else plan.monthly }}</span>
+				<span class="text-sm {% if plan.featured %}text-indigo-100{% else %}text-slate-500{% endif %}">/{{ 'year' if yearly else 'month' }}</span>
+			</p>
+			<ul class="mt-6 flex-1 space-y-2 text-sm">
+				{% for feature in plan.features %}
+				<li class="flex gap-2"><span aria-hidden="true">&#10003;</span>{{ feature }}</li>
+				{% endfor %}
+			</ul>
+			<a href="/#signup" class="mt-8 rounded-lg px-4 py-2.5 text-center font-semibold {% if plan.featured %}bg-white text-indigo-600 hover:bg-indigo-50{% else %}bg-indigo-600 text-white hover:bg-indigo-500{% endif %}">Choose {{ plan.name }}</a>
+		</div>
+		{% endfor %}
+	</div>
+</div>

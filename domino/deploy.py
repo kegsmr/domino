@@ -48,7 +48,7 @@ RUN pip install {install}
 RUN useradd --create-home --uid 10001 domino
 COPY --chown=domino:domino . .
 USER domino
-
+{tailwind}
 EXPOSE {port}
 
 # One worker process per CPU core; set WEB_CONCURRENCY (e.g. -e WEB_CONCURRENCY=2) to choose
@@ -370,6 +370,19 @@ def write_file(path, text, force=False, keep=False):
 	return True
 
 
+def tailwind_step(folder):
+	"""The Dockerfile lines that build the app's Tailwind CSS into the image, if it uses Tailwind."""
+
+	from . import tailwind
+	from .settings import load_settings
+
+	if not tailwind.options(load_settings(str(folder)), str(folder)):
+		return ""
+
+	# Built once here (the CLI stays cached in the image), so the server starts with it ready
+	return "\n# Tailwind's CSS, built into the image\nRUN domino tailwind build\n"
+
+
 def build(path, force=False):
 	"""Write the Dockerfile, .dockerignore and (if missing) requirements.txt. Returns the
 	app's folder."""
@@ -385,7 +398,7 @@ def build(path, force=False):
 	if has_requirements and not requires_domino(requirements.read_text(encoding="utf-8", errors="replace")):
 		install += f' "{requirement}"'
 
-	dockerfile = DOCKERFILE_TEMPLATE.format(port=PORT, health=HEALTH_PATH, install=install, target=target)
+	dockerfile = DOCKERFILE_TEMPLATE.format(port=PORT, health=HEALTH_PATH, install=install, target=target, tailwind=tailwind_step(folder))
 
 	say(f"Deployment files in {folder}:")
 	write_file(folder / "Dockerfile", dockerfile, force)

@@ -191,7 +191,7 @@ window.Domino = (() => {
 
         // With the other component CSS, before the page's own stylesheets, so those still win
         const last = blocks[blocks.length - 1];
-        const firstSheet = document.head.querySelector('style, link[rel=stylesheet]');
+        const firstSheet = document.head.querySelector('style, link[rel=stylesheet]:not([data-domino-tailwind])');
         if (last) {
             last.after(style);
         } else if (firstSheet) {
@@ -1198,12 +1198,61 @@ window.Domino = (() => {
         setTimeout(() => { announcer.textContent = document.title; }, 100);
     }
 
+    // While debugging an app that uses Tailwind CSS, the server says each time its CSS is rebuilt
+    // (and when this connects again, after a restart), and the page swaps in the new stylesheet
+    // without reloading. Nothing to do with the page's own socket or stream, so static pages get it too.
+    // Pages served over ASGI hear it on a WebSocket of its own, which the server closes at once when
+    // it restarts (it waits for streams); others on Server-Sent Events. Both reconnect by themselves.
+    let tailwindWatch = null;
+    let tailwindFailures = 0; // socket closes in a row
+    let tailwindOpened = false; // a socket worked, so it's worth waiting for the server to be back
+
+    function watchTailwind() {
+        if (tailwindWatch || !document.querySelector('link[data-domino-tailwind][data-domino-watch]')) return;
+        const onmessage = (e) => {
+            let data;
+            try { data = JSON.parse(e.data); } catch (err) { return; }
+            if (data.version) swapTailwind(data.version);
+        };
+        if (window.WebSocket && document.querySelector('[data-domino-ws]') && (tailwindOpened || tailwindFailures <= RETRIES)) {
+            const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const ws = tailwindWatch = new WebSocket(scheme + location.host + '/_domino/tailwind/watch');
+            ws.onopen = () => {
+                tailwindFailures = 0;
+                tailwindOpened = true;
+            };
+            ws.onmessage = onmessage;
+            ws.onclose = () => {
+                tailwindWatch = null;
+                tailwindFailures++;
+                setTimeout(watchTailwind, Math.min(250 * 2 ** tailwindFailures, 2000));
+            };
+        } else if (window.EventSource) {
+            tailwindWatch = new EventSource('/_domino/tailwind/watch');
+            tailwindWatch.onmessage = onmessage;
+        }
+    }
+
+    function swapTailwind(version) {
+        const links = Array.from(document.querySelectorAll('link[data-domino-tailwind]'));
+        const link = links[links.length - 1];
+        const href = '/_domino/tailwind.css?v=' + encodeURIComponent(version);
+        if (!link || link.getAttribute('href') === href) return;
+        // The new sheet loads next to the old one, which goes once it's in, so nothing shows unstyled
+        const next = link.cloneNode();
+        next.setAttribute('href', href);
+        next.addEventListener('load', () => links.forEach((old) => old.remove()), { once: true });
+        next.addEventListener('error', () => next.remove(), { once: true });
+        link.after(next);
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         latency = readLatency();
         readGraphs(document).forEach(installGraph);
         listen();
         scheduleAfterEvents();
         connect();
+        watchTailwind();
         document.addEventListener('click', onClick);
         window.addEventListener('popstate', onPopState);
         document.addEventListener('visibilitychange', () => sendVisibility(socket));

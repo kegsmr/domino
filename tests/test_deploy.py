@@ -153,6 +153,20 @@ def files_text(folder):
 # domino build
 
 
+def test_apps_with_tailwind_build_its_css_into_the_image(app):
+
+	plain = app("plain")
+	styled = app("styled", settings={"tailwind": True})
+
+	cli.main(["build", str(plain)])
+	cli.main(["build", str(styled)])
+
+	assert "tailwind" not in (plain / "Dockerfile").read_text()
+	lines = (styled / "Dockerfile").read_text().splitlines()
+	# After the app is copied in, as the user that runs it, so the CLI stays cached for it
+	assert lines.index("RUN domino tailwind build") > lines.index("USER domino")
+
+
 def test_build_writes_a_dockerfile(app, capsys):
 
 	folder = app()

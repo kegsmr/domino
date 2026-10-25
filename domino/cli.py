@@ -1,5 +1,6 @@
 """The `domino` command: `domino run` and `domino create`, like `meteor run` and `meteor create`,
-`domino serve` for production, and `domino build` and `domino deploy`, like `meteor deploy`."""
+`domino serve` for production, `domino build` and `domino deploy`, like `meteor deploy`, and
+`domino tailwind build` before deploying."""
 
 import argparse
 import importlib.util
@@ -10,7 +11,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from . import deploy, devmongo
+from . import deploy, devmongo, tailwind
 
 
 APP_TEMPLATE = '''\
@@ -123,6 +124,69 @@ def test_other_tabs_see_it(page, open_page):
 	assert other.text("ul") == "Walk the dog"
 '''
 
+# `domino create --tailwind`: the same app, styled with Tailwind CSS classes
+TAILWIND_LAYOUT_TEMPLATE = '''\
+from flask import current_app
+
+import domino.tags as t
+from domino.components import Document
+
+
+# Wraps every page in this folder and below. Tailwind CSS classes work anywhere ("tailwind": true
+# in settings.json), and are built into the CSS every page links
+def layout(content):
+
+	title = current_app.settings.public.title
+
+	page = Document(title=title)
+	page.body.configure(class_="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100")
+
+	return page [
+		t.main(class_="mx-auto max-w-xl px-6 py-12") [
+			t.h1(class_="mb-6 text-3xl font-bold tracking-tight") [
+				title
+			],
+			content
+		]
+	]
+'''
+
+TAILWIND_COMPONENT_TEMPLATE = '''\
+import time
+
+import domino.tags as t
+
+from data import tasks
+
+
+class Tasks(t.div):
+
+
+	def render(self):
+
+		# Reading the collection here re-renders this on every open page when it changes
+		return [
+			t.form(on_submit=self.add, class_="flex gap-2") [
+				t.input(name="text", placeholder="What needs doing?", required=True, autocomplete="off",
+					class_="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900"),
+				t.button(type="submit", class_="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500") [
+					"Add"
+				]
+			],
+			t.ul(class_="mt-4 space-y-2")([
+				t.li(class_="rounded-lg bg-white px-3 py-2 shadow-sm dark:bg-slate-900") [
+					task["text"]
+				]
+				for task in tasks.find(sort=[("created", -1)])
+			])
+		]
+
+
+	def add(self, event):
+
+		tasks.insert({"text": event.form.get("text", "").strip()[:200], "created": time.time()})
+'''
+
 GITIGNORE_TEMPLATE = '''\
 settings.local.json
 .domino/
@@ -170,6 +234,13 @@ def build_parser():
 
 	create = commands.add_parser("create", help="create a new app folder")
 	create.add_argument("name", help="folder to create")
+	create.add_argument("--tailwind", action="store_true", help="style it with Tailwind CSS")
+
+	tailwind_parser = commands.add_parser("tailwind", help="Tailwind CSS: `domino tailwind build` before deploying")
+	tailwind_parser.set_defaults(usage=tailwind_parser)
+	tailwind_commands = tailwind_parser.add_subparsers(dest="tailwind_command", metavar="command")
+	tailwind_build = tailwind_commands.add_parser("build", help="build an app's minified Tailwind CSS into .domino/tailwind.css (e.g. in a Dockerfile)")
+	tailwind_build.add_argument("app", nargs="?", default=".", help="the app's folder or Python file (default: the current folder)")
 
 	return parser
 
@@ -194,17 +265,20 @@ def main(argv=None):
 		if args.command == "serve":
 			return serve(args)
 		if args.command == "create":
-			return create(args.name)
+			return create(args.name, args.tailwind)
 		if args.command == "build":
 			deploy.build(args.app, args.force)
 			return 0
 		if args.command == "deploy":
 			return deploy.deploy(args.platform, args.app, name=args.name, mongo_url=args.mongo_url, force=args.force)
-	except (CliError, devmongo.DevMongoError, deploy.DeployError) as error:
+		if args.command == "tailwind" and args.tailwind_command == "build":
+			return tailwind_build(args)
+	except (CliError, devmongo.DevMongoError, deploy.DeployError, tailwind.TailwindError) as error:
 		print(f"domino: {error}", file=sys.stderr)
 		return 1
 
-	parser.print_help()
+	# `domino` or `domino tailwind` alone
+	getattr(args, "usage", parser).print_help()
 	return 2
 
 
@@ -333,15 +407,42 @@ def serve(args):
 	# One process needs no router: the app served by uvicorn, as `uvicorn app:app.asgi` would
 	if count == 1:
 		app = load_app(args.app)
+		tailwind.prepare(app.root_path, app.tailwind)
 		print(f"domino: App: http://{args.host}:{args.port}/ (1 worker)", file=sys.stderr, flush=True)
 		asgi.serve(app, args.host, args.port, False)
 		return 0
 
-	# The workers load the app themselves; this process only routes
-	return workers.serve(app_path(args.app), args.host, args.port, count)
+	# The workers load the app themselves; this process only routes (and builds the CSS they serve)
+	path = app_path(args.app)
+	tailwind.prepare(*app_tailwind(path))
+
+	return workers.serve(path, args.host, args.port, count)
 
 
-def create(name):
+def app_tailwind(path):
+	"""The app's folder and how it uses Tailwind, from its settings, without importing it."""
+
+	from .settings import load_settings
+
+	path = Path(path).resolve()
+	root = path if path.is_dir() else path.parent
+
+	return root, tailwind.options(load_settings(str(root)), root)
+
+
+def tailwind_build(args):
+
+	root, options = app_tailwind(app_path(args.app))
+	if options is None:
+		raise CliError(f'{root} doesn\'t use Tailwind CSS: add {{"tailwind": true}} to its settings.json, or a tailwind.css')
+
+	output = tailwind.build(root, options, minify=True)
+	print(f"domino: Tailwind CSS: built {output} ({output.stat().st_size // 1024} KB)", file=sys.stderr, flush=True)
+
+	return 0
+
+
+def create(name, with_tailwind=False):
 
 	folder = Path(name)
 
@@ -352,13 +453,15 @@ def create(name):
 
 	title = folder.resolve().name
 	settings = {"public": {"title": title}}
+	if with_tailwind:
+		settings["tailwind"] = True
 
 	files = {
 		"app.py": APP_TEMPLATE,
-		"pages/layout.py": LAYOUT_TEMPLATE,
+		"pages/layout.py": TAILWIND_LAYOUT_TEMPLATE if with_tailwind else LAYOUT_TEMPLATE,
 		"pages/index.py": INDEX_TEMPLATE,
 		"pages/index_test.py": INDEX_TEST_TEMPLATE,
-		"components/tasks.py": COMPONENT_TEMPLATE,
+		"components/tasks.py": TAILWIND_COMPONENT_TEMPLATE if with_tailwind else COMPONENT_TEMPLATE,
 		"data.py": DATA_TEMPLATE,
 		"settings.json": json.dumps(settings, indent=4) + "\n",
 		".gitignore": GITIGNORE_TEMPLATE,

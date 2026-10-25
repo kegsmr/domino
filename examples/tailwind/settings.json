@@ -1,0 +1,6 @@
+{
+    "tailwind": true,
+    "mongo": {
+        "auto": false
+    }
+}

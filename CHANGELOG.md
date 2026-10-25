@@ -16,6 +16,9 @@
 - `domino.mail`: SMTP, a console backend while debugging, and an outbox under pytest (`mail_outbox` fixture).
 - Password reset, email verification (`login_required(verified=True)`) and changing the password. The login and sign-up forms are built on `domino.forms`.
 
+### Styles
+- Tailwind CSS with zero setup: `{"tailwind": true}` (or a `tailwind.css` in the app's folder) and classes work anywhere. Tailwind's standalone CLI is downloaded once into `~/.domino/tailwind/`; `domino run` rebuilds as files change and open pages swap in the new CSS; `domino serve` builds it minified; `domino tailwind build` for Dockerfiles; `domino create --tailwind`.
+
 ### Speed
 - Over the WebSocket, updates are sent as line-diff patches against what the tab already has: a chat message to a 200-message list goes from 28 KB to 198 bytes. Large predicted states are patched too.
 - Hidden tabs pause: the server skips their updates until they're shown again.

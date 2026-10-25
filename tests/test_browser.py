@@ -1868,3 +1868,67 @@ def test_large_predicted_states_arrive_as_patches_and_show_at_once(serve_app, pa
 	assert page.locator("li.picked").count() == 1
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []
+
+
+@pytest.mark.parametrize("transport", ["wsgi", "asgi"])
+def test_tailwind_rebuilds_are_swapped_in_without_reloading(transport, page, tmp_path, monkeypatch, asgi_server):
+
+	import domino.tags as t
+	from domino import Domino, tailwind
+	from domino.components import Document
+	from test_tailwind import write_fake_cli
+
+	monkeypatch.setenv("DOMINO_HOME", str(tmp_path / "home"))
+	monkeypatch.setenv(tailwind.ENV_BIN, str(write_fake_cli(tmp_path)))
+	folder = tmp_path / "app"
+	folder.mkdir()
+	(folder / "settings.json").write_text('{"tailwind": true}')
+	(folder / "page.py").write_text('shown = "tw-red"')
+
+	app = Domino(__name__, root_path=str(folder), pages=False)
+	app.debug = True
+
+	@app.route("/")
+	def index():
+
+		# The second class isn't written out anywhere yet, so the CLI doesn't build it
+		return Document() [
+			t.p(id="a", class_="tw-red") ["built"],
+			t.p(id="b", class_="tw-" + "later") ["not yet"]
+		]
+
+	tailwind.watch(folder, app.tailwind)
+	opened = []
+	page.on("websocket", lambda ws: "/_domino/tailwind/watch" in ws.url and opened.append("websocket"))
+	page.on("request", lambda request: "/_domino/tailwind/watch" in request.url and opened.append("stream"))
+
+	if transport == "wsgi":
+		server = make_server("127.0.0.1", 0, app, threaded=True)
+		threading.Thread(target=server.serve_forever, daemon=True).start()
+		url = f"http://127.0.0.1:{server.server_port}/"
+	else:
+		url = asgi_server(app).url
+
+	color = "(selector) => getComputedStyle(document.querySelector(selector)).color"
+	try:
+		page.goto(url)
+		page.evaluate("window.notReloaded = true")
+		assert page.evaluate(color, "#a") == "rgb(255, 0, 0)"
+		assert page.evaluate(color, "#b") != "rgb(255, 0, 0)"
+		before = page.get_attribute("link[data-domino-tailwind]", "href")
+
+		# Writing the class out somewhere (here a template) rebuilds the CSS, and the page swaps it in
+		(folder / "later.html").write_text('<p class="tw-later"></p>')
+		page.wait_for_function("getComputedStyle(document.querySelector('#b')).color === 'rgb(255, 0, 0)'", timeout=10000)
+
+		assert page.evaluate("window.notReloaded") is True
+		assert page.locator("link[data-domino-tailwind]").count() == 1
+		assert page.get_attribute("link[data-domino-tailwind]", "href") != before
+		# Its own socket over ASGI (the server closes it at once when restarting), else a stream
+		assert opened[0] == ("websocket" if transport == "asgi" else "stream")
+		assert page.errors == []
+	finally:
+		page.close()
+		if transport == "wsgi":
+			server.shutdown()
+		tailwind.stop_all()
