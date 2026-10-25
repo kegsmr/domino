@@ -76,7 +76,8 @@ def test_todo_submit_clears_input_and_removal_keeps_checkboxes_right(serve, page
 
 	assert page.input_value("input[name=text]") == ""
 
-	page.locator("li input[type=checkbox]").nth(1).check()
+	# click, not check(): the box is reset as soon as the item is removed
+	page.locator("li input[type=checkbox]").nth(1).click()
 	page.wait_for_function("document.querySelectorAll('li').length === 2")
 
 	assert [text.strip() for text in page.locator("li").all_inner_texts()] == ["one", "three"]
