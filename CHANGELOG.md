@@ -39,6 +39,17 @@
 ### Experimental
 - Client components: `client = True` runs a component in the browser on MicroPython (or Pyodide), server-rendered first, working offline once loaded. See `docs/research/client-python.md`.
 
+### Security
+Fixes from a security review. Apps that deploy behind a proxy, use accounts or run in public should upgrade.
+- **MongoDB operator injection:** `event.form` values are now always strings (or lists of strings). A client could send `{"$ne": null}` and make `find_one({"email": event.form["email"]})` match any document.
+- **Password reset poisoning:** emails sent over SMTP outside debug mode need the `public_url` setting. Links used to be built from the request's Host header, which an attacker could forge. Reset tokens are also bound to the account's email, and email addresses can't hold characters that add recipients.
+- **Behind Fly's or Render's proxy,** every visitor had the proxy's address, so one person's wrong passwords locked everyone out. `fly.toml` and `render.yaml` now trust the platform's proxy (`FORWARDED_ALLOW_IPS`), and the router can't be tricked past that check. `fly.toml` sets `DOMINO_PUBLIC_URL`. `domino serve` warns when the app is in debug mode.
+- **A slow email check (ReDoS):** one sign-up with a crafted address could keep a server thread busy for hours. The check now runs in linear time.
+- **HTML injection** through attribute names and `<script>` text is no longer possible.
+- **A leaked page id** (it appears in `/_domino/ws` URLs, which access logs keep) no longer lets someone act as that page's user: events on a signed-in page also need that user's session. The session hand-off refuses cross-site claims (login CSRF).
+- **Limits** on event size (`max_event_mb`, default 1), WebSocket message queues and pending uploads (`max_pending_uploads_mb`, default 256).
+- **Security headers:** `X-Frame-Options: SAMEORIGIN` (against clickjacking; `{"domino": {"frame_options": false}}` turns it off), `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin`.
+
 ### Fixes
 - `<pre>` and `<textarea>` content is no longer indented by the renderer.
 
