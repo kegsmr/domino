@@ -82,6 +82,16 @@ class Batch:
 		self.skip_root = None
 
 
+	def affected_on(self, page):
+		"""The first component changed so far that's shown on `page`, if any."""
+
+		for component in self.pending:
+			if page in (component.__pages__ or ()):
+				return component
+
+		return None
+
+
 	def skip(self, page, root):
 		"""`root` was just rendered for `page` (e.g. an event response); don't push it there again."""
 
@@ -178,13 +188,51 @@ def schedule(component):
 
 
 class State:
-	"""A single reactive value. Read it with .value (or get()), change it with .value = x (or set())."""
+	"""A reactive value. Read it with .value (or get()), change it with .value = x (or set()).
+
+	As a class attribute of a component it's a value per component instance, read and set like
+	a plain attribute (self.count += 1), like React's useState:
+
+		class Counter(t.div):
+			count = State(0)
+	"""
 
 
 	def __init__(self, value=None):
 
 		self._value = value
 		self._dependency = Dependency()
+		self._name = None
+
+
+	def __set_name__(self, owner, name):
+
+		self._name = name
+
+
+	def __get__(self, instance, owner):
+
+		if instance is None:
+			return self
+
+		return self._of(instance).get()
+
+
+	def __set__(self, instance, value):
+
+		self._of(instance).set(value)
+
+
+	def _of(self, instance):
+		"""This attribute's State for one component; the class attribute holds the default."""
+
+		key = f"__state_{self._name}__"
+		state = instance.__dict__.get(key)
+		if state is None:
+			state = State(deepcopy(self._value))
+			instance.__dict__[key] = state
+
+		return state
 
 
 	def get(self):
@@ -196,7 +244,8 @@ class State:
 
 	def set(self, value):
 
-		if value == self._value:
+		# Lists, dicts and sets may have been changed in place, so always count as changed
+		if value == self._value and not isinstance(value, (list, dict, set)):
 			return
 
 		self._value = value

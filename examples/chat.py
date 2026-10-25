@@ -4,7 +4,7 @@ import time
 sys.path.append("")
 
 import domino.tags as t
-from domino import Collection, Domino
+from domino import Collection, Domino, State
 from domino.components import Document
 
 
@@ -18,19 +18,15 @@ messages = Collection("messages")
 
 class Chat(t.div):
 
-
-	def __init__(self, *args, **kwargs):
-
-		super().__init__(*args, **kwargs)
-
-		self.name = ""
+	# Remembered per window, so the form keeps the name after sending
+	name = State("")
 
 
 	def render(self):
 
 		recent = messages.find(sort=[("sent", -1)], limit=50).fetch()
 
-		self([
+		return [
 			t.ul(class_="messages")([
 				t.li() [
 					t.strong() [
@@ -40,21 +36,18 @@ class Chat(t.div):
 				]
 				for message in reversed(recent)
 			]),
-			form := t.form() [
+			t.form(on_submit=self.send) [
 				t.input(name="name", placeholder="Name", required=True, autocomplete="off", value=self.name),
 				t.input(name="text", placeholder="Message", required=True, autocomplete="off"),
 				t.button(type="submit") [
 					"Send"
 				]
 			]
-		])
-
-		form.bind("submit", self.send)
+		]
 
 
 	def send(self, event):
 
-		# Remembered per window, so the form keeps the name after sending
 		self.name = event.form.get("name", "").strip()[:30] or "anonymous"
 
 		messages.insert({
@@ -62,8 +55,6 @@ class Chat(t.div):
 			"text": event.form.get("text", "").strip()[:500],
 			"sent": time.time(),
 		})
-
-		return self
 
 
 @app.route("/")

@@ -30,9 +30,42 @@ Keyword arguments become HTML attributes; underscores turn into hyphens (`aria_l
 t.button(class_="btn btn-primary", aria_pressed="false", style={"font_weight": "bold"})
 ```
 
+## Components
+
+A component is a Python class: subclass a tag, keep state in `State` class attributes, and return its children from `render()`. Changing state re-renders the component, and only what changed is updated in the browser:
+
+```python
+from domino import Domino, State
+import domino.tags as t
+
+
+class Counter(t.div):
+
+	count = State(0)  # per component, like React's useState
+
+
+	def render(self):
+
+		return [
+			t.p() [f"Count: {self.count}"],
+			t.button(on_click=self.increment) ["+"],
+		]
+
+
+	def increment(self):
+
+		self.count += 1
+```
+
+- `on_<event>=handler` (`on_click`, `on_submit`, `on_input`, `on_change`, ...) runs `handler` on the server. Add `debounce=ms` to wait until the user pauses.
+- A handler that returns nothing re-renders whatever its changes affected (or the component it belongs to); returning a component re-renders that one.
+- `State` as a class attribute is per component instance; a `State` at module level is shared by everyone. Lists and dicts: assign a new value (`self.items = self.items + [x]`) or set them again after changing them in place.
+- `init(self)` runs once when the component is created, for setup that isn't state.
+- The older style, `self([...])` with `element.bind("click", callback)` and `return self`, still works.
+
 ## Events
 
-`element.bind("click", callback)` runs `callback` on the server and re-renders the component it returns. A callback that takes an argument receives an `Event`:
+`element.bind("click", callback)` (or `on_click=callback`) runs `callback` on the server. A callback that takes an argument receives an `Event`:
 
 - `event.type`: the DOM event name (`"click"`, `"submit"`, `"change"`, ...)
 - `event.value`: the element's value (`True`/`False` for checkboxes)

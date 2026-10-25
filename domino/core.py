@@ -323,6 +323,11 @@ class Domino(Flask):
 					else:
 						result = callback()
 
+					# A handler that returns nothing re-renders the component its changes
+					# affected on this page, or else the component it's a method of
+					if result is None:
+						result = changes.affected_on(page) or getattr(callback, "__self__", None)
+
 					if not isinstance(result, Element):
 						return jsonify({"id": None, "html": None})
 
@@ -593,6 +598,15 @@ class Element:
 
 
 	def configure(self, **kwargs):
+
+		# on_click=handler binds the event like bind("click", handler); debounce= applies to them
+		handlers = [key for key in kwargs if key.startswith("on_") and callable(kwargs[key])]
+		debounce = None
+		if handlers:
+			debounce = kwargs.pop("debounce", None)
+		for key in handlers:
+			self.bind(key[3:], kwargs.pop(key), debounce=debounce)
+
 		self.__attributes__.update(kwargs)
 		return self
 
@@ -694,9 +708,15 @@ class Element:
 			reactive.forget(self)
 			render_stack().append([self, 0])
 			try:
-				self.render()
+				children = self.render()
 			finally:
 				render_stack().pop()
+
+			# render() may return its children instead of calling self([...])
+			if children is not None and children is not self:
+				if not isinstance(children, (list, tuple)):
+					children = [children]
+				self.set_children(list(children))
 
 			if page is not DEFAULT_PAGE and self.is_live():
 				page.live = True

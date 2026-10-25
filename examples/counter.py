@@ -3,7 +3,7 @@ import sys
 sys.path.append("")
 
 import domino.tags as t
-from domino import Domino
+from domino import Domino, State
 from domino.components import Document
 
 
@@ -12,44 +12,33 @@ app = Domino(__name__)
 
 class CounterComponent(t.div):
 
-
-	def __init__(self, *args, **kwargs):
-
-		super().__init__(*args, **kwargs)
-
-		self.count = 0
+	# Per-component state; changing it re-renders the component
+	count = State(0)
 
 
 	def render(self):
 
-		self([
+		return [
 			t.p() [
 				f"Current Count: {self.count}"
 			],
-			increment_button := t.button() [
+			t.button(on_click=self.increment) [
 				"Increment"
 			],
-			decrement_button := t.button() [
+			t.button(on_click=self.decrement) [
 				"Decrement"
 			]
-		])
-
-		increment_button.bind("click", self.increment)
-		decrement_button.bind("click", self.decrement)
+		]
 
 
 	def increment(self):
 
 		self.count += 1
 
-		return self
 
-	
 	def decrement(self):
 
 		self.count -= 1
-
-		return self
 
 
 @app.route("/")

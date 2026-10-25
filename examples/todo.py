@@ -3,7 +3,7 @@ import sys
 sys.path.append("")
 
 import domino.tags as t
-from domino import Domino
+from domino import Domino, State
 from domino.components import Document
 
 
@@ -12,42 +12,28 @@ app = Domino(__name__)
 
 class TodoList(t.div):
 
-
-	def __init__(self, *args, **kwargs):
-
-		super().__init__(*args, **kwargs)
-
-		self.items = []
+	items = State([])
 
 
 	def render(self):
 
-		self([
-			form := t.form() [
+		return [
+			t.form(on_submit=self.add) [
 				t.input(name="text", placeholder="What needs doing?", autocomplete="off"),
 				t.button(type="submit") [
 					"Add"
 				]
 			],
 			t.ul()([
-				self.item(index, text) for index, text in enumerate(self.items)
+				t.li() [
+					t.input(type="checkbox", on_change=lambda event, index=index: self.remove(index)),
+					f" {text}"
+				]
+				for index, text in enumerate(self.items)
 			]),
 			t.p() [
 				f"{len(self.items)} item(s)"
 			]
-		])
-
-		form.bind("submit", self.add)
-
-
-	def item(self, index, text):
-
-		done = t.input(type="checkbox")
-		done.bind("change", lambda event: self.remove(index))
-
-		return t.li() [
-			done,
-			f" {text}"
 		]
 
 
@@ -55,16 +41,12 @@ class TodoList(t.div):
 
 		text = event.form.get("text", "").strip()
 		if text:
-			self.items.append(text)
-
-		return self
+			self.items = self.items + [text]
 
 
 	def remove(self, index):
 
-		del self.items[index]
-
-		return self
+		self.items = self.items[:index] + self.items[index + 1:]
 
 
 @app.route("/")

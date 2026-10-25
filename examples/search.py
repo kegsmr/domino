@@ -3,7 +3,7 @@ import sys
 sys.path.append("")
 
 import domino.tags as t
-from domino import Domino
+from domino import Domino, State
 from domino.components import Document
 
 
@@ -21,13 +21,8 @@ LANGUAGES = [
 
 class Search(t.div):
 
-
-	def __init__(self, *args, **kwargs):
-
-		super().__init__(*args, **kwargs)
-
-		self.query = ""
-		self.requests = 0
+	query = State("")
+	requests = State(0)
 
 
 	def render(self):
@@ -35,9 +30,10 @@ class Search(t.div):
 		matches = [name for name in LANGUAGES if self.query.lower() in name.lower()]
 
 		# The input is part of this component, yet it keeps focus, caret and anything
-		# typed since the request was sent, because updates are patched in place
-		self([
-			box := t.input(type="search", placeholder="Search languages", value=self.query, autofocus=True),
+		# typed since the request was sent, because updates are patched in place.
+		# debounce: only send once the user pauses for 250 ms
+		return [
+			t.input(type="search", placeholder="Search languages", value=self.query, autofocus=True, on_input=self.search, debounce=250),
 			t.p() [
 				f"{len(matches)} match(es), {self.requests} request(s) sent"
 			],
@@ -47,18 +43,13 @@ class Search(t.div):
 				]
 				for name in matches
 			])
-		])
-
-		# Only sends once the user pauses for 250 ms
-		box.bind("input", self.search, debounce=250)
+		]
 
 
 	def search(self, event):
 
 		self.query = event.value or ""
 		self.requests += 1
-
-		return self
 
 
 @app.route("/")

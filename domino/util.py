@@ -18,7 +18,8 @@ def get_class_attributes(obj):
         cached = {}
         for base in reversed(cls.__mro__):  # Iterate over base classes (from top to bottom)
             for k, v in base.__dict__.items():
-                if not k.startswith("__") and not callable(v):  # Exclude dunder & methods
+                # Exclude dunders, methods and descriptors (properties, State attributes)
+                if not k.startswith("__") and not callable(v) and not hasattr(type(v), "__get__"):
                     cached[k] = v  # Overwrite if a subclass redefines the attribute
         _class_attributes[cls] = cached
 
