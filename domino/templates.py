@@ -570,7 +570,7 @@ SKIPPED_FOLDERS = ("node_modules", "static", "__pycache__", "site-packages")
 
 # A file that starts (after comments and an optional {# domino #}) with a capitalized tag defines
 # components; see domino.dtemplates
-DEFINITION_START = re.compile(r"\A(?:\s|<!--.*?-->|\{#\s*domino\s*#\})*<[A-Z]", re.S)
+DEFINITION_START = re.compile(r"\A(?:\s|<!--.*?-->|\{#\s*domino\s*#\})*<(?:component|layout)\b", re.S)
 
 
 class TemplateFinder(BaseLoader):

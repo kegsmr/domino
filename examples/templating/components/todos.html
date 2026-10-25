@@ -1,11 +1,11 @@
-<!-- One file can define several components: each top-level tag is the markup of the class of that name -->
+<!-- One file can define several components: each <component> is the markup of the class of that name -->
 
-<TodoForm class="todo-form" on-submit="submit">
+<component name="TodoForm" class="todo-form" on-submit="submit">
 	<input name="text" placeholder="What needs doing?" autocomplete="off" required>
 	<button type="submit">Add</button>
-</TodoForm>
+</component>
 
-<TodoList>
+<component name="TodoList">
 	<ul>
 		{{ for index, item in enumerate(items) }}
 		<li class="{{ item_class(item) }}">
@@ -16,8 +16,8 @@
 		{{ /for }}
 	</ul>
 	<p class="hint">{{ remaining }} left.</p>
-</TodoList>
+</component>
 
-<EmptyState class="hint">
+<component name="EmptyState" class="hint">
 	<p>Nothing to do. Add something above!</p>
-</EmptyState>
+</component>

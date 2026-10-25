@@ -171,9 +171,9 @@ def find_template_pages(folder):
 			continue
 		if path.name == "layout.html":
 			raise PagesError(
-				f"{path.relative_to(folder).as_posix()}: layouts are components that pages name. Move it to "
-				"layouts/layout.html, wrap its markup in <Layout>...</Layout> (with <slot /> where the page "
-				"goes), and wrap each page in <Layout>...</Layout>"
+				f"{path.relative_to(folder).as_posix()}: layouts are files of their own that pages name. Move it "
+				"to layouts/main.html as <layout name=\"Main\">...</layout> (with <slot /> where the page goes), "
+				"and put pages in it with <page layout=\"Main\">...</page>"
 			)
 		# about.html next to about.py is the markup of about.py's components
 		if path.with_suffix(".py").exists():

@@ -490,8 +490,8 @@ def test_domino_create_makes_a_pages_app(tmp_path):
 	app = make_app(tmp_path / "new", {})
 
 	assert "/" in {rule.rule for rule in app.url_map.iter_rules()}
-	assert "<slot />" in (tmp_path / "new" / "layouts" / "layout.html").read_text()
-	assert "<Layout" in (tmp_path / "new" / "pages" / "index.html").read_text()
+	assert "<slot />" in (tmp_path / "new" / "layouts" / "main.html").read_text()
+	assert "<page layout=\"Main\"" in (tmp_path / "new" / "pages" / "index.html").read_text()
 	assert "from data import tasks" in (tmp_path / "new" / "components" / "tasks.py").read_text()
 	assert len((tmp_path / "new" / "app.py").read_text().splitlines()) < 12
 	assert os.path.exists(tmp_path / "new" / "data.py")

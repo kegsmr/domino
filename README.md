@@ -41,7 +41,7 @@ myapp/
     404.py               the page for URLs no page serves
     _helpers.py          not a page: names starting with _ are private
   layouts/
-    layout.html          <Layout>: the document pages wrap themselves in
+    main.html            <layout name="Main">: the document pages go in
   components/            components the pages use
   data.py                Collections the pages import
   settings.json
@@ -88,11 +88,11 @@ class Page(t.div):
 		self.count += 1
 ```
 
-A layout is the document and navigation pages share. It's a [component](#templates) like any other, by convention in `layouts/`, whose markup is a whole `<html>` document with `<slot />` where the page goes. A page wraps itself in it, so each page says which layout it's in and can pass it values:
+A layout is the document and navigation pages share. It's a file of its own, by convention in `layouts/`: `<layout name="Main">` around a whole `<html>` document, with `<slot />` where the page goes. A page names its layout, and its other attributes are the layout's values:
 
 ```html
-<!-- layouts/layout.html -->
-<Layout>
+<!-- layouts/main.html -->
+<layout name="Main">
 	<html lang="en">
 		<head>
 			<title>{{ title }} · My site</title>
@@ -105,21 +105,21 @@ A layout is the document and navigation pages share. It's a [component](#templat
 			<main><slot /></main>
 		</body>
 	</html>
-</Layout>
+</layout>
 ```
 
 ```html
 <!-- pages/about.html -->
-<Layout title="About">
+<page layout="Main" title="About">
 	<h1>About</h1>
 	<p>...</p>
-</Layout>
+</page>
 ```
 
-- A page in a layout is the whole document: Domino adds the doctype, its script and the components' CSS.
-- A layout needs no Python class. What a page gives it (`title="About"`) are its values, and a value it isn't given shows nothing. A class (`layouts/layout.py`, `class Layout(t.div)`) adds what any component has: helpers (the signed-in user for the nav), `State` and handlers (a menu that opens), live data. Its handlers are answered by the server rather than predicted.
-- Several layouts are several components: `<AdminLayout>` in `layouts/admin.html`, say. A component inside a layout, like a sidebar, goes in its markup as usual.
-- From Python, a page returns it like any component: `return Layout(title="About") [Article()]`.
+- A page in a layout is the whole document: Domino adds the doctype, its script and the components' CSS. `<page>` without `layout=` is just its markup (or a whole document of its own, with `<html>`).
+- A layout needs no Python class. What a page gives it (`title="About"`) are its values, and a value it isn't given shows nothing. A class with the layout's name (`layouts/main.py`, `class Main(t.div)`) adds what any component has: helpers (the signed-in user for the nav), `State` and handlers (a menu that opens), live data. Its handlers are answered by the server rather than predicted.
+- Layouts nest: `<layout name="Admin" layout="Main">` goes inside Main (given the same values), so `<page layout="Admin">` gets the site's document with an admin frame around the page.
+- From Python, a page returns it like any component: `return Main(title="About") [Article()]`.
 - Links between pages keep the layout's elements as they are (see [Moving between pages](#moving-between-pages)), and saving it updates open pages.
 - `pages/layout.html` (which wrapped a folder's pages automatically in development versions) stops the app with a message saying how to move it.
 
@@ -169,7 +169,7 @@ cd myapp
 domino run
 ```
 
-`domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, the page `pages/index.html` in the layout `layouts/layout.html`, components in `components/` (their logic in `tasks.py`, their markup in `tasks.html`, see [Templates](#templates)), a `Collection` in `data.py`, a test for the page in `pages/index_test.py` (run it with `pytest`; see [Testing your app](#testing-your-app)), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
+`domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, the page `pages/index.html` in the layout `layouts/main.html`, components in `components/` (their logic in `tasks.py`, their markup in `tasks.html`, see [Templates](#templates)), a `Collection` in `data.py`, a test for the page in `pages/index_test.py` (run it with `pytest`; see [Testing your app](#testing-your-app)), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
 
 `domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode, with [hot reloading](#hot-reloading): saving a file in the app's folder updates the open pages in place. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `--port 0` picks a free port. `domino --version` prints the version.
 
@@ -404,7 +404,7 @@ Domino templates are plain HTML with three additions: components are capitalized
 
 ```html
 <!-- components/todos.html -->
-<TodoList class="todos">
+<component name="TodoList" class="todos">
 	<ul>
 		{{ for index, item in enumerate(items) }}
 		<li class="{{ item_class(item) }}">
@@ -422,7 +422,7 @@ Domino templates are plain HTML with three additions: components are capitalized
 	<p>All done.</p>
 	{{ /if }}
 	<Card heading="Tips"><p>Click an item to finish it.</p></Card>
-</TodoList>
+</component>
 ```
 
 ```python
@@ -452,13 +452,13 @@ class TodoList(t.div):
 		self.items = self.items[:index] + self.items[index + 1:]
 ```
 
-**Defining a component.** A capitalized tag at the top level of an `.html` file defines the component of that class: `<TodoList>...</TodoList>` holds `TodoList`'s markup (the class still makes the outer element, here a `<div>`). Attributes on the defining tag go on that element, after what the Python side sets (`class` adds up, other attributes the Python side set win); `as="aside"` makes the element an `<aside>` instead (a class that sets its own `tag` must agree). A file can define several components, Meteor-style, and holds nothing but definitions.
+**Defining a component.** `<component name="TodoList">...</component>` holds the markup of the component of that class (the class still makes the outer element, here a `<div>`). Every file says what it holds: `<component>` definitions, a `<layout>` or a `<page>`; lowercase tags define, capitalized tags use. Attributes on `<component>` go on the component's element, after what the Python side sets (`class` adds up, other attributes the Python side set win); `as="aside"` makes the element an `<aside>` instead (a class that sets its own `tag` must agree). A file can define several components, Meteor-style, and holds nothing but definitions.
 
-**Where they go.** Put them anywhere in the app; by convention next to the module, with the same name (`todos.py` and `todos.html`). Domino reads every `.html` file of the app's folder at startup (skipping hidden folders, `node_modules`, `site-packages` and `static/`, and pages and Jinja templates, whose top level isn't a definition) and finds each component's definition by its class name. Two definitions of one name stop the app at startup, naming both files, unless two classes of that name in different modules each have theirs next to their module, which then wins. A definition no class is named after is a warning. A class with a `render()` uses that instead.
+**Where they go.** Put them anywhere in the app; by convention next to the module, with the same name (`todos.py` and `todos.html`). Domino reads every `.html` file of the app's folder at startup (skipping hidden folders, `node_modules`, `site-packages` and `static/`, and pages and Jinja templates) and finds each component's definition by its name. Two definitions of one name stop the app at startup, naming both files, unless two classes of that name in different modules each have theirs next to their module, which then wins. A definition no class is named after is a warning. A class with a `render()` uses that instead.
 
-**Using components.** Anywhere else, a capitalized tag shows a component: `<Counter />`, or `<Card heading="Tips">children</Card>`. They're live like any other: events, `State`, re-renders and instant updates work. Classes are found by name: in the module of the component whose template it is (or, for `template()`, its context and the calling module), then among the app's component classes; one not imported yet is imported from the module next to a file that defines components (or `components/<snake_case name>.py`). An unknown name is an error with the closest names.
+**Using components.** A capitalized tag shows a component: `<Counter />`, or `<Card heading="Tips">children</Card>`. They're live like any other: events, `State`, re-renders and instant updates work. Classes are found by name: in the module of the component whose template it is (or, for `template()`, its context and the calling module), then among the app's component classes; one not imported yet is imported from the module next to a file that defines components (or `components/<snake_case name>.py`). An unknown name is an error with the closest names.
 
-- Attributes become what the component declares: a `State` (its starting value), a property with a setter, or a class attribute (`heading = ""`). Plain attributes are strings; `:items="visible"` passes a value. Other attributes (`class`, `id`, `aria-*`, ...) go on its element, as in Python.
+- Attributes become what the component declares: a `State` (its starting value), a property with a setter, or a class attribute (`heading = ""`). Plain attributes are strings; `items="{{ visible }}"` passes the value itself. Other attributes (`class`, `id`, `aria-*`, ...) go on its element, as in Python.
 - `on-add="add"` passes a handler: if the component declares `on_add = None`, the handler is its prop, which it calls itself (`self.on_add(text)`), and the event then re-renders the parent; otherwise it's a DOM event on the component's element.
 - What's between `<Card>` and `</Card>` goes where Card's template has `<slot />` (`<slot>fallback</slot>` shows its own content when there's none). Python composition works the same way: `Card(heading="Tips") [t.p() ["..."]]`.
 
@@ -475,13 +475,13 @@ class TodoList(t.div):
 
 **Whitespace** is kept as written: nothing is added around inline elements (`<a>Domino</a>.` has no space before the dot), and a block's own lines leave nothing behind, so each item is on a line of its own and a hidden element leaves no empty line.
 
-**Pages and layouts.** An `.html` file in `pages/` without a `.py` of the same name is a page: `pages/about.html` is `/about`, with the URL's parameters as its values (`pages/users/[name].html` reads `{{ name }}`). A capitalized tag at a page's top level uses that component: `<Layout title="About">...</Layout>` puts the page in the layout (see [Pages](#pages)). A component whose markup is a whole `<html>` document, like a layout, makes the page that uses it a whole document. A page with `<html>`, or `<head>` and `<body>` without `<html>` (like Meteor's `index.html`), is a whole document itself, used without layouts. Domino adds the doctype, its script and the components' CSS to documents. `template("home.html", title="Home")` renders any template from Python.
+**Pages and layouts.** An `.html` file in `pages/` without a `.py` of the same name is a page: `pages/about.html` is `/about`, with the URL's parameters as its values (`pages/users/[name].html` reads `{{ name }}`). Its markup is inside `<page>...</page>`, and `<page layout="Main" title="About">` puts it in a layout (see [Pages](#pages)). A page with `<html>`, or `<head>` and `<body>` without `<html>` (like Meteor's `index.html`), is a whole document itself, used without layouts. Domino adds the doctype, its script and the components' CSS to documents. `template("home.html", title="Home")` renders any template from Python.
 
 **Compiled once.** Each file is parsed once into static HTML strings and the few dynamic parts, so rendering a template does little more than join strings (about as fast as Jinja, faster than tag classes); while debugging, a file that changed is parsed again, and hot reloading updates open pages.
 
 ### Jinja or Domino?
 
-Jinja stays available, for pages and existing templates. A file is Jinja when it starts with `{# jinja #}`, ends in `.jinja`, or uses anything only Jinja has (`{% %}`, `{# #}`, filters, operators, `{{ }}` inside an attribute, Jinja's globals such as `url_for`, `component`, `on`); `{"templates": "jinja"}` in the settings reads every page template as Jinja, and `{# domino #}` at the top marks a Domino one. Files that define components (a capitalized tag at the top level) are always Domino templates.
+Jinja stays available, for pages and existing templates. A file is Jinja when it starts with `{# jinja #}`, ends in `.jinja`, or uses anything only Jinja has (`{% %}`, `{# #}`, filters, operators, Jinja's globals such as `url_for`, `component`, `on`); `{"templates": "jinja"}` in the settings reads every page template as Jinja, and `{# domino #}` at the top marks a Domino one. Files of `<component>`, `<layout>` or `<page>` are always Domino templates.
 
 ### Template strings (Python 3.14)
 

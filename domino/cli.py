@@ -29,9 +29,9 @@ if __name__ == "__main__":
 
 # "{title}" is replaced with the app's name
 LAYOUT_TEMPLATE = '''\
-<!-- The layout: a component pages wrap themselves in (<Layout title="...">...</Layout>). The page
-     goes where <slot /> is; Domino adds the doctype, its script and the components' CSS -->
-<Layout>
+<!-- The layout pages go in (<page layout="Main" title="...">): the page goes where <slot /> is.
+     Domino adds the doctype, its script and the components' CSS -->
+<layout name="Main">
 	<html lang="en">
 		<head>
 			<meta charset="utf-8">
@@ -43,14 +43,14 @@ LAYOUT_TEMPLATE = '''\
 			<slot />
 		</body>
 	</html>
-</Layout>
+</layout>
 '''
 
 INDEX_TEMPLATE = '''\
-<!-- The page at /, inside the layout (layouts/layout.html) -->
-<Layout title="Tasks">
+<!-- The page at /, in the layout called Main (layouts/main.html) -->
+<page layout="Main" title="Tasks">
 	<Tasks />
-</Layout>
+</page>
 '''
 
 COMPONENT_TEMPLATE = '''\
@@ -105,22 +105,22 @@ class NoTasks(t.p):
 '''
 
 COMPONENT_HTML_TEMPLATE = '''\
-<!-- The markup of the components in tasks.py: each top-level tag is the class of that name -->
+<!-- The markup of the components in tasks.py: each <component> is the class of that name -->
 
-<TaskForm on-submit="submit">
+<component name="TaskForm" on-submit="submit">
 	<input name="text" placeholder="What needs doing?" required autocomplete="off">
 	<button type="submit">Add</button>
-</TaskForm>
+</component>
 
-<TaskList>
+<component name="TaskList">
 	<ul>
 		{{ for task in tasks }}
 		<li>{{ task.text }}</li>
 		{{ /for }}
 	</ul>
-</TaskList>
+</component>
 
-<NoTasks>Nothing to do yet.</NoTasks>
+<component name="NoTasks">Nothing to do yet.</component>
 '''
 
 DATA_TEMPLATE = '''\
@@ -158,10 +158,10 @@ def test_other_tabs_see_it(page, open_page):
 
 # `domino create --tailwind`: the same app, styled with Tailwind CSS classes
 TAILWIND_LAYOUT_TEMPLATE = '''\
-<!-- The layout: a component pages wrap themselves in (<Layout title="...">...</Layout>). The page
-     goes where <slot /> is. Tailwind CSS classes work anywhere ("tailwind": true in settings.json),
-     built into the CSS every page links -->
-<Layout>
+<!-- The layout pages go in (<page layout="Main" title="...">): the page goes where <slot /> is.
+     Tailwind CSS classes work anywhere ("tailwind": true in settings.json), built into the CSS every
+     page links -->
+<layout name="Main">
 	<html lang="en">
 		<head>
 			<meta charset="utf-8">
@@ -175,28 +175,28 @@ TAILWIND_LAYOUT_TEMPLATE = '''\
 			</main>
 		</body>
 	</html>
-</Layout>
+</layout>
 '''
 
 # The Python side is the same (components/tasks.py); the markup has Tailwind classes
 TAILWIND_COMPONENT_HTML_TEMPLATE = '''\
-<!-- The markup of the components in tasks.py: each top-level tag is the class of that name -->
+<!-- The markup of the components in tasks.py: each <component> is the class of that name -->
 
-<TaskForm class="flex gap-2" on-submit="submit">
+<component name="TaskForm" class="flex gap-2" on-submit="submit">
 	<input name="text" placeholder="What needs doing?" required autocomplete="off"
 		class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
 	<button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Add</button>
-</TaskForm>
+</component>
 
-<TaskList>
+<component name="TaskList">
 	<ul class="mt-4 space-y-2">
 		{{ for task in tasks }}
 		<li class="rounded-lg bg-white px-3 py-2 shadow-sm dark:bg-slate-900">{{ task.text }}</li>
 		{{ /for }}
 	</ul>
-</TaskList>
+</component>
 
-<NoTasks class="mt-4 text-slate-500">Nothing to do yet.</NoTasks>
+<component name="NoTasks" class="mt-4 text-slate-500">Nothing to do yet.</component>
 '''
 
 GITIGNORE_TEMPLATE = '''\
@@ -471,7 +471,7 @@ def create(name, with_tailwind=False):
 
 	files = {
 		"app.py": APP_TEMPLATE,
-		"layouts/layout.html": (TAILWIND_LAYOUT_TEMPLATE if with_tailwind else LAYOUT_TEMPLATE).replace("{title}", html.escape(title)),
+		"layouts/main.html": (TAILWIND_LAYOUT_TEMPLATE if with_tailwind else LAYOUT_TEMPLATE).replace("{title}", html.escape(title)),
 		"pages/index.html": INDEX_TEMPLATE,
 		"pages/index_test.py": INDEX_TEST_TEMPLATE,
 		"components/tasks.py": COMPONENT_TEMPLATE,

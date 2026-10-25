@@ -98,7 +98,7 @@ def inner(html, selector):
 def test_markup_is_kept_as_written(tmp_path):
 
 	module = component(tmp_path, "class Widget(t.div):\n\tpass\n", """
-		<Widget>
+		<component name="Widget">
 			<!-- a comment, left out -->
 			<p class=lead data-x='1' hidden>Tom &amp; Jerry &lt;3</p>
 			<img src="a.png" alt=""><br/><input disabled>
@@ -107,7 +107,7 @@ def test_markup_is_kept_as_written(tmp_path):
 			</pre>
 			<svg viewBox="0 0 1 1"><linearGradient id="g"></linearGradient></svg>
 			<div />
-		</Widget>
+		</component>
 	""")
 	html = inner(html_of(serve(tmp_path, module.Widget)), "Widget")
 
@@ -121,7 +121,7 @@ def test_markup_is_kept_as_written(tmp_path):
 
 def test_no_spaces_are_added_around_inline_elements(tmp_path):
 
-	module = component(tmp_path, "class Note(t.p):\n\tname = 'Domino'\n", "<Note>Made with <a href=\"/\">{{ name }}</a>.</Note>")
+	module = component(tmp_path, "class Note(t.p):\n\tname = 'Domino'\n", "<component name=\"Note\">Made with <a href=\"/\">{{ name }}</a>.</component>")
 
 	html = html_of(serve(tmp_path, module.Note))
 
@@ -153,22 +153,22 @@ def test_a_page_template_keeps_its_doctype_and_entities(tmp_path):
 	("<W>\n  <ul>\n</W>", "</W> doesn't close <ul> from line 2, column 3"),
 	("<W><li>", "<li> is never closed"),
 	("<W></br></W>", "<br> is a void element"),
-	("<W><p :class=\"kind\">x</p></W>", "write class=\"{{ kind }}\""),
-	("<W><p class=\"a {{ if x }}b\">x</p></W>", "never closed with {{ /if }}"),
-	("<W><p class=\"{{ for x in xs }}{{ x }}{{ /for }}\">x</p></W>", "a helper can build the value"),
-	("<W>{{ a + b }}</W>", "unexpected '+'"),
-	("<W>{{ x</W>", "{{ is never closed"),
-	("<W><p if=\"x\">x</p></W>", "wrap them in {{ if x }}"),
-	("<W>{{ for items }}<p>x</p>{{ /for }}</W>", "name the item: {{ for item in items }}"),
+	("<component name=\"W\"><p :class=\"kind\">x</p></component>", "write class=\"{{ kind }}\""),
+	("<component name=\"W\"><p class=\"a {{ if x }}b\">x</p></component>", "never closed with {{ /if }}"),
+	("<component name=\"W\"><p class=\"{{ for x in xs }}{{ x }}{{ /for }}\">x</p></component>", "a helper can build the value"),
+	("<component name=\"W\">{{ a + b }}</component>", "unexpected '+'"),
+	("<component name=\"W\">{{ x</component>", "{{ is never closed"),
+	("<component name=\"W\"><p if=\"x\">x</p></component>", "wrap them in {{ if x }}"),
+	("<component name=\"W\">{{ for items }}<p>x</p>{{ /for }}</component>", "name the item: {{ for item in items }}"),
 	("<p>a</p>\n{{ if x }}\n<p>x</p>", "{{ if }} is never closed; add {{ /if }}"),
-	("<W>{{ if x }}<p>x{{ /if }}</p></W>", "a block wraps whole elements"),
-	("<W><p>{{ if x }}x</p>{{ /if }}</W>", "end it inside the element it starts in"),
-	("<W>{{ for x in xs }}<p>x</p>{{ /if }}</W>", "{{ /if }} doesn't close {{ for }}"),
-	("<W>{{ /for }}</W>", "{{ /for }} closes nothing"),
-	("<W>{{ else }}</W>", "{{ else }} goes inside"),
-	("<W>{{ for x in xs }}x{{ elif y }}y{{ /for }}</W>", "not {{ elif }}"),
-	("<W>{{ if x }}x{{ else }}y{{ else }}z{{ /if }}</W>", "already has an {{ else }}"),
-	("<W><p on-click>x</p></W>", "an event needs a handler"),
+	("<component name=\"W\">{{ if x }}<p>x{{ /if }}</p></component>", "a block wraps whole elements"),
+	("<component name=\"W\"><p>{{ if x }}x</p>{{ /if }}</component>", "end it inside the element it starts in"),
+	("<component name=\"W\">{{ for x in xs }}<p>x</p>{{ /if }}</component>", "{{ /if }} doesn't close {{ for }}"),
+	("<component name=\"W\">{{ /for }}</component>", "{{ /for }} closes nothing"),
+	("<component name=\"W\">{{ else }}</component>", "{{ else }} goes inside"),
+	("<component name=\"W\">{{ for x in xs }}x{{ elif y }}y{{ /for }}</component>", "not {{ elif }}"),
+	("<component name=\"W\">{{ if x }}x{{ else }}y{{ else }}z{{ /if }}</component>", "already has an {{ else }}"),
+	("<component name=\"W\"><p on-click>x</p></component>", "an event needs a handler"),
 ])
 def test_syntax_errors_say_where(tmp_path, source, message):
 
@@ -209,7 +209,7 @@ class Widget(t.div):
 def test_values_from_state_properties_attributes_and_helpers(tmp_path):
 
 	module = component(tmp_path, "from markupsafe import Markup\n" + WIDGET, """
-		<Widget>{{ count }}|{{ double }}|{{ label }}|{{ safe }}|{{ nothing }}|{{ greeting }}|{{ user.name }}|{{ user["name"] }}|{{ user.tags[1] }}|{{ user.missing }}|{{ plus(count, 2) }}|{{ plus("a", 'b') }}|{{ not nothing }}</Widget>
+		<component name="Widget">{{ count }}|{{ double }}|{{ label }}|{{ safe }}|{{ nothing }}|{{ greeting }}|{{ user.name }}|{{ user["name"] }}|{{ user.tags[1] }}|{{ user.missing }}|{{ plus(count, 2) }}|{{ plus("a", 'b') }}|{{ not nothing }}</component>
 	""")
 	html = inner(html_of(serve(tmp_path, module.Widget)), "Widget")
 
@@ -218,7 +218,7 @@ def test_values_from_state_properties_attributes_and_helpers(tmp_path):
 
 def test_an_unknown_name_says_where_and_suggests(tmp_path):
 
-	module = component(tmp_path, WIDGET.replace("class Widget", "from markupsafe import Markup\n\n\nclass Widget"), "<Widget>\n\t<p>{{ cuont }}</p>\n</Widget>")
+	module = component(tmp_path, WIDGET.replace("class Widget", "from markupsafe import Markup\n\n\nclass Widget"), "<component name=\"Widget\">\n\t<p>{{ cuont }}</p>\n</component>")
 	app = serve(tmp_path, module.Widget)
 
 	with pytest.raises(TemplateError) as error:
@@ -231,7 +231,7 @@ def test_an_unknown_name_says_where_and_suggests(tmp_path):
 
 def test_an_unknown_attribute_of_an_object_is_an_error(tmp_path):
 
-	module = component(tmp_path, "class Widget(t.div):\n\tpoint = 1j\n", "<Widget>{{ point.imagx }}</Widget>")
+	module = component(tmp_path, "class Widget(t.div):\n\tpoint = 1j\n", "<component name=\"Widget\">{{ point.imagx }}</component>")
 
 	with pytest.raises(TemplateError, match=r"complex has no attribute 'imagx'.*Did you mean 'imag'"):
 		serve(tmp_path, module.Widget).test_page("/")
@@ -240,7 +240,7 @@ def test_an_unknown_attribute_of_an_object_is_an_error(tmp_path):
 def test_values_in_script_style_and_textarea(tmp_path):
 
 	module = component(tmp_path, "class Widget(t.div):\n\tdata = {'a': '</script>'}\n\tcolor = 'red'\n\ttext = '<x>'\n", """
-		<Widget><script>const data = {{ data }};</script><style>p { color: {{ color }}; }</style><textarea>{{ text }}</textarea></Widget>
+		<component name="Widget"><script>const data = {{ data }};</script><style>p { color: {{ color }}; }</style><textarea>{{ text }}</textarea></component>
 	""")
 	html = inner(html_of(serve(tmp_path, module.Widget)), "Widget")
 
@@ -267,7 +267,7 @@ def test_each_if_elif_else(tmp_path):
 			def is_two(self):
 				return self.mode == "two"
 	""", """
-		<Widget>
+		<component name="Widget">
 			<ul>
 				{{ for item in items }}
 				<li>{{ item }}</li>
@@ -297,7 +297,7 @@ def test_each_if_elif_else(tmp_path):
 			{{ if not items }}
 			<p>empty</p>
 			{{ /if }}
-		</Widget>
+		</component>
 	""")
 	widget = module.Widget()
 	app = serve(tmp_path, lambda: widget)
@@ -325,7 +325,7 @@ def test_an_if_inside_a_for_filters(tmp_path):
 	module = component(tmp_path, """
 		class Widget(t.ul):
 			items = [{"text": "a", "done": True}, {"text": "b", "done": False}]
-	""", '<Widget>{{ for item in items }}{{ if item.done }}<li>{{ item.text }}</li>{{ /if }}{{ /for }}</Widget>')
+	""", '<component name="Widget">{{ for item in items }}{{ if item.done }}<li>{{ item.text }}</li>{{ /if }}{{ /for }}</component>')
 
 	assert inner(html_of(serve(tmp_path, module.Widget)), "Widget") == "<li>a</li>"
 
@@ -345,7 +345,7 @@ def test_values_in_attributes(tmp_path):
 			class_list = ["x", None, "y"]
 			styles = {"font_weight": "bold", "color": None}
 	""", """
-		<Widget><input disabled="{{ yes }}" hidden="{{ no }}" title="{{ none }}" value="{{ number }}" placeholder="{{ text }}"><p class="base {{ classes }}">1</p><p class="{{ class_list }}">2</p><p class="{{ text }}">3</p><p style="color: red; {{ styles }}">4</p><p class="{{ none }}">5</p><a href="/items/{{ number }}?q={{ text }}" class="item {{ if yes }}on{{ elif no }}never{{ else }}off{{ /if }}">6</a><b aria-pressed="{{ yes }}" aria-hidden="{{ no }}" data-on="{{ yes }}">7</b></Widget>
+		<component name="Widget"><input disabled="{{ yes }}" hidden="{{ no }}" title="{{ none }}" value="{{ number }}" placeholder="{{ text }}"><p class="base {{ classes }}">1</p><p class="{{ class_list }}">2</p><p class="{{ text }}">3</p><p style="color: red; {{ styles }}">4</p><p class="{{ none }}">5</p><a href="/items/{{ number }}?q={{ text }}" class="item {{ if yes }}on{{ elif no }}never{{ else }}off{{ /if }}">6</a><b aria-pressed="{{ yes }}" aria-hidden="{{ no }}" data-on="{{ yes }}">7</b></component>
 	""")
 	html = inner(html_of(serve(tmp_path, module.Widget)), "Widget")
 
@@ -378,7 +378,7 @@ class Widget(t.div):
 """
 
 LIST_HTML = """
-<Widget>
+<component name="Widget">
 	<ul>
 		{{ for index, item in enumerate(items) }}
 		<li>{{ item }} <button on-click="remove(index)">x</button></li>
@@ -387,7 +387,7 @@ LIST_HTML = """
 	<input on-input="rename(items[0], event)" debounce="250">
 	<p>{{ searched }}</p>
 	<button on-click="clear">clear</button>
-</Widget>
+</component>
 """
 
 
@@ -426,7 +426,7 @@ def test_event_ids_stay_the_same_across_renders(tmp_path):
 
 def test_an_event_needs_a_callable(tmp_path):
 
-	module = component(tmp_path, "class Widget(t.div):\n\tlabel = 'x'\n", '<Widget><button on-click="label">x</button></Widget>')
+	module = component(tmp_path, "class Widget(t.div):\n\tlabel = 'x'\n", '<component name="Widget"><button on-click="label">x</button></component>')
 
 	with pytest.raises(TemplateError, match="isn't a handler"):
 		serve(tmp_path, module.Widget).test_page("/")
@@ -446,7 +446,7 @@ class Counter(t.div):
 
 def test_predictions_for_a_template_counter(tmp_path):
 
-	module = component(tmp_path, COUNTER, '<Counter><p>Count: {{ count }}</p><button on-click="increment">+</button></Counter>', name="counter")
+	module = component(tmp_path, COUNTER, '<component name="Counter"><p>Count: {{ count }}</p><button on-click="increment">+</button></component>', name="counter")
 	app = serve(tmp_path, module.Counter)
 	graph = json.loads(html_of(app).split("data-domino-predict>")[1].split("</script>")[0])
 
@@ -468,7 +468,7 @@ def test_predictions_for_handlers_with_values(tmp_path):
 			def is_active(self, index):
 				return self.active == index
 	""", """
-		<Tabs>{{ for index, name in enumerate(names) }}<button on-click="select(index)" aria-pressed="{{ is_active(index) }}">{{ name }}</button>{{ /for }}</Tabs>
+		<component name="Tabs">{{ for index, name in enumerate(names) }}<button on-click="select(index)" aria-pressed="{{ is_active(index) }}">{{ name }}</button>{{ /for }}</component>
 	""", name="tabs")
 	app = serve(tmp_path, module.Tabs)
 	graph = json.loads(html_of(app).split("data-domino-predict>")[1].split("</script>")[0])
@@ -528,7 +528,7 @@ class Plain(t.div):
 """
 
 CARDS_HTML = """
-<Page>
+<component name="Page">
 	<Card heading="Literal" class="extra" aria-label="card">
 		<p>{{ title }}</p>
 	</Card>
@@ -536,16 +536,16 @@ CARDS_HTML = """
 	<Plain on-click="add_one" />
 	<Adder on-add="add" />
 	<ul>{{ for item in items }}<li>{{ item }}</li>{{ /for }}</ul>
-</Page>
+</component>
 
-<Card class="card">
+<component name="Card" class="card">
 	<h2>{{ heading }} ({{ count }})</h2>
 	<slot>No content</slot>
-</Card>
+</component>
 
-<Adder><button on-click="go">add</button></Adder>
+<component name="Adder"><button on-click="go">add</button></component>
 
-<Plain>plain</Plain>
+<component name="Plain">plain</component>
 """
 
 
@@ -579,12 +579,12 @@ def test_a_child_calls_its_parents_handler(tmp_path):
 
 def test_an_unknown_component_suggests_names(tmp_path):
 
-	module = component(tmp_path, COUNTER, "<Counter><Countr /></Counter>", name="counter")
+	module = component(tmp_path, COUNTER, "<component name=\"Counter\"><Countr /></component>", name="counter")
 
 	with pytest.raises(TemplateError) as error:
 		serve(tmp_path, module.Counter).test_page("/")
 
-	assert "counter.html:1:10" in str(error.value)
+	assert "counter.html:1:27" in str(error.value)
 	assert "<Countr> isn't a component Domino knows" in str(error.value) and "Did you mean 'Counter'?" in str(error.value)
 
 
@@ -615,8 +615,8 @@ def test_python_composition_passes_props_and_handlers(tmp_path):
 			items = None
 			label = ""
 	""", """
-		<Form on-submit="submit"><input name="text"><button>Add</button></Form>
-		<List><p>{{ label }}</p><ul>{{ for item in items }}<li>{{ item }}</li>{{ /for }}</ul></List>
+		<component name="Form" on-submit="submit"><input name="text"><button>Add</button></component>
+		<component name="List"><p>{{ label }}</p><ul>{{ for item in items }}<li>{{ item }}</li>{{ /for }}</ul></component>
 	""", name="tasks")
 	page = serve(tmp_path, module.Tasks).test_page("/")
 
@@ -640,7 +640,7 @@ def test_the_definitions_attributes_go_on_the_element(tmp_path):
 
 			def toggle(self):
 				self.open = not self.open
-	""", '<Box class="box" role="region" data-state="{{ state }}" on-click="toggle">x</Box>', name="box")
+	""", '<component name="Box" class="box" role="region" data-state="{{ state }}" on-click="toggle">x</component>', name="box")
 	widget = module.Box(class_="mine", role="group")
 	page = serve(tmp_path, lambda: widget).test_page("/")
 
@@ -659,7 +659,7 @@ def test_the_definitions_attributes_go_on_the_element(tmp_path):
 
 def test_definitions_are_found_anywhere_in_the_app(tmp_path):
 
-	write(tmp_path / "parts" / "deep" / "misc.html", "<Badge><b>{{ text }}</b></Badge>")
+	write(tmp_path / "parts" / "deep" / "misc.html", "<component name=\"Badge\"><b>{{ text }}</b></component>")
 	module = import_file(write(tmp_path / "elsewhere.py", "import domino.tags as t\n\n\nclass Badge(t.span):\n\ttext = 'new'\n"))
 
 	app = serve(tmp_path, module.Badge)
@@ -670,8 +670,8 @@ def test_definitions_are_found_anywhere_in_the_app(tmp_path):
 
 def test_a_duplicate_definition_fails_at_startup_naming_both(tmp_path):
 
-	write(tmp_path / "a" / "one.html", "<Badge>1</Badge>")
-	write(tmp_path / "b" / "two.html", "<Badge>2</Badge>")
+	write(tmp_path / "a" / "one.html", "<component name=\"Badge\">1</component>")
+	write(tmp_path / "b" / "two.html", "<component name=\"Badge\">2</component>")
 
 	with pytest.raises(TemplateError) as error:
 		Domino("app", root_path=str(tmp_path))
@@ -682,8 +682,8 @@ def test_a_duplicate_definition_fails_at_startup_naming_both(tmp_path):
 
 def test_the_template_next_to_the_module_wins_for_two_classes_with_one_name(tmp_path):
 
-	write(tmp_path / "a" / "badge.html", "<Badge>from a</Badge>")
-	write(tmp_path / "b" / "badge.html", "<Badge>from b</Badge>")
+	write(tmp_path / "a" / "badge.html", "<component name=\"Badge\">from a</component>")
+	write(tmp_path / "b" / "badge.html", "<component name=\"Badge\">from b</component>")
 	first = import_file(write(tmp_path / "a" / "badge.py", "import domino.tags as t\n\n\nclass Badge(t.span):\n\tpass\n"))
 	second = import_file(write(tmp_path / "b" / "badge.py", "import domino.tags as t\n\n\nclass Badge(t.span):\n\tpass\n"))
 
@@ -695,33 +695,33 @@ def test_the_template_next_to_the_module_wins_for_two_classes_with_one_name(tmp_
 
 def test_markup_outside_a_definition_is_an_error(tmp_path):
 
-	write(tmp_path / "components" / "cards.html", "<Card>card</Card>\n<p>stray</p>\n")
+	write(tmp_path / "components" / "cards.html", "<component name=\"Card\">card</component>\n<p>stray</p>\n")
 
 	with pytest.raises(TemplateError) as error:
 		Domino("app", root_path=str(tmp_path))
 
-	assert "cards.html:2:1" in str(error.value) and "<p> is outside a component definition" in str(error.value)
+	assert "cards.html:2:1" in str(error.value) and "<p> is outside a definition" in str(error.value)
 
 
 def test_a_definition_twice_in_one_file(tmp_path):
 
-	write(tmp_path / "cards.html", "<Card>1</Card>\n<Card>2</Card>")
+	write(tmp_path / "cards.html", "<component name=\"Card\">1</component>\n<component name=\"Card\">2</component>")
 
-	with pytest.raises(TemplateError, match="cards.html:2:1: <Card> is defined twice in this file"):
+	with pytest.raises(TemplateError, match="cards.html:2:1: Card is defined twice in this file"):
 		Domino("app", root_path=str(tmp_path))
 
 
 def test_a_self_closing_definition_explains(tmp_path):
 
-	write(tmp_path / "cards.html", "<Card />")
+	write(tmp_path / "cards.html", "<component name=\"Card\" />")
 
-	with pytest.raises(TemplateError, match="defines Card, but has no markup"):
+	with pytest.raises(TemplateError, match="has no markup; put it inside"):
 		Domino("app", root_path=str(tmp_path))
 
 
 def test_a_file_next_to_the_module_without_the_class_says_so(tmp_path):
 
-	module = component(tmp_path, "class Widget(t.div):\n\tpass\n", "<Widgt>x</Widgt>")
+	module = component(tmp_path, "class Widget(t.div):\n\tpass\n", "<component name=\"Widgt\">x</component>")
 
 	with pytest.raises(TemplateError) as error:
 		serve(tmp_path, module.Widget).test_page("/")
@@ -732,7 +732,7 @@ def test_a_file_next_to_the_module_without_the_class_says_so(tmp_path):
 
 def test_a_definition_without_a_class_warns(tmp_path, caplog):
 
-	module = component(tmp_path, COUNTER, "<Counter>{{ count }}</Counter>\n<Countre>typo</Countre>", name="counter")
+	module = component(tmp_path, COUNTER, "<component name=\"Counter\">{{ count }}</component>\n<component name=\"Countre\">typo</component>", name="counter")
 
 	with caplog.at_level(logging.WARNING):
 		serve(tmp_path, module.Counter).test_page("/")
@@ -744,8 +744,8 @@ def test_a_component_used_by_name_is_imported_from_next_to_its_definition(tmp_pa
 
 	write(tmp_path / "components" / "__init__.py", "")
 	write(tmp_path / "components" / "gadget_dt.py", "import domino.tags as t\n\n\nclass GadgetDt(t.span):\n\tpass\n")
-	write(tmp_path / "components" / "gadget_dt.html", "<GadgetDt>gadget</GadgetDt>")
-	write(tmp_path / "pages" / "index.html", "<main><GadgetDt /></main>")
+	write(tmp_path / "components" / "gadget_dt.html", "<component name=\"GadgetDt\">gadget</component>")
+	write(tmp_path / "pages" / "index.html", "<page><main><GadgetDt /></main></page>")
 	monkeypatch.syspath_prepend(str(tmp_path))
 	monkeypatch.delitem(sys.modules, "components", raising=False)
 
@@ -761,8 +761,8 @@ def test_a_component_used_by_name_is_imported_from_next_to_its_definition(tmp_pa
 
 def test_a_template_in_pages_is_a_page_inside_the_layouts(tmp_path):
 
-	write(tmp_path / "pages" / "about.html", "<h1>About</h1>")
-	write(tmp_path / "pages" / "users" / "[name].html", "<h1>User {{ name }}</h1>")
+	write(tmp_path / "pages" / "about.html", "<page><h1>About</h1></page>")
+	write(tmp_path / "pages" / "users" / "[name].html", "<page><h1>User {{ name }}</h1></page>")
 	write(tmp_path / "pages" / "layout.py", """
 		import domino.tags as t
 		from domino.components import Document
@@ -781,14 +781,16 @@ def test_a_template_in_pages_is_a_page_inside_the_layouts(tmp_path):
 def test_a_meteor_style_index_html(tmp_path):
 
 	module = import_file(write(tmp_path / "components" / "counter.py", "import domino.tags as t\nfrom domino import State\n\n\n" + COUNTER))
-	write(tmp_path / "components" / "counter.html", '<Counter><p>{{ count }}</p><button on-click="increment">+</button></Counter>')
+	write(tmp_path / "components" / "counter.html", '<component name="Counter"><p>{{ count }}</p><button on-click="increment">+</button></component>')
 	write(tmp_path / "pages" / "index.html", """
-		<head>
-			<title>Meteor style</title>
-		</head>
-		<body>
-			<Counter />
-		</body>
+		<page>
+			<head>
+				<title>Meteor style</title>
+			</head>
+			<body>
+				<Counter />
+			</body>
+		</page>
 	""")
 	app = make_app(tmp_path)
 	assert module.Counter
@@ -822,7 +824,7 @@ def test_template_from_a_route_finds_components_in_the_calling_module(tmp_path):
 
 def test_a_component_file_isnt_a_page(tmp_path):
 
-	write(tmp_path / "cards.html", "<Card>x</Card>")
+	write(tmp_path / "cards.html", "<component name=\"Card\">x</component>")
 	app = make_app(tmp_path)
 
 	@app.route("/")
@@ -887,7 +889,7 @@ def test_the_jinja_setting_reads_every_page_template_as_jinja(tmp_path):
 
 def test_each_file_is_parsed_once(tmp_path):
 
-	module = component(tmp_path, COUNTER, '<Counter><p>{{ count }}</p><button on-click="increment">+</button></Counter>', name="counter")
+	module = component(tmp_path, COUNTER, '<component name="Counter"><p>{{ count }}</p><button on-click="increment">+</button></component>', name="counter")
 	app = serve(tmp_path, module.Counter)
 
 	page = app.test_page("/")
@@ -902,7 +904,7 @@ def test_each_file_is_parsed_once(tmp_path):
 
 def test_edits_are_picked_up_while_debugging(tmp_path):
 
-	module = component(tmp_path, COUNTER, "<Counter>old {{ count }}</Counter>", name="counter")
+	module = component(tmp_path, COUNTER, "<component name=\"Counter\">old {{ count }}</component>", name="counter")
 	app = serve(tmp_path, module.Counter)
 	app.debug = True
 	app.testing = True
@@ -910,7 +912,7 @@ def test_edits_are_picked_up_while_debugging(tmp_path):
 	assert "old 0" in app.test_page("/").html
 
 	path = tmp_path / "components" / "counter.html"
-	path.write_text("<Counter>new {{ count }}</Counter>", encoding="utf-8")
+	path.write_text("<component name=\"Counter\">new {{ count }}</component>", encoding="utf-8")
 	later = time.time() + 5
 	os.utime(path, (later, later))
 
@@ -921,7 +923,7 @@ def test_hot_reloading_forgets_parsed_files(tmp_path):
 
 	from domino import hot
 
-	module = component(tmp_path, COUNTER, "<Counter>{{ count }}</Counter>", name="counter")
+	module = component(tmp_path, COUNTER, "<component name=\"Counter\">{{ count }}</component>", name="counter")
 	app = serve(tmp_path, module.Counter)
 	app.test_page("/")
 
@@ -931,7 +933,7 @@ def test_hot_reloading_forgets_parsed_files(tmp_path):
 	hot.forget_caches(app, {path})
 
 	assert path not in dtemplates._compiled and app.template_finder.stale
-	write(tmp_path / "components" / "extra.html", "<Extra>x</Extra>")
+	write(tmp_path / "components" / "extra.html", "<component name=\"Extra\">x</component>")
 	assert "Extra" in app.template_finder.current_definitions()
 
 
@@ -944,7 +946,7 @@ def test_the_scaffold_uses_templates(tmp_path):
 	cli.create(str(tmp_path / "site"))
 	html = (tmp_path / "site" / "components" / "tasks.html").read_text()
 
-	assert "<TaskForm on-submit=\"submit\">" in html and "{{ for task in tasks }}" in html
+	assert "<component name=\"TaskForm\" on-submit=\"submit\">" in html and "{{ for task in tasks }}" in html
 	assert dtemplates.parse_file(str(tmp_path / "site" / "components" / "tasks.html")).definitions.keys() == {"TaskForm", "TaskList", "NoTasks"}
 	assert "def render" in (tmp_path / "site" / "components" / "tasks.py").read_text()
 
@@ -953,7 +955,7 @@ def test_the_scaffold_uses_templates(tmp_path):
 
 def test_as_picks_the_components_element(tmp_path):
 
-	module = component(tmp_path, "class Sidebar(t.div):\n\tpass\n", '<Sidebar as="aside" class="w-64 border-r"><nav>links</nav></Sidebar>', name="sidebar")
+	module = component(tmp_path, "class Sidebar(t.div):\n\tpass\n", '<component name="Sidebar" as="aside" class="w-64 border-r"><nav>links</nav></component>', name="sidebar")
 	html = html_of(serve(tmp_path, module.Sidebar))
 
 	assert '<aside class="Sidebar w-64 border-r" id="' in html and "<nav>links</nav></aside>" in html
@@ -961,8 +963,8 @@ def test_as_picks_the_components_element(tmp_path):
 
 
 @pytest.mark.parametrize("source, message", [
-	('<Sidebar :as="kind">x</Sidebar>', "isn't Domino's syntax"),
-	('<Sidebar as="Aside">x</Sidebar>', "names the HTML element"),
+	('<component name="Sidebar" :as="kind">x</component>', "isn't Domino's syntax"),
+	('<component name="Sidebar" as="Aside">x</component>', "names the HTML element"),
 ])
 def test_as_takes_an_element_name(tmp_path, source, message):
 
@@ -975,7 +977,7 @@ def test_as_takes_an_element_name(tmp_path, source, message):
 def test_as_and_a_tag_set_by_the_class_must_agree(tmp_path):
 
 	# A tag set on the class (the Component base's `tag = "section"`) is what as= is checked against
-	module = component(tmp_path, "class Sidebar(t.div):\n\tpass\n", '<Sidebar as="aside">x</Sidebar>', name="sidebar")
+	module = component(tmp_path, "class Sidebar(t.div):\n\tpass\n", '<component name="Sidebar" as="aside">x</component>', name="sidebar")
 	sidebar = module.Sidebar()
 	module.Sidebar.tag = "section"
 
@@ -984,10 +986,10 @@ def test_as_and_a_tag_set_by_the_class_must_agree(tmp_path):
 		dtemplates.render_component(sidebar, str(tmp_path / "components" / "sidebar.html"))
 
 
-# Layouts: components pages wrap themselves in
+# Layouts: <layout name="Main">, and pages that name them
 
 LAYOUT = """
-<Layout>
+<layout name="Main">
 	<html lang="en">
 		<head><title>{{ title }} · Site</title></head>
 		<body>
@@ -995,17 +997,17 @@ LAYOUT = """
 			<main><slot /></main>
 		</body>
 	</html>
-</Layout>
+</layout>
 """
 
 
 def test_a_page_wrapped_in_its_layout_is_the_whole_document(tmp_path):
 
-	write(tmp_path / "layouts" / "layout.html", LAYOUT)
+	write(tmp_path / "layouts" / "main.html", LAYOUT)
 	write(tmp_path / "pages" / "index.html", """
-		<Layout title="Home">
+		<page layout="Main" title="Home">
 			<p>home</p>
-		</Layout>
+		</page>
 	""")
 	app = make_app(tmp_path)
 
@@ -1013,7 +1015,7 @@ def test_a_page_wrapped_in_its_layout_is_the_whole_document(tmp_path):
 
 	# The layout's <html> is the page's, with the doctype, the page id and Domino's script
 	assert html.startswith("<!DOCTYPE html>\n<html ") and "data-domino-page=" in html and 'lang="en"' in html
-	assert 'class="Layout"' in html.split(">")[1]
+	assert 'class="Main"' in html.split(">")[1]
 	assert '<script class="Core" src="/_domino/core"' in html.split("</head>")[0]
 	page = app.test_page("/")
 	assert page.text("title") == "Home · Site"
@@ -1022,8 +1024,8 @@ def test_a_page_wrapped_in_its_layout_is_the_whole_document(tmp_path):
 
 def test_a_layout_needs_no_class_and_a_value_it_isnt_given_shows_nothing(tmp_path):
 
-	write(tmp_path / "layouts" / "layout.html", LAYOUT)
-	write(tmp_path / "pages" / "index.html", "<Layout><p>home</p></Layout>")
+	write(tmp_path / "layouts" / "main.html", LAYOUT)
+	write(tmp_path / "pages" / "index.html", "<page layout=\"Main\"><p>home</p></page>")
 	app = make_app(tmp_path)
 
 	assert app.test_page("/").text("title") == "· Site"
@@ -1031,7 +1033,7 @@ def test_a_layout_needs_no_class_and_a_value_it_isnt_given_shows_nothing(tmp_pat
 
 def test_components_work_inside_a_layout(tmp_path):
 
-	write(tmp_path / "layouts" / "layout.html", LAYOUT)
+	write(tmp_path / "layouts" / "main.html", LAYOUT)
 	write(tmp_path / "components" / "counter.py", """
 		import domino.tags as t
 		from domino import State
@@ -1044,8 +1046,8 @@ def test_components_work_inside_a_layout(tmp_path):
 			def add(self):
 				self.count += 1
 	""")
-	write(tmp_path / "components" / "counter.html", '<Counter><p>{{ count }}</p><button on-click="add">+</button></Counter>')
-	write(tmp_path / "pages" / "index.html", '<Layout title="Home"><Counter /></Layout>')
+	write(tmp_path / "components" / "counter.html", '<component name="Counter"><p>{{ count }}</p><button on-click="add">+</button></component>')
+	write(tmp_path / "pages" / "index.html", '<page layout="Main" title="Home"><Counter /></page>')
 	app = make_app(tmp_path)
 
 	page = app.test_page("/")
@@ -1057,12 +1059,12 @@ def test_components_work_inside_a_layout(tmp_path):
 
 def test_a_layout_with_a_class_from_python_pages_and_404(tmp_path):
 
-	write(tmp_path / "layouts" / "layout.html", LAYOUT.replace("<nav>nav</nav>", "<nav>{{ greeting }}</nav>"))
-	write(tmp_path / "layouts" / "layout.py", """
+	write(tmp_path / "layouts" / "main.html", LAYOUT.replace("<nav>nav</nav>", "<nav>{{ greeting }}</nav>"))
+	write(tmp_path / "layouts" / "main.py", """
 		import domino.tags as t
 
 
-		class Layout(t.div):
+		class Main(t.div):
 
 			title = "Untitled"
 
@@ -1072,20 +1074,20 @@ def test_a_layout_with_a_class_from_python_pages_and_404(tmp_path):
 	write(tmp_path / "pages" / "about.py", """
 		import domino.tags as t
 
-		from layouts.layout import Layout
+		from layouts.main import Main
 
 
 		def page():
-			return Layout(title="About") [t.p() ["about"]]
+			return Main(title="About") [t.p() ["about"]]
 	""")
 	write(tmp_path / "pages" / "404.py", """
 		import domino.tags as t
 
-		from layouts.layout import Layout
+		from layouts.main import Main
 
 
 		def page():
-			return Layout(title="Not found") [t.p() ["Not here"]]
+			return Main(title="Not found") [t.p() ["Not here"]]
 	""")
 	sys.path.insert(0, str(tmp_path))
 	try:
@@ -1108,9 +1110,9 @@ def test_a_layout_html_in_pages_says_where_layouts_go_now(tmp_path):
 	from domino.pages import PagesError
 
 	write(tmp_path / "pages" / "layout.html", "<html><body><slot /></body></html>")
-	write(tmp_path / "pages" / "index.html", "<p>home</p>")
+	write(tmp_path / "pages" / "index.html", "<page><p>home</p></page>")
 
-	with pytest.raises(PagesError, match="layouts/layout.html"):
+	with pytest.raises(PagesError, match="layouts/main.html"):
 		make_app(tmp_path)
 
 
@@ -1128,7 +1130,50 @@ def test_a_page_template_next_to_a_module_still_defines_its_components(tmp_path)
 		def page():
 			return About()
 	""")
-	write(tmp_path / "pages" / "about.html", "<About><p>about</p></About>")
+	write(tmp_path / "pages" / "about.html", "<component name=\"About\"><p>about</p></component>")
 	app = make_app(tmp_path)
 
 	assert app.test_page("/about").text("p") == "about"
+
+
+def test_layouts_nest(tmp_path):
+
+	write(tmp_path / "layouts" / "main.html", LAYOUT)
+	write(tmp_path / "layouts" / "admin.html", """
+		<layout name="Admin" layout="Main" as="section" class="admin">
+			<aside>Admin menu for {{ title }}</aside>
+			<slot />
+		</layout>
+	""")
+	write(tmp_path / "pages" / "users.html", '<page layout="Admin" title="Users"><h1>Users</h1></page>')
+	app = make_app(tmp_path)
+
+	html = html_of(app, "/users")
+	page = app.test_page("/users")
+
+	# Main's document, then Admin's frame, then the page; both layouts get the page's values
+	assert html.startswith("<!DOCTYPE html>\n<html ") and 'class="Main"' in html.split(">")[1]
+	assert page.text("title") == "Users · Site"
+	assert page.find("main section.admin aside").text == "Admin menu for Users"
+	assert page.find("main section.admin h1").text == "Users"
+
+
+@pytest.mark.parametrize("files, message", [
+	({"pages/index.html": "<p>bare</p>"}, "wrap the page in <page>"),
+	({"pages/index.html": '<page title="Home"><p>x</p></page>'}, "is a value for the page's layout"),
+	({"pages/index.html": "<page><p>x</p></page>\n<p>after</p>"}, "a page file holds one <page>"),
+	({"components/card.html": '<component layout="Main" name="Card">x</component>'}, "layout= goes on a <page>"),
+	({"components/card.html": "<component>x</component>"}, "<component> needs a name"),
+	({"components/card.html": '<component name="Card"><page>x</page></component>'}, "goes at the top of its file"),
+])
+def test_page_and_definition_mistakes_are_explained(tmp_path, files, message):
+
+	for path, text in files.items():
+		write(tmp_path / path, text)
+
+	with pytest.raises(TemplateError) as error:
+		app = make_app(tmp_path)
+		app.test_client().get("/")
+		dtemplates.parse_file(str(tmp_path / next(iter(files))))
+
+	assert message in str(error.value)

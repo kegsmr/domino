@@ -2088,7 +2088,7 @@ def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser
 	from domino import Domino
 
 	files = {
-		"layouts/layout.html": """<Layout>
+		"layouts/main.html": """<layout name="Main">
 	<html lang="en">
 		<head><title>{{ title }} · Site</title></head>
 		<body>
@@ -2096,12 +2096,12 @@ def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser
 			<main><slot /></main>
 		</body>
 	</html>
-</Layout>
+</layout>
 """,
-		"layouts/layout.py": "import domino.tags as t\nfrom domino import State\n\n\nclass Layout(t.div):\n\n\ttitle = ''\n\topen = State(False)\n\n\tdef toggle(self):\n\t\tself.open = not self.open\n",
+		"layouts/main.py": "import domino.tags as t\nfrom domino import State\n\n\nclass Main(t.div):\n\n\ttitle = ''\n\topen = State(False)\n\n\tdef toggle(self):\n\t\tself.open = not self.open\n",
 		"components/counter.py": "import domino.tags as t\nfrom domino import State\n\n\nclass Counter(t.div):\n\n\tcss = {'color': 'rgb(0, 128, 0)'}\n\tcount = State(0)\n\n\tdef add(self):\n\t\tself.count += 1\n",
-		"components/counter.html": '<Counter><p class="count">{{ count }}</p><button class="add" on-click="add">+</button></Counter>',
-		"pages/index.html": '<Layout title="Home"><Counter /></Layout>',
+		"components/counter.html": '<component name="Counter"><p class="count">{{ count }}</p><button class="add" on-click="add">+</button></component>',
+		"pages/index.html": '<page layout="Main" title="Home"><Counter /></page>',
 	}
 	for path, text in files.items():
 		(tmp_path / path).parent.mkdir(parents=True, exist_ok=True)

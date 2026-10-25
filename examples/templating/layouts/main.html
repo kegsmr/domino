@@ -1,6 +1,6 @@
-<!-- The layout, a component the pages wrap themselves in (<Layout title="...">...</Layout>):
-     the page goes where <slot /> is. Domino adds the doctype, its script and the components' CSS -->
-<Layout>
+<!-- The layout the pages go in (<page layout="Main" title="...">): the page goes where <slot /> is.
+     Domino adds the doctype, its script and the components' CSS -->
+<layout name="Main">
 	<html lang="en">
 		<head>
 			<meta charset="utf-8">
@@ -29,4 +29,4 @@
 			<slot />
 		</body>
 	</html>
-</Layout>
+</layout>

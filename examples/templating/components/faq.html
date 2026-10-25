@@ -1,4 +1,4 @@
-<Faq class="faq">
+<component name="Faq" class="faq">
 	<dl>
 		{{ for index, question in enumerate(questions) }}
 		<dt><button on-click="toggle(index)" aria-expanded="{{ expanded(index) }}">{{ question[0] }}</button></dt>
@@ -7,4 +7,4 @@
 		{{ /if }}
 		{{ /for }}
 	</dl>
-</Faq>
+</component>

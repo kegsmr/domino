@@ -1,5 +1,5 @@
 <!-- The markup of the Counter class in counter.py. Its attributes go on the component's own <div> -->
-<Counter class="counter">
+<component name="Counter" class="counter">
 	<p>Count: <strong>{{ count }}</strong></p>
 	<button on-click="increment">+1</button>
 	<button on-click="reset" disabled="{{ at_zero }}">Reset</button>
@@ -10,4 +10,4 @@
 	{{ else }}
 	<p class="hint">Keep going.</p>
 	{{ /if }}
-</Counter>
+</component>

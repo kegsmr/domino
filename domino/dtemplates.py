@@ -72,6 +72,9 @@ VALUE_TAG = re.compile(r"\{\{(.*?)\}\}", re.S)
 # {{ for item in items }}, {{ /for }}
 BLOCK = re.compile(r"\s*(if|elif|else|for|/\s*if|/\s*for)\b(.*)", re.S)
 
+# The tags that define what a file holds: <component name="TodoList">, <layout name="Main">
+DEFINERS = ("component", "layout")
+
 # Just "{{ x }}": the attribute's value is x itself
 SINGLE_VALUE = re.compile(r"\s*\{\{(.*?)\}\}\s*", re.S)
 
@@ -871,16 +874,17 @@ VALUE, ATTRIBUTE_OP, CLASS, STYLE, EVENTS, IF, EACH, COMPONENT, SLOT = range(9)
 class Definition:
 	"""A component's markup: <TodoList class="x">...</TodoList> at the top level of a file."""
 
-	__slots__ = ("name", "where", "ops", "root", "document")
+	__slots__ = ("name", "where", "ops", "root", "document", "outer")
 
 
-	def __init__(self, name, where, ops, root, document=False):
+	def __init__(self, name, where, ops, root, document=False, outer=None):
 
 		self.name = name
 		self.where = where
 		self.ops = ops
 		self.root = root  # (static [(name, value)], bound [(name, function)], events, debounce)
 		self.document = document  # its markup is a whole <html> document (a layout)
+		self.outer = outer  # <layout name="Admin" layout="Main">: the layout it goes inside
 
 
 class Compiled:
@@ -915,33 +919,73 @@ def parse_file(path, source=None):
 
 	top = [node for node in nodes if not (isinstance(node, Text) and node.blank())]
 	first = top[0] if top else None
-	if isinstance(first, Tag) and first.component and not is_page_path(path):
-		for node in nodes:
-			if isinstance(node, Text) and node.blank():
-				continue
-			if not (isinstance(node, Tag) and node.component):
-				where = node.where if isinstance(node, Tag) else Parser(source, path).where(node.start) if isinstance(node, Text) else None
+
+	# <component name="TodoList">...</component> and <layout name="Main">...</layout>
+	if isinstance(first, Tag) and not first.component and first.name in DEFINERS:
+		for node in top:
+			if not (isinstance(node, Tag) and not node.component and node.name in DEFINERS):
+				where = node.where if isinstance(node, Tag) else Parser(source, path).where(node.start)
 				shown = f"<{node.name}>" if isinstance(node, Tag) else "text"
 				raise TemplateError(
-					f"{where or shown_path(path)}: {shown} is outside a component definition. A file that defines "
-					f"components (<{first.name}>...</{first.name}>) holds only definitions; put this inside one, "
-					"or in a page template of its own"
+					f"{where}: {shown} is outside a definition. A file that defines components (<component "
+					"name=\"...\">) or layouts (<layout name=\"...\">) holds only definitions; put this inside one"
 				)
-			if node.name in compiled.definitions:
-				previous = compiled.definitions[node.name].where
-				raise TemplateError(f"{node.where}: <{node.name}> is defined twice in this file (first at line {previous.line})")
-			compiled.definitions[node.name] = compile_definition(node)
+			definition = compile_definition(node)
+			if definition.name in compiled.definitions:
+				previous = compiled.definitions[definition.name].where
+				raise TemplateError(f"{node.where}: {definition.name} is defined twice in this file (first at line {previous.line})")
+			compiled.definitions[definition.name] = definition
 		return compiled
+
+	# <page layout="Main" title="About">...</page>: the page, in its layout
+	if isinstance(first, Tag) and not first.component and first.name == "page":
+		if len(top) > 1:
+			extra = top[1]
+			where = extra.where if isinstance(extra, Tag) else Parser(source, path).where(extra.start)
+			raise TemplateError(f"{where}: a page file holds one <page>...</page>, with everything inside it")
+		nodes, compiled.single = page_nodes(first)
+	elif is_page_path(path) and top:
+		where = first.where if isinstance(first, Tag) else Parser(source, path).where(first.start)
+		raise TemplateError(f"{where}: wrap the page in <page>...</page> (<page layout=\"Main\"> puts it in a layout)")
+	elif isinstance(first, Tag) and first.component and all(isinstance(node, Tag) and node.component for node in top) \
+			and os.path.isfile(os.path.splitext(path)[0] + ".py"):
+		names = ", ".join(node.name for node in top)
+		raise TemplateError(
+			f"{first.where}: components are defined with <component name=\"{first.name}\">...</component> "
+			f"(this file defines {names} the older way, with the class's name as the tag)"
+		)
 
 	_strip(nodes)
 	compiled.ops = Compiler().nodes(nodes)
 	tags = {node.name.lower() for node in nodes if isinstance(node, Tag)}
 	compiled.document = any(isinstance(node, Raw) for node in nodes) or bool(tags & {"html", "head", "body"})
 	compiled.wrap = "html" not in tags and bool(tags & {"head", "body"})
-	if len(top) == 1 and isinstance(first, Tag) and first.component and not first.directive():
-		compiled.single = first.name
 
 	return compiled
+
+
+def page_nodes(page):
+	"""<page layout="Main" title="About">...</page> -> (its nodes, the layout's name or None). With
+	a layout, the page is a use of it: <Main title="About">...</Main>."""
+
+	children = list(page.children)
+	_strip(children)
+	layout = page.attribute("layout")
+	others = [attribute for attribute in page.attributes if attribute[0] != "layout"]
+	if layout is None:
+		if others:
+			name, value, text, where = others[0]
+			raise where.error(f"<page {name}=...> is a value for the page's layout; name it: <page layout=\"Main\" {text}>")
+		return children, None
+
+	_, name, _, where = layout
+	if not name or not is_component_name(name) or not name.isidentifier():
+		raise where.error("layout= names a layout, like layout=\"Main\" for <layout name=\"Main\">")
+	use = Tag(name, page.where)
+	use.attributes = others
+	use.children = children
+
+	return [use], name
 
 
 def definitions_in(path):
@@ -969,27 +1013,32 @@ def _strip(nodes):
 
 def compile_definition(tag):
 
+	kind = tag.name
+	named = tag.attribute("name")
+	if named is None or not named[1] or not is_component_name(named[1]) or not named[1].isidentifier():
+		raise tag.where.error(f"<{kind}> needs a name, the class's: <{kind} name=\"{'Main' if kind == 'layout' else 'TodoList'}\">")
+	name = named[1]
+	outer = tag.attribute("layout")
+	if outer is not None and kind != "layout":
+		raise outer[3].error("layout= goes on a <page> (or a <layout>, to put it inside another), not on a <component>")
+	if outer is not None and (not outer[1] or not is_component_name(outer[1])):
+		raise outer[3].error("layout= names a layout, like layout=\"Main\"")
+	attributes = [attribute for attribute in tag.attributes if attribute[0] not in ("name", "layout")]
+
 	if tag.self_closing:
-		raise TemplateError(
-			f"{tag.where}: <{tag.name} /> at the top level of a file defines {tag.name}, but has no markup. "
-			f"Wrap the markup: <{tag.name}>...</{tag.name}>. To show {tag.name} on a page, put it inside an "
-			"element of a page template"
-		)
-	if tag.directive():
-		raise TemplateError(f"{tag.where}: <{tag.name} {tag.directive()}> defines {tag.name}; each/if go on the elements inside it")
+		raise TemplateError(f"{tag.where}: <{kind} name=\"{name}\" /> has no markup; put it inside: <{kind} name=\"{name}\">...</{kind}>")
 
 	children = list(tag.children)
 	_strip(children)
 
-	# <Layout><html lang="en">...</html></Layout>: the component is the whole document, its element
-	# the <html> (as with as="html"), so a page that wraps itself in <Layout> is a whole page
-	attributes = list(tag.attributes)
+	# <layout name="Main"><html lang="en">...</html></layout>: the layout is the whole document, its
+	# element the <html> (as with as="html"), so a page in it is a whole page
 	document = False
 	only = [node for node in children if not (isinstance(node, Text) and node.blank())]
 	if len(only) == 1 and isinstance(only[0], Tag) and only[0].name.lower() == "html":
 		html = only[0]
 		if tag.attribute("as") is not None:
-			raise tag.where.error(f"<{tag.name}>'s markup is an <html> document, so it is the <html>; leave out as=")
+			raise tag.where.error(f"{name}'s markup is an <html> document, so it is the <html>; leave out as=")
 		if html.directive():
 			raise html.where.error(f"<html {html.directive()}>: a document is shown whole; put each/if on the elements inside it")
 		attributes += html.attributes
@@ -1017,7 +1066,7 @@ def compile_definition(tag):
 			compiler.literal(value, where)
 			static.append((name, True if value is None else unescape(value)))
 
-	return Definition(tag.name, tag.where, compiler.nodes(children), (static, bound, events, debounce, element), document)
+	return Definition(named[1], tag.where, compiler.nodes(children), (static, bound, events, debounce, element), document, outer and outer[1])
 
 
 class Compiler:
@@ -1202,6 +1251,9 @@ class Compiler:
 		if node.component:
 			ops.append(self.component(node, skip))
 			return
+
+		if node.name in DEFINERS or node.name == "page":
+			raise node.where.error(f"<{node.name}> goes at the top of its file, around everything else in it")
 
 		if node.name == "slot":
 			if any(name not in skip for name, *_ in node.attributes):
@@ -1661,7 +1713,8 @@ def _component(op, context):
 		run(children, context, out)
 		element.set_children([Fragment(_join(out))])
 
-	return element
+	# A layout that goes inside another (<layout name="Admin" layout="Main">) is put in it
+	return in_outer_layouts(element, layout_values(kwargs), where, context.lookup.path)
 
 
 def _join(out):
@@ -2084,19 +2137,55 @@ def definition_for(cls, path):
 	)
 
 
-def defines_document(name):
-	"""Whether the component called `name` is defined as a whole <html> document (a layout)."""
+def definition_named(name):
+	"""The definition of the component or layout called `name` in the running app, if any."""
 
 	finder = _finder()
 	if finder is None:
-		return False
+		return None
 
 	for path in finder.current_definitions().get(name, ()):
 		definition = load(path, _checking()).definitions.get(name)
-		if definition is not None and definition.document:
-			return True
+		if definition is not None:
+			return definition
 
-	return False
+	return None
+
+
+def defines_document(name, seen=()):
+	"""Whether the component called `name` is a whole <html> document: a layout, or one inside one."""
+
+	definition = definition_named(name)
+	if definition is None or name in seen:
+		return False
+
+	return definition.document or (definition.outer is not None and defines_document(definition.outer, seen + (name,)))
+
+
+def layout_values(kwargs):
+	"""What a layout passes on to the layout it goes inside: its values, not its HTML attributes,
+	handlers or the State it keeps."""
+
+	return {
+		key: value for key, value in kwargs.items()
+		if key not in ("class_", "id", "style", "debounce") and not key.startswith(("on_", "data_", "aria_"))
+	}
+
+
+def in_outer_layouts(element, values, where=None, path=None):
+	"""`element`, inside the layouts its layout goes in (<layout name="Admin" layout="Main">): Main,
+	given the same values, with Admin in its <slot />."""
+
+	seen = set()
+	while True:
+		definition = definition_named(type(element).__name__)
+		if definition is None or definition.outer is None:
+			return element
+		if definition.outer in seen or definition.outer == definition.name:
+			raise definition.where.error(f"<layout name=\"{definition.name}\"> goes inside itself (layout=\"{definition.outer}\")")
+		seen.add(definition.outer)
+		outer = find_class(definition.outer, where or definition.where, path or definition.where.path)
+		element = outer(**values) [element]
 
 
 def render_component(element, path):
@@ -2193,11 +2282,13 @@ def whole_page(result):
 	path = paired_template(cls)
 	if not path or template_format(path) != "components":
 		return result
-	definition = load(path, _checking()).definitions.get(cls.__name__)
-	if definition is None or not definition.document:
+	if not defines_document(cls.__name__):
 		return result
 
-	return WholePage(result)
+	# Admin(title="Users") [...] from Python goes inside Main too, given the same values
+	values = layout_values({key: value for key, value in result.__dict__.items() if not key.startswith("_") and key not in ELEMENT_NAMES})
+
+	return WholePage(in_outer_layouts(result, values))
 
 
 class WholePage(Element):
