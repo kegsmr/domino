@@ -811,3 +811,20 @@ def test_a_folder_with_just_pages_reloads_too(tmp_path, uvicorn_runs, monkeypatc
 	assert child.app is not app
 	assert child.app.root_path == str(folder.resolve())
 	assert child.app.test_client().get("/").get_data(as_text=True) == "hi"
+
+
+def test_python_m_domino_runs_the_command(tmp_path):
+
+	import subprocess
+	import sys
+
+	root = str(Path(__file__).resolve().parent.parent)
+	env = dict(os.environ, PYTHONPATH=root)
+
+	version = subprocess.run([sys.executable, "-m", "domino", "--version"], capture_output=True, text=True, env=env)
+	assert version.returncode == 0, version.stderr
+	assert version.stdout.startswith("domino ")
+
+	created = subprocess.run([sys.executable, "-m", "domino", "create", "app"], capture_output=True, text=True, env=env, cwd=tmp_path)
+	assert created.returncode == 0, created.stderr
+	assert (tmp_path / "app" / "app.py").is_file()
