@@ -475,7 +475,7 @@ def test_debug_serving_hot_reloads(make_app, served):
 
 	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
-	assert served == [("hot", "domino.asgi:from_environ", app.root_path, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3})]
+	assert served == [("hot", "domino.asgi:from_environ", app.root_path, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3, "ws_per_message_deflate": True})]
 	assert os.environ["DOMINO_ASGI_HOT"] == "1"
 
 
