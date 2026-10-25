@@ -407,8 +407,8 @@ Domino templates are plain HTML with three additions: components are capitalized
 <TodoList class="todos">
 	<ul>
 		{{ for index, item in enumerate(items) }}
-		<li :class="item_class(item)">
-			<input type="checkbox" :checked="item.done" on-change="toggle(index)">
+		<li class="{{ item_class(item) }}">
+			<input type="checkbox" checked="{{ item.done }}" on-change="toggle(index)">
 			{{ item.text }}
 			<button on-click="remove(index)" aria-label="Remove">×</button>
 		</li>
@@ -437,7 +437,7 @@ class TodoList(t.div):
 		return sum(1 for item in self.items if not item["done"])
 
 
-	def item_class(self, item):              # :class takes a string, a list or {class: bool}
+	def item_class(self, item):              # in class, a string, a list or {class: bool}
 
 		return {"done": item["done"]}
 
@@ -465,11 +465,11 @@ class TodoList(t.div):
 **Values.** `{{ name }}`, `{{ item.text }}` and `{{ item["text"] }}` read the component's `State`, properties, attributes and helper methods (called without arguments: helpers are how logic stays in Python), and loop variables. `.name` also reads a dict's key, and a missing key is nothing; an unknown name, or an object's unknown attribute, is an error naming the template's file, line and column, with the names that exist. `helper(item, "text")` calls a method with values; `not x` is the one operator. Nothing else: no comparisons, arithmetic or filters, so write a helper (`is_open(index)`, `remaining`).
 
 - Text is escaped; `Markup` values and Domino elements are inserted as they are; `None` and `False` show nothing. In `<script>` values are inserted as JSON.
-- Plain attributes are written as they are: `{{ }}` doesn't work in them (it's an error saying what to write instead).
+- In attributes too: `href="/polls/{{ poll.id }}"`, `class="task {{ if task.done }}done{{ /if }}"` (an `{{ if }}` block works inside an attribute).
 
 **Lists and conditions** are blocks, in Python's words and closed like HTML: `{{ for item in items }}` ... `{{ /for }}` repeats what's inside (`{{ for key, value in prices.items }}` unpacks, `enumerate(items)` numbers), and `{{ if done }}` ... `{{ elif loading }}` ... `{{ else }}` ... `{{ /if }}` shows one part (`{{ if not items }}` too). `{{ else }}` inside a `for` shows when the list is empty. A block wraps whole elements: one that starts inside an element ends inside it, so `{{ if x }}<div>{{ /if }}` is an error at startup, with the file and line. A block on a line of its own takes the line with it.
 
-**Bound attributes**: `:disabled="at_zero"` writes `disabled` when the value is true and leaves it out when it's false or None; other values are written escaped. `:class` takes a string, a list or a dict `{class: bool}`, and adds to `class="..."`; `:style` takes a dict (`{"font_weight": "bold"}`) and adds to `style="..."`.
+**Attributes** are written as they are, with any `{{ }}` values in them filled in and escaped. An attribute that is just one value works like Blaze's: `disabled="{{ at_zero }}"` writes `disabled` when the value is true and leaves it out when it's false or None, and on a component, `items="{{ items }}"` passes the list itself. In `class`, a list or a dict `{class: bool}` gives the names that are on (`class="task {{ row_class(task) }}"`); in `style`, a dict gives declarations (`{"font_weight": "bold"}`).
 
 **Events**: `on-click="increment"` binds a method; `on-click="remove(index)"` binds it with values, so each item of a list gets its own. `on-input="search(event)"` passes the `Event`; `debounce="250"` waits until the user pauses. Handlers that only change the component's own `State` are [instant](#instant-updates), with values too.
 

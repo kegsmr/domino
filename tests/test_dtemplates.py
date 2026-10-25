@@ -153,7 +153,9 @@ def test_a_page_template_keeps_its_doctype_and_entities(tmp_path):
 	("<W>\n  <ul>\n</W>", "</W> doesn't close <ul> from line 2, column 3"),
 	("<W><li>", "<li> is never closed"),
 	("<W></br></W>", "<br> is a void element"),
-	("<W><p class=\"{{ kind }}\">x</p></W>", ":class=\"helper\""),
+	("<W><p :class=\"kind\">x</p></W>", "write class=\"{{ kind }}\""),
+	("<W><p class=\"a {{ if x }}b\">x</p></W>", "never closed with {{ /if }}"),
+	("<W><p class=\"{{ for x in xs }}{{ x }}{{ /for }}\">x</p></W>", "a helper can build the value"),
 	("<W>{{ a + b }}</W>", "unexpected '+'"),
 	("<W>{{ x</W>", "{{ is never closed"),
 	("<W><p if=\"x\">x</p></W>", "wrap them in {{ if x }}"),
@@ -328,9 +330,9 @@ def test_an_if_inside_a_for_filters(tmp_path):
 	assert inner(html_of(serve(tmp_path, module.Widget)), "Widget") == "<li>a</li>"
 
 
-# Bound attributes
+# Values in attributes
 
-def test_bound_attributes(tmp_path):
+def test_values_in_attributes(tmp_path):
 
 	module = component(tmp_path, """
 		class Widget(t.div):
@@ -343,11 +345,12 @@ def test_bound_attributes(tmp_path):
 			class_list = ["x", None, "y"]
 			styles = {"font_weight": "bold", "color": None}
 	""", """
-		<Widget><input :disabled="yes" :hidden="no" :title="none" :value="number" :placeholder="text"><p class="base" :class="classes">1</p><p :class="class_list">2</p><p :class="text">3</p><p style="color: red;" :style="styles">4</p><p :class="none">5</p></Widget>
+		<Widget><input disabled="{{ yes }}" hidden="{{ no }}" title="{{ none }}" value="{{ number }}" placeholder="{{ text }}"><p class="base {{ classes }}">1</p><p class="{{ class_list }}">2</p><p class="{{ text }}">3</p><p style="color: red; {{ styles }}">4</p><p class="{{ none }}">5</p><a href="/items/{{ number }}?q={{ text }}" class="item {{ if yes }}on{{ elif no }}never{{ else }}off{{ /if }}">6</a></Widget>
 	""")
 	html = inner(html_of(serve(tmp_path, module.Widget)), "Widget")
 
 	assert '<input disabled value="0" placeholder="a&#34;b">' in html
+	assert '<a href="/items/0?q=a&#34;b" class="item on">6</a>' in html
 	assert '<p class="base on">1</p>' in html
 	assert '<p class="x y">2</p>' in html
 	assert '<p class="a&#34;b">3</p>' in html
@@ -464,7 +467,7 @@ def test_predictions_for_handlers_with_values(tmp_path):
 			def is_active(self, index):
 				return self.active == index
 	""", """
-		<Tabs>{{ for index, name in enumerate(names) }}<button on-click="select(index)" :aria-pressed="is_active(index)">{{ name }}</button>{{ /for }}</Tabs>
+		<Tabs>{{ for index, name in enumerate(names) }}<button on-click="select(index)" aria-pressed="{{ is_active(index) }}">{{ name }}</button>{{ /for }}</Tabs>
 	""", name="tabs")
 	app = serve(tmp_path, module.Tabs)
 	graph = json.loads(html_of(app).split("data-domino-predict>")[1].split("</script>")[0])
@@ -528,7 +531,7 @@ CARDS_HTML = """
 	<Card heading="Literal" class="extra" aria-label="card">
 		<p>{{ title }}</p>
 	</Card>
-	<Card :heading="title" :count="items_count" />
+	<Card heading="{{ title }}" count="{{ items_count }}" />
 	<Plain on-click="add_one" />
 	<Adder on-add="add" />
 	<ul>{{ for item in items }}<li>{{ item }}</li>{{ /for }}</ul>
@@ -636,7 +639,7 @@ def test_the_definitions_attributes_go_on_the_element(tmp_path):
 
 			def toggle(self):
 				self.open = not self.open
-	""", '<Box class="box" role="region" :data-state="state" on-click="toggle">x</Box>', name="box")
+	""", '<Box class="box" role="region" data-state="{{ state }}" on-click="toggle">x</Box>', name="box")
 	widget = module.Box(class_="mine", role="group")
 	page = serve(tmp_path, lambda: widget).test_page("/")
 
@@ -841,7 +844,8 @@ def test_which_files_are_jinja():
 	assert source_format("a.html", "<p>{{ name|upper }}</p>") == "jinja"
 	assert source_format("a.html", "<button {{ on(click=go) }}>") == "jinja"
 	assert source_format("a.html", "{{ component(Counter) }}") == "jinja"
-	assert source_format("a.html", '<a href="{{ url }}">') == "jinja"
+	assert source_format("a.html", '<a href="/items/{{ item.id }}">') == "domino"
+	assert source_format("a.html", '<a href="{{ url_for(\'home\') }}">') == "jinja"
 	assert source_format("a.html", "{{ this.label }}") == "jinja"
 	assert source_format("a.jinja", "<p>{{ name }}</p>") == "jinja"
 	assert source_format("a.html", "{# jinja #}\n<p>{{ name }}</p>") == "jinja"
@@ -956,7 +960,7 @@ def test_as_picks_the_components_element(tmp_path):
 
 
 @pytest.mark.parametrize("source, message", [
-	('<Sidebar :as="kind">x</Sidebar>', "can't be bound"),
+	('<Sidebar :as="kind">x</Sidebar>', "isn't Domino's syntax"),
 	('<Sidebar as="Aside">x</Sidebar>', "names the HTML element"),
 ])
 def test_as_takes_an_element_name(tmp_path, source, message):

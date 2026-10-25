@@ -1,7 +1,7 @@
 <Faq class="faq">
 	<dl>
 		{{ for index, question in enumerate(questions) }}
-		<dt><button on-click="toggle(index)" :aria-expanded="expanded(index)">{{ question[0] }}</button></dt>
+		<dt><button on-click="toggle(index)" aria-expanded="{{ expanded(index) }}">{{ question[0] }}</button></dt>
 		{{ if is_open(index) }}
 		<dd>{{ question[1] }}</dd>
 		{{ /if }}

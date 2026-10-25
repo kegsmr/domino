@@ -2,7 +2,7 @@
 <Counter class="counter">
 	<p>Count: <strong>{{ count }}</strong></p>
 	<button on-click="increment">+1</button>
-	<button on-click="reset" :disabled="at_zero">Reset</button>
+	<button on-click="reset" disabled="{{ at_zero }}">Reset</button>
 	{{ if at_zero }}
 	<p class="hint">Click +1. Every click shows at once, even on a slow connection.</p>
 	{{ elif big }}

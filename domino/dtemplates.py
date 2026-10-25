@@ -72,6 +72,11 @@ VALUE_TAG = re.compile(r"\{\{(.*?)\}\}", re.S)
 # {{ for item in items }}, {{ /for }}
 BLOCK = re.compile(r"\s*(if|elif|else|for|/\s*if|/\s*for)\b(.*)", re.S)
 
+# Just "{{ x }}": the attribute's value is x itself
+SINGLE_VALUE = re.compile(r"\s*\{\{(.*?)\}\}\s*", re.S)
+
+OLD_BINDING = '":{name}" isn\'t Domino\'s syntax: write {name}="{{{{ {value} }}}}"'
+
 DIRECTIVE_ATTRIBUTE = (
 	"{name}= isn't how Domino templates show or repeat elements: wrap them in "
 	"{{{{ if x }}}}...{{{{ else }}}}...{{{{ /if }}}} or {{{{ for item in items }}}}...{{{{ /for }}}}"
@@ -85,9 +90,6 @@ JINJA_NAMES = {
 	"request", "session", "g", "config", "get_flashed_messages", "range", "dict", "lipsum",
 	"cycler", "joiner", "namespace",
 }
-
-# A {{ }} in an attribute's value: Jinja (Domino templates bind attributes with :name="...")
-JINJA_ATTRIBUTE = re.compile(r"""=\s*("[^"]*\{\{|'[^']*\{\{)""")
 
 # Functions and methods read as values are called without arguments, like helpers
 CALLED = (types.MethodType, types.FunctionType, types.BuiltinMethodType, types.BuiltinFunctionType, functools.partial)
@@ -111,7 +113,7 @@ def source_format(path, source, setting=None):
 		return marker.group(1)
 	if path.endswith(".jinja") or setting == "jinja":
 		return "jinja"
-	if "{%" in source or "{#" in source or JINJA_ATTRIBUTE.search(source):
+	if "{%" in source or "{#" in source:
 		return "jinja"
 
 	for match in VALUE_TAG.finditer(source):
@@ -1003,14 +1005,14 @@ def compile_definition(tag):
 			if not value or not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", value) or is_component_name(value):
 				raise where.error("as= names the HTML element the component is, like as=\"aside\"")
 			element = value
-		elif name == ":as":
-			raise where.error("as= is written as it is (as=\"aside\"); it can't be bound")
 		elif name.startswith(":"):
-			bound.append((name[1:], compiler.value(value, where)))
+			raise where.error(OLD_BINDING.format(name=name[1:], value=value))
 		elif name.startswith("on-"):
 			events.append((name[3:].lower(), compiler.handler(value, where)))
 		elif name == "debounce":
 			debounce = compiler.debounce(value, where)
+		elif value is not None and "{{" in value:
+			bound.append((name, compiler.attribute(value, where, name)))
 		else:
 			compiler.literal(value, where)
 			static.append((name, True if value is None else unescape(value)))
@@ -1154,6 +1156,27 @@ class Compiler:
 			raise where.error("debounce takes a number of milliseconds, like debounce=\"250\"") from None
 
 
+	def attribute(self, value, where, name=None):
+		"""A function giving an attribute's value. Just "{{ x }}" gives x itself (True writes the bare
+		attribute, False and None leave it out, and a component gets the object); anything else,
+		text with values and {{ if }} blocks in it, gives the text. In class, a dict or list value
+		gives the names that are on ({"done": True} -> done); in style, a dict gives declarations."""
+
+		single = SINGLE_VALUE.fullmatch(value)
+		if single and not BLOCK.match(single.group(1)):
+			return self.value(single.group(1), where)
+
+		parts = attribute_parts(value, where)
+		show = {"class": lambda value: " ".join(class_names(value)), "style": style_text}.get(name, str)
+
+		def text(context):
+			out = []
+			_attribute_text(parts, context, out, show)
+			return "".join(out)
+
+		return text
+
+
 	def literal(self, value, where):
 
 		if value is not None and "{{" in value:
@@ -1197,26 +1220,20 @@ class Compiler:
 			elif name == "debounce" and any(other.startswith("on-") for other, *_ in node.attributes):
 				debounce = self.debounce(value, where)
 			elif name.startswith(":"):
-				bound[name[1:]] = (value, where)
+				raise where.error(OLD_BINDING.format(name=name[1:], value=value))
 			elif name in DIRECTIVES:
 				raise where.error(DIRECTIVE_ATTRIBUTE.format(name=name))
 
-		# class="a" with :class="b" (and style with :style) is one attribute
-		done = set()
 		for name, value, text, where in node.attributes:
 			if name in skip or name.startswith("on-") or name == "debounce" and events:
 				continue
-			key = name[1:] if name.startswith(":") else name
-			if key in done:
-				continue
-			if key in ("class", "style") and key in bound:
-				done.add(key)
-				static = node.attribute(key)
-				static_value = unescape(static[1] or "") if static else ""
-				self.literal(static and static[1], static[3] if static else where)
-				ops.append((CLASS if key == "class" else STYLE, static_value, self.value(*bound[key])))
-			elif name.startswith(":"):
-				ops.append((ATTRIBUTE_OP, key, self.value(value, where)))
+			if value is not None and "{{" in value:
+				# class="task {{ if done }}done{{ /if }}", href="/polls/{{ poll._id }}", disabled="{{ at_zero }}"
+				function = self.attribute(value, where, name)
+				if name in ("class", "style"):
+					ops.append((CLASS if name == "class" else STYLE, "", function))
+				else:
+					ops.append((ATTRIBUTE_OP, name, function))
 			else:
 				self.literal(value, where)
 				ops.append(f" {text}")
@@ -1242,13 +1259,16 @@ class Compiler:
 			if name in skip:
 				continue
 			if name.startswith(":"):
-				bound.append((prop_name(name[1:]), self.value(value, where)))
+				raise where.error(OLD_BINDING.format(name=name[1:], value=value))
 			elif name.startswith("on-"):
 				events.append(("on_" + prop_name(name[3:].lower()), self.handler(value, where)))
 			elif name == "debounce":
 				debounce = self.debounce(value, where)
 			elif name in DIRECTIVES:
 				raise where.error(DIRECTIVE_ATTRIBUTE.format(name=name))
+			elif value is not None and "{{" in value:
+				# items="{{ items }}" passes the list itself; heading="Hi {{ name }}" a string
+				bound.append((prop_name(name), self.attribute(value, where, name)))
 			else:
 				self.literal(value, where)
 				static.append((prop_name(name), True if value is None else unescape(value)))
@@ -1261,6 +1281,68 @@ class Compiler:
 			children = self.nodes(nodes)
 
 		return (COMPONENT, node.name, node.where, static, bound, events, debounce, children, {})
+
+
+def attribute_parts(value, where):
+	"""An attribute's text, values and {{ if }} blocks -> [str | (VALUE, function) | (IF, [(condition, parts)])]."""
+
+	root = []
+	current = root
+	stack = []  # (the if's branches, the parts the if is in)
+	pos = 0
+	for match in VALUE_TAG.finditer(value):
+		if match.start() > pos:
+			current.append(unescape(value[pos:match.start()]))
+		code = match.group(1)
+		block = BLOCK.match(code)
+		if block is None:
+			try:
+				expression = parse_expression(code)
+			except TemplateError as error:
+				raise TemplateError(f"{where}: {error}") from None
+			current.append((VALUE, compile_expression(expression, where)))
+		else:
+			keyword, rest = block.group(1).replace(" ", ""), block.group(2).strip()
+			if keyword in ("for", "/for"):
+				raise where.error("{{ for }} doesn't go inside an attribute; a helper can build the value")
+			if keyword == "if":
+				branches = [(Compiler().value(rest, where), [])]
+				current.append((IF, branches))
+				stack.append((branches, current))
+				current = branches[-1][1]
+			elif not stack:
+				raise where.error(f"{{{{ {keyword} }}}} has no {{{{ if }}}} before it in this attribute")
+			elif keyword == "/if":
+				current = stack.pop()[1]
+			else:
+				branches = stack[-1][0]
+				if branches[-1][0] is None:
+					raise where.error("this {{ if }} already has an {{ else }}")
+				branches.append((Compiler().value(rest, where) if keyword == "elif" else None, []))
+				current = branches[-1][1]
+		pos = match.end()
+	if stack:
+		raise where.error("an {{ if }} in this attribute is never closed with {{ /if }}")
+	if pos < len(value):
+		current.append(unescape(value[pos:]))
+
+	return root
+
+
+def _attribute_text(parts, context, out, show=str):
+
+	for part in parts:
+		if type(part) is str:
+			out.append(part)
+		elif part[0] == VALUE:
+			value = part[1](context)
+			if value is not None and value is not False:
+				out.append(show(value))
+		else:
+			for condition, body in part[1]:
+				if condition is None or condition(context):
+					_attribute_text(body, context, out, show)
+					break
 
 
 def prop_name(name):
