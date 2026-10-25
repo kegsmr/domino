@@ -22,6 +22,16 @@ python examples/counter.py
 
 Then open http://127.0.0.1:5000.
 
+## Events
+
+`element.bind("click", callback)` runs `callback` on the server and re-renders the component it returns. A callback that takes an argument receives an `Event`:
+
+- `event.type`: the DOM event name (`"click"`, `"submit"`, `"change"`, ...)
+- `event.value`: the element's value (`True`/`False` for checkboxes)
+- `event.form`: the surrounding `<form>`'s fields as a dict (repeated names become lists)
+
+Submit events don't reload the page. See `examples/todo.py`.
+
 ## Tests
 
 ```

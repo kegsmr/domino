@@ -1,3 +1,6 @@
+import inspect
+
+
 def get_class_attributes(obj):
     """Returns a dictionary of all class attributes, including inherited ones, 
     excluding methods, instance attributes, and dunder attributes."""
@@ -12,3 +15,17 @@ def get_class_attributes(obj):
                 attributes[k] = v  # Overwrite if a subclass redefines the attribute
 
     return attributes
+
+
+def accepts_argument(func):
+	"""Returns True if `func` can be called with one positional argument."""
+
+	try:
+		parameters = inspect.signature(func).parameters.values()
+	except (TypeError, ValueError):
+		return False
+
+	return any(
+		parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD, parameter.VAR_POSITIONAL)
+		for parameter in parameters
+	)

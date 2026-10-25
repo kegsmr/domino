@@ -71,6 +71,37 @@ class Page:
 DEFAULT_PAGE = Page()
 
 
+class Event:
+	"""What the browser sent with an event: the element's value and its form's fields."""
+
+
+	def __init__(self, type, value=None, form=None):
+
+		self.type = type
+		self.value = value
+		self.form = form or {}
+
+
+	@staticmethod
+	def from_request(event_id, data):
+
+		if not isinstance(data, dict):
+			data = {}
+
+		form = data.get("form")
+		if not isinstance(form, dict):
+			form = {}
+
+		type_ = "after" if event_id.startswith("after-") else event_id.rsplit("-", 1)[-1]
+
+		return Event(type_, data.get("value"), form)
+
+
+	def __repr__(self):
+
+		return f"Event(type={self.type!r}, value={self.value!r}, form={self.form!r})"
+
+
 class Domino(Flask):
 
 
@@ -110,7 +141,10 @@ class Domino(Flask):
 
 			_, callback = event
 
-			result = callback()
+			if accepts_argument(callback):
+				result = callback(Event.from_request(event_id, data.get("data")))
+			else:
+				result = callback()
 
 			if not isinstance(result, Element):
 				return jsonify({"id": None, "html": None})
