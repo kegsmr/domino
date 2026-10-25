@@ -45,11 +45,11 @@ import uvicorn
 from uvicorn._subprocess import get_subprocess
 from uvicorn.supervisors.basereload import BaseReload
 
-from . import core, optimistic, util
-from .core import Element, collect_styles
-from .util import css_class_name
-from .optimistic import state_names
-from .reactive import Collection, State
+from . import _core as core, _optimistic as optimistic, _util as util
+from ._core import Element, collect_styles
+from ._util import css_class_name
+from ._optimistic import state_names
+from ._reactive import Collection, State
 
 
 # The exit code of a server process that needs replacing (see Supervisor)
@@ -67,7 +67,7 @@ POLL_INTERVAL = 0.25
 # Files that matter; others in the app's folder (data, logs, uploads) change without a reload
 WATCHED = (".py", ".html", ".css", ".js", ".json")
 
-# Folders never watched, as for templates (see domino.templates), and hidden ones
+# Folders never watched, as for templates (see domino._templates), and hidden ones
 SKIPPED = ("__pycache__", "node_modules", "site-packages")
 
 # Calls at a module's top level (by name) that would do something twice if the module ran twice:
@@ -107,7 +107,7 @@ class HotReloader:
 		self.root = Path(os.path.realpath(app.root_path))
 		self.app_file = None
 		if app_file is None:
-			from .asgi import app_location
+			from ._asgi import app_location
 			location = app_location(app) or ""
 			# "path/to/app.py:app" (C:\path\to\app.py:app on Windows), or a folder
 			if location.rpartition(":")[0].endswith(".py"):
@@ -202,7 +202,7 @@ class HotReloader:
 				pages_changed = pages_changed or (page and path not in modules)
 			elif path.suffix == ".html":
 				templates.add(str(path))
-				# A template in pages/ may be a page (see domino.pages): its route may come or go
+				# A template in pages/ may be a page (see domino._pages): its route may come or go
 				pages_changed = pages_changed or (folder is not None and is_page_file(folder, path.with_suffix(".py")))
 			elif path.suffix == ".css":
 				stylesheets = True
@@ -265,7 +265,7 @@ class HotReloader:
 		if path.suffix != ".json":
 			return False
 
-		# settings.json, settings.local.json or another file the app reads (see domino.settings)
+		# settings.json, settings.local.json or another file the app reads (see domino._settings)
 		other = os.environ.get("DOMINO_SETTINGS")
 		if other:
 			other = Path(os.path.realpath(other))
@@ -370,7 +370,7 @@ class HotReloader:
 
 	def add_pages(self, folder):
 
-		from .pages import add_pages
+		from ._pages import add_pages
 
 		# Flask allows no new routes once it has served a request, for good reason; the routes
 		# of pages are only added to, and the app isn't serving anything else meanwhile
@@ -419,8 +419,8 @@ class HotReloader:
 	def update_pages(self, edited, classes, pages_changed, templates, css_changed, stylesheets, assets):
 		"""Send each open page what changed. Returns how many pages were updated."""
 
-		from .pages import PageRoute
-		from .templates import paired_template
+		from ._pages import PageRoute
+		from ._templates import paired_template
 
 		paired = {}
 
@@ -483,7 +483,7 @@ class HotReloader:
 		for component, visit in refresh.items():
 			try:
 				with self.request_context(visit):
-					component.refresh()
+					component._refresh()
 			except Exception as error:
 				for page in list(component.__pages__ or ()):
 					self.show_error(page, error)
@@ -640,11 +640,13 @@ def forget_caches(app, templates):
 	optimistic._state_lists.clear()
 	util._class_attributes.clear()
 	core._component_css.clear()
+	core._refreshed.clear()
+	core._html_attributes.clear()
 	core._paired_templates.clear()
 	core._component_props.clear()
 
 	# Domino templates are parsed again, and the files defining components found again
-	from . import dtemplates
+	from . import _dtemplates as dtemplates
 	dtemplates.forget()
 	dtemplates._class_names.clear()
 	finder = getattr(app, "template_finder", None)
@@ -862,7 +864,7 @@ def watched(root, path):
 
 
 def is_page_file(folder, path):
-	"""Whether `path` is a page, a layout or 404.py in the pages folder (see domino.pages)."""
+	"""Whether `path` is a page, a layout or 404.py in the pages folder (see domino._pages)."""
 
 	try:
 		parts = path.relative_to(folder).parts
@@ -964,7 +966,7 @@ class SubprocessConfig(uvicorn.Config):
 
 
 def serve(target, root, host="127.0.0.1", port=5000, **options):
-	"""Serve the app that `target` makes (see domino.asgi.from_environ) in a process that hot
+	"""Serve the app that `target` makes (see domino._asgi.from_environ) in a process that hot
 	reloads changes to the files in `root`, and is replaced when it can't."""
 
 	config = SubprocessConfig(target, factory=True, host=host, port=port, **options)

@@ -12,7 +12,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from . import deploy, devmongo, tailwind
+from . import _deploy as deploy, _devmongo as devmongo, _tailwind as tailwind
 
 
 APP_TEMPLATE = '''\
@@ -56,14 +56,14 @@ INDEX_TEMPLATE = '''\
 COMPONENT_TEMPLATE = '''\
 import time
 
-import domino.tags as t
+from domino import Component
 
 from data import tasks
 
 
-# Logic in Python, markup in tasks.html next to this file: <TaskForm>, <TaskList> and <NoTasks>
-# there are the markup of the classes of those names. Tasks only composes, so it has a render()
-class Tasks(t.div):
+# Logic in Python, markup in tasks.html next to this file: the <component> blocks named TaskForm,
+# TaskList and NoTasks are the markup of these classes. Tasks only composes, so it has a render()
+class Tasks(Component):
 
 
 	def render(self):
@@ -82,8 +82,9 @@ class Tasks(t.div):
 		tasks.insert({"text": text[:200], "created": time.time()})
 
 
-class TaskForm(t.form):
+class TaskForm(Component):
 
+	tag = "form"
 	on_add = None  # a prop: the parent's handler, called with the text
 
 
@@ -94,14 +95,14 @@ class TaskForm(t.form):
 			self.on_add(text)
 
 
-class TaskList(t.div):
+class TaskList(Component):
 
-	tasks = None  # a prop: the tasks to show
+	tasks = []  # a prop: the tasks to show (State would be the component's own memory)
 
 
-class NoTasks(t.p):
+class NoTasks(Component):
 
-	pass
+	tag = "p"
 '''
 
 COMPONENT_HTML_TEMPLATE = '''\
@@ -327,7 +328,7 @@ def load_module(path):
 
 def find_app(module):
 
-	from .core import Domino
+	from ._core import Domino
 
 	if isinstance(getattr(module, "app", None), Domino):
 		return module.app
@@ -342,7 +343,7 @@ def find_app(module):
 def load_app(path):
 	"""The app in a Python file, or in a folder: its app.py, or else one made for its pages/."""
 
-	from .core import Domino
+	from ._core import Domino
 
 	path = Path(path).resolve()
 	if not path.is_dir():
@@ -355,7 +356,7 @@ def load_app(path):
 		raise CliError(f"No app.py or pages/ folder in {path}")
 
 	# No boilerplate needed: an app rooted at the folder, serving its pages/. Remembered so
-	# the reloader's new process can make it again (see domino.asgi.app_location)
+	# the reloader's new process can make it again (see domino._asgi.app_location)
 	app = Domino(module_name(path), root_path=str(path))
 	app.domino_folder = str(path)
 
@@ -412,7 +413,7 @@ def env_workers():
 
 def serve(args):
 
-	from . import asgi, workers
+	from . import _asgi as asgi, _workers as workers
 
 	count = args.workers or env_workers() or workers.default_count()
 
@@ -435,7 +436,7 @@ def serve(args):
 def app_tailwind(path):
 	"""The app's folder and how it uses Tailwind, from its settings, without importing it."""
 
-	from .settings import load_settings
+	from ._settings import load_settings
 
 	path = Path(path).resolve()
 	root = path if path.is_dir() else path.parent

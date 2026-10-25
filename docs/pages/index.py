@@ -146,11 +146,11 @@ def page():
 		t.h2(class_="section-title") [
 			"What's in the box"
 		],
-		Features()([
+		Features() [[
 			t.a(href=href) [
 				t.h3() [title],
 				t.p() [text]
 			]
 			for title, text, href in FEATURES
-		])
+		]]
 	]

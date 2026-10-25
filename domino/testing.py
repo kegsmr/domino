@@ -15,7 +15,7 @@ from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 
-from . import reactive
+from . import _reactive as reactive
 
 
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
@@ -432,7 +432,7 @@ class TestPage:
 
 	def apply(self, payload, reset):
 
-		# Hot reloading sent the whole page again (see domino.hot)
+		# Hot reloading sent the whole page again (see domino._hot)
 		if payload.get("type") == "hot" and payload.get("html"):
 			self.root = parse(payload["html"])
 			return

@@ -12,8 +12,9 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.test import encode_multipart
 
 import domino.tags as t
-from domino import Domino, optimistic
-from domino.components import Document
+from domino import Domino
+from domino import _optimistic as optimistic
+from domino import Document
 from domino.testing import DominoTestError
 
 

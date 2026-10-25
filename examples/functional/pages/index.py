@@ -17,12 +17,12 @@ def page():
 		t.p() [
 			"Say hello to:"
 		],
-		t.ul()([
+		t.ul() [[
 			t.li() [
 				t.a(href=f"/hello/{name}") [
 					name
 				]
 			]
 			for name in NAMES
-		])
+		]]
 	]

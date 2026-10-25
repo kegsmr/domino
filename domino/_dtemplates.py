@@ -42,9 +42,9 @@ from html import unescape
 
 from markupsafe import Markup, escape
 
-from .core import Element, Page, VOID_TAGS, collect_styles, current_styles, note_render_error, render_stack
-from .settings import script_json
-from .templates import TemplateError
+from ._core import Element, Page, VOID_TAGS, collect_styles, current_styles, note_render_error, render_stack
+from ._settings import script_json
+from ._templates import TemplateError
 
 
 # Counts parses, for tests that check each file is parsed once
@@ -141,7 +141,7 @@ def file_format(path, setting=None):
 	if cached is not None and cached[0] == mtime:
 		return cached[1]
 
-	from .templates import DEFINITION_START
+	from ._templates import DEFINITION_START
 
 	with open(path, encoding="utf-8") as file:
 		source = file.read()
@@ -160,7 +160,7 @@ pages_folders = set()
 def is_page_path(path):
 	"""Whether `path` is a page template (see TemplateFinder.is_page)."""
 
-	from .templates import is_page_template
+	from ._templates import is_page_template
 
 	return any(is_page_template(path, folder) for folder in pages_folders)
 
@@ -1459,7 +1459,7 @@ def load(path, check=True):
 def _checking():
 	"""Whether files are checked for changes: while debugging (or TEMPLATES_AUTO_RELOAD)."""
 
-	from .templates import _app
+	from ._templates import _app
 
 	try:
 		app = _app()
@@ -1992,7 +1992,7 @@ def _import_definer(name):
 	paths = list(definitions.get(name, ()))
 	for found in definitions.values():
 		paths += [path for path in found if path not in paths]
-	from .templates import snake_case
+	from ._templates import snake_case
 	paths.append(os.path.join(finder.root, "components", f"{snake_case(name)}.html"))
 
 	# Files already imported, under whatever name
@@ -2074,7 +2074,7 @@ def warn_unused():
 	definitions = finder.current_definitions()
 	finder.warned = True
 
-	from .templates import _app
+	from ._templates import _app
 
 	for name, paths in sorted(definitions.items()):
 		if app_classes(name):
@@ -2096,7 +2096,7 @@ def warn_unused():
 
 def _finder():
 
-	from .templates import _app
+	from ._templates import _app
 
 	try:
 		return getattr(_app(), "template_finder", None)
@@ -2253,7 +2253,7 @@ def _root(element, definition, context):
 	element.__dict__["_domino_root"] = applied
 
 	for name, handler in events:
-		element.bind(name, handler(context), debounce=debounce)
+		element._bind(name, handler(context), debounce=debounce)
 
 
 def _declared_tag(cls):
@@ -2276,7 +2276,7 @@ def whole_page(result):
 	if not isinstance(result, Element) or isinstance(result, (DominoTemplate, WholePage)):
 		return result
 
-	from .templates import paired_template, template_format
+	from ._templates import paired_template, template_format
 
 	cls = type(result)
 	path = paired_template(cls)
@@ -2317,7 +2317,7 @@ class WholePage(Element):
 		html = "<!DOCTYPE html>\n" + self.component._render(level, indent)
 
 		if self.__attributes__:
-			from .templates import _as_page
+			from ._templates import _as_page
 			return _as_page(html, self.__attributes__)
 
 		return html
@@ -2381,7 +2381,7 @@ class DominoTemplate(Element):
 
 		# Returned from a route, the template is the page: it needs the page id and core.js
 		if self.__attributes__:
-			from .templates import _as_page
+			from ._templates import _as_page
 			return _as_page(html, self.__attributes__)
 
 		return html

@@ -2,7 +2,7 @@ import pytest
 
 import domino.tags as t
 from domino import Collection, Domino, State
-from domino.components import Document
+from domino import Document
 from domino.testing import DominoTestError
 
 

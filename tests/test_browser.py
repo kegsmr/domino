@@ -869,7 +869,7 @@ def test_component_css_from_an_event_response_is_added_once(page):
 
 	import domino.tags as t
 	from domino import Domino, State
-	from domino.components import Document
+	from domino import Document
 
 	class Badge(t.span):
 
@@ -1297,7 +1297,7 @@ def site():
 
 	import domino.tags as t
 	from domino import Domino, accounts
-	from domino.components import Document
+	from domino import Document
 
 	app = Domino(__name__)
 	app.secret_key = "test"
@@ -1640,9 +1640,9 @@ def test_a_page_switch_to_another_worker_opens_a_socket_to_it(serve_asgi, page, 
 	# Each page as if from another worker of `domino serve` (all served by one process here),
 	# so every page switch moves to a page the open socket's worker doesn't have
 	import itertools
-	import domino.core
+	import domino._core
 	workers = itertools.cycle(["w1-", "w2-", "w3-"])
-	monkeypatch.setattr(domino.core, "worker_prefix", lambda: next(workers))
+	monkeypatch.setattr(domino._core, "worker_prefix", lambda: next(workers))
 
 	sockets = []
 	posts = []
@@ -1735,7 +1735,7 @@ def test_a_long_list_edited_many_times_ends_like_a_fresh_load(serve_app, browser
 
 	import domino.tags as t
 	from domino import Collection, Domino
-	from domino.components import Document
+	from domino import Document
 
 	items = Collection()
 	for number in range(100):
@@ -1817,7 +1817,7 @@ def chat_app():
 
 	import domino.tags as t
 	from domino import Collection, Domino
-	from domino.components import Document
+	from domino import Document
 
 	messages = Collection()
 	for number in range(200):
@@ -1858,7 +1858,7 @@ def test_typing_after_a_submit_isnt_cleared_by_its_answer(serve_app, browser):
 
 	import domino.tags as t
 	from domino import Collection, Domino
-	from domino.components import Document
+	from domino import Document
 
 	messages = Collection()
 
@@ -1970,7 +1970,7 @@ def test_large_predicted_states_arrive_as_patches_and_show_at_once(serve_app, pa
 
 	import domino.tags as t
 	from domino import Domino, State
-	from domino.components import Document
+	from domino import Document
 
 	class Picker(t.div):
 
@@ -2016,8 +2016,9 @@ def test_large_predicted_states_arrive_as_patches_and_show_at_once(serve_app, pa
 def test_tailwind_rebuilds_are_swapped_in_without_reloading(transport, page, tmp_path, monkeypatch, asgi_server):
 
 	import domino.tags as t
-	from domino import Domino, tailwind
-	from domino.components import Document
+	from domino import Domino
+	from domino import _tailwind as tailwind
+	from domino import Document
 	from test_tailwind import write_fake_cli
 
 	monkeypatch.setenv("DOMINO_HOME", str(tmp_path / "home"))
@@ -2055,7 +2056,8 @@ def test_tailwind_rebuilds_are_swapped_in_without_reloading(transport, page, tmp
 	try:
 		page.goto(url)
 		page.evaluate("window.notReloaded = true")
-		assert page.evaluate(color, "#a") == "rgb(255, 0, 0)"
+		# The watcher's first build may still be running as the page loads
+		page.wait_for_function("getComputedStyle(document.querySelector('#a')).color === 'rgb(255, 0, 0)'", timeout=10000)
 		assert page.evaluate(color, "#b") != "rgb(255, 0, 0)"
 		before = page.get_attribute("link[data-domino-tailwind]", "href")
 
@@ -2137,3 +2139,89 @@ def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser
 		sys.path.remove(str(tmp_path))
 		for name in [name for name in sys.modules if name.split(".")[0] in ("layouts", "components")]:
 			del sys.modules[name]
+
+# The polished API (see tests/test_api_polish.py)
+
+
+import domino.tags as t
+from domino import Component, Document as PolishDocument, Domino as PolishDomino, State as PolishState
+
+
+class PushedTicker(t.div):
+	"""Refreshed from outside, without `live = True`: this module calls pushed_ticker.refresh(),
+	so pages showing it keep a channel open from the first one on."""
+
+	ticks = 0
+
+	def render(self):
+		return [t.p [f"Ticks: {self.ticks}"]]
+
+
+pushed_ticker = PushedTicker()
+
+
+def push_tick():
+
+	pushed_ticker.ticks += 1
+	pushed_ticker.refresh()
+
+
+def test_refresh_without_live_true_updates_the_page(serve_app, page):
+
+	pushed_ticker.ticks = 0
+	app = PolishDomino(__name__)
+
+	@app.route("/")
+	def index():
+		return PolishDocument() [pushed_ticker]
+
+	page.goto(serve_app(app))
+	assert page.locator("[data-live]").count() == 1
+	page.wait_for_function("!document.documentElement.hasAttribute('data-domino-loading')")
+	time.sleep(0.3)  # the socket or stream opens
+
+	for _ in range(2):
+		push_tick()
+	page.wait_for_function("document.querySelector('p').textContent.includes('Ticks: 2')", timeout=5000)
+	assert page.errors == []
+
+
+def test_remove_buttons_with_tuple_handlers_are_instant_under_latency(serve_app, page):
+
+	class Shopping(Component):
+
+		items = PolishState(["milk", "eggs", "bread", "tea"])
+
+		def render(self):
+			return [
+				t.ul [[
+					t.li [item, " ", t.button(on_click=(self.remove, index)) [f"Remove {item}"]]
+					for index, item in enumerate(self.items)
+				]]
+			]
+
+		def remove(self, index):
+			self.items = self.items[:index] + self.items[index + 1:]
+
+	app = PolishDomino(__name__)
+
+	@app.route("/")
+	def index():
+		return PolishDocument() [Shopping()]
+
+	page.goto(serve_app(app))
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	page.get_by_text("Remove eggs").click()
+	# Well before the 1.5 s round trip: the predicted list without eggs
+	page.wait_for_function("document.querySelectorAll('li').length === 3", timeout=700)
+	assert "eggs" not in page.locator("ul").inner_text()
+
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=8000)
+	page.get_by_text("Remove tea").click()
+	page.wait_for_function("document.querySelectorAll('li').length === 2", timeout=700)
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=8000)
+
+	assert page.locator("li").all_inner_texts() == ["milk Remove milk", "bread Remove bread"]
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []

@@ -2,7 +2,7 @@
 
 import sys
 
-from .cli import main
+from ._cli import main
 
 
 sys.exit(main())

@@ -22,8 +22,8 @@ import math
 import re
 
 from . import tags as t
-from .core import Element
-from .reactive import State
+from ._core import Element
+from ._reactive import State
 
 
 class ValidationError(ValueError):
@@ -438,7 +438,7 @@ class Choice(Field):
 		for choice, label in self.choices:
 			options.append(t.option(value=str(choice), selected=str(choice) == value) [str(label)])
 
-		return t.select(**attributes, required=self.required)(options)
+		return t.select(**attributes, required=self.required) [options]
 
 
 class BoundField:
@@ -507,7 +507,7 @@ class BoundField:
 		if field.live:
 			name = self.name
 			debounce = field.debounce if field.live == "input" else None
-			element.bind(field.live, lambda event: self.form._validate_live(name, event), debounce=debounce)
+			element._bind(field.live, lambda event: self.form._validate_live(name, event), debounce=debounce)
 
 		return element
 
@@ -541,7 +541,7 @@ class BoundField:
 		parts = [self.input(), self.label()] if checkbox else [self.label(), self.input()]
 		parts += [self.help(), self.error()]
 
-		return t.div(class_=["field", "checkbox"] if checkbox else "field")([part for part in parts if part != ""])
+		return t.div(class_=["field", "checkbox"] if checkbox else "field") [[part for part in parts if part != ""]]
 
 
 class Fields:
@@ -581,7 +581,8 @@ class Fields:
 
 
 class Option:
-	"""A setting on the Form class (like submit_text), kept out of the HTML attributes."""
+	"""No longer needed: class attributes are plain Python settings and never HTML attributes,
+	so `submit_text = "Join"` is enough. Kept so code that uses it keeps working."""
 
 
 	def __init__(self, value):
@@ -599,7 +600,7 @@ class Form(t.form):
 	validate_<field>(self, value) and validate(self, data) to check more, and render() to lay
 	it out yourself with self.fields."""
 
-	submit_text = Option("Submit")
+	submit_text = "Submit"
 
 	# Submit handlers use the event, so there's nothing to predict
 	optimistic = False
@@ -656,9 +657,6 @@ class Form(t.form):
 				elif name in fields:
 					del fields[name]
 		cls._fields = fields
-
-		if "submit_text" in vars(cls) and not isinstance(vars(cls)["submit_text"], Option):
-			cls.submit_text = Option(vars(cls)["submit_text"])
 
 
 	def __init__(self, *, initial=None, submitted=None, submit_text=None, **kwargs):
@@ -832,7 +830,7 @@ class Form(t.form):
 	def _render(self, level=0, indent=4):
 
 		# Bound on every render, so it's there whatever render() a subclass has
-		self.bind("submit", self._submit)
+		self._bind("submit", self._submit)
 
 		return super()._render(level, indent)
 

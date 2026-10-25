@@ -32,7 +32,7 @@ Entry = namedtuple("Entry", "title url context")
 GUIDE = [
 	Topic("installation", "Installation", "Start", "Install Domino and run the examples.", ["Install", "Run an example"]),
 
-	Topic("components", "Components", "Guide", "Classes that render HTML, keep state and handle events.", ["Components", "Attributes"]),
+	Topic("components", "Components", "Guide", "Classes that render HTML, keep state and handle events.", ["Components", "Imports", "Attributes"]),
 	Topic("state", "State", "Guide", "Values that re-render what shows them when they change.", ["State"]),
 	Topic("events", "Events", "Guide", "Clicks, typing and submits, handled in Python on the server.", ["Events", "Loading and errors"]),
 	Topic("devtools", "Developer tools", "Guide", "Error pages, the component inspector and the event log, while debugging.", ["Developer tools"]),

@@ -1,5 +1,4 @@
-import domino.tags as t
-from domino import State
+from domino import Component, State
 
 
 QUESTIONS = [
@@ -9,7 +8,7 @@ QUESTIONS = [
 ]
 
 
-class Faq(t.div):
+class Faq(Component):
 
 	open = State(None)
 	questions = QUESTIONS

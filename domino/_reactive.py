@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 def current_component():
 	"""The component whose render() is running in this thread, if any."""
 
-	from .core import render_stack
+	from ._core import render_stack
 
 	stack = render_stack()
 	if stack:
@@ -118,9 +118,9 @@ class Batch:
 
 		for component in self.pending:
 			if id(component) in skipped:
-				component.refresh(skip=self.skip_page)
+				component._refresh(skip=self.skip_page)
 			else:
-				component.refresh()
+				component._refresh()
 
 
 # Batches flushed in the background, one at a time so updates keep their order
@@ -193,7 +193,7 @@ def schedule(component):
 		pending.pending[component] = None
 		return
 
-	component.refresh()
+	component._refresh()
 
 
 class predicting:

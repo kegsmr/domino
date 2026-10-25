@@ -2,9 +2,10 @@
 
 A handler qualifies when it only changes the component's own State attributes, using plain
 expressions (arithmetic, comparisons, f-strings, list/tuple literals, a few builtins) of constants
-and those attributes, possibly inside if/else. So does a lambda that only calls such a method of
-the component with plain values (`lambda event, index=index: self.select(index)`). Running it can
-then have no effect outside the component. Anything else (database writes, calls, other objects)
+and those attributes, possibly inside if/else. So does a handler with arguments, `(self.select,
+index)` (a functools.partial), or a lambda that only calls such a method of the component with
+plain values (`lambda event, index=index: self.select(index)`). Running it can then have no effect
+outside the component. Anything else (database writes, calls, other objects)
 is never run ahead of time.
 
 The server follows those handlers from the component's current state to every state they reach,
@@ -15,6 +16,7 @@ many (a counter can go up forever), it ships just the states one click away.
 """
 
 import ast
+import functools
 import inspect
 import json
 import linecache
@@ -22,9 +24,9 @@ import textwrap
 import types
 from copy import deepcopy
 
-from . import patches, reactive
-from .reactive import State
-from .util import accepts_argument
+from . import _patches as patches, _reactive as reactive
+from ._reactive import State
+from ._util import accepts_argument
 
 
 # Plain functions allowed in a predictable handler: they have no side effects
@@ -219,7 +221,8 @@ class Checker:
 
 def predictable_callback(component, callback):
 	"""Whether `callback`, bound in `component`'s render, can run ahead of time: a predictable
-	method of the component, or a lambda that only calls one with plain values."""
+	method of the component, a method given its arguments (`on_click=(self.select, index)`, a
+	functools.partial), or a lambda that only calls one with plain values."""
 
 	# on-click="remove(item)" in a Domino template: one of the component's methods, with values
 	call = getattr(callback, "__domino_call__", None)
@@ -229,6 +232,13 @@ def predictable_callback(component, callback):
 
 	if getattr(callback, "__self__", None) is component:
 		return getattr(callback, "__name__", None) in predictable_methods(type(component))
+
+	if isinstance(callback, functools.partial):
+		method = callback.func
+		return (
+			not callback.keywords and getattr(method, "__self__", None) is component
+			and callable_methods(type(component)).get(getattr(method, "__name__", None)) == len(callback.args)
+		)
 
 	if not isinstance(callback, types.FunctionType) or callback.__name__ != "<lambda>":
 		return False
@@ -352,11 +362,16 @@ def own_callbacks(component, bound):
 def takes_argument(callback):
 	"""accepts_argument() for a method or lambda, from its code: inspect.signature is slow."""
 
+	given = 0
+	if isinstance(callback, functools.partial) and not callback.keywords:
+		given = len(callback.args)
+		callback = callback.func
+
 	code = getattr(getattr(callback, "__func__", callback), "__code__", None)
 	if code is None:
 		return accepts_argument(callback)
 
-	positional = code.co_argcount - (1 if hasattr(callback, "__func__") else 0)
+	positional = code.co_argcount - (1 if hasattr(callback, "__func__") else 0) - given
 
 	return positional > 0 or bool(code.co_flags & inspect.CO_VARARGS)
 
@@ -400,7 +415,7 @@ def graph(component, callbacks, render, limit=None, budget=None):
 	{"states": [html per state], "edges": [{event: state index} per state]}. State 0 is the
 	current one, whose HTML the browser already has (null here); a state whose HTML another
 	state already has refers to it by its index, and a large state may be a patch (a list, see
-	domino.patches) against the state whose index is "base". Event ids leave out the component's prefix
+	domino._patches) against the state whose index is "base". Event ids leave out the component's prefix
 	("event-<id>-"), which is the same for all of them.
 
 	When more than `limit` states are reachable, or their HTML is longer than `budget`, only the
@@ -526,7 +541,7 @@ class Graph:
 		data = {"states": self.states, "edges": self.edges}
 
 		# States usually differ in a line or two (one item of a list toggled, say), so a large
-		# one is sent as a patch against the first, which core.js applies (see domino.patches)
+		# one is sent as a patch against the first, which core.js applies (see domino._patches)
 		texts = [index for index, html in enumerate(self.states) if isinstance(html, str)]
 		if len(texts) < 2 or len(self.states[texts[0]]) < patches.MIN_SIZE:
 			return data
@@ -544,7 +559,7 @@ class Graph:
 
 def explain(component, callback):
 	"""Why `callback`, bound in `component`'s render, isn't run ahead of time, or None if it is.
-	Only for the inspector in debug mode (see domino.devtools), so it can take its time."""
+	Only for the inspector in debug mode (see domino._devtools), so it can take its time."""
 
 	cls = type(component)
 	if getattr(cls, "optimistic", True) is False:
@@ -566,6 +581,21 @@ def explain(component, callback):
 		if not states:
 			return nothing
 		return f"it calls {method.__name__}() with {len(args)} value(s), and " + method_reason(method.__func__, states, read_parameters=True)
+
+	if isinstance(callback, functools.partial):
+		method = callback.func
+		owner = getattr(method, "__self__", None)
+		if callback.keywords:
+			return "it's given keyword arguments; give the method plain positional ones: (self.method, value)"
+		if owner is not component:
+			whose = type(owner).__name__ if owner is not None else "nothing"
+			return f"it calls a method of {whose}, not of this {cls.__name__}"
+		if not states:
+			return nothing
+		count = callable_methods(cls).get(method.__name__)
+		if count is not None and count != len(callback.args):
+			return f"{method.__name__}() takes {count} arguments but is given {len(callback.args)}"
+		return f"it calls {method.__name__}(), and " + method_reason(method.__func__, states, read_parameters=True)
 
 	owner = getattr(callback, "__self__", None)
 	if owner is not None:

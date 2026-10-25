@@ -1,4 +1,4 @@
-"""Tailwind CSS with zero setup (domino.tailwind), with a fake CLI so nothing is downloaded."""
+"""Tailwind CSS with zero setup (domino._tailwind), with a fake CLI so nothing is downloaded."""
 
 import hashlib
 import json
@@ -14,10 +14,11 @@ from pathlib import Path
 
 import pytest
 
-import domino.cli as cli
+import domino._cli as cli
 import domino.tags as t
-from domino import Domino, tailwind, template
-from domino.components import Document
+from domino import Domino, template
+from domino import _tailwind as tailwind
+from domino import Document
 
 from conftest import EXAMPLES, running, wait_until
 
@@ -466,8 +467,8 @@ def test_production_without_cli_or_css_logs_why(tmp_path, monkeypatch, capsys):
 
 def test_app_run_builds_once_in_production(tmp_path, fake_cli, monkeypatch):
 
-	import domino.asgi
-	monkeypatch.setattr(domino.asgi, "serve", lambda *args, **kwargs: None)
+	import domino._asgi
+	monkeypatch.setattr(domino._asgi, "serve", lambda *args, **kwargs: None)
 	app = make_app(tmp_path / "app", {"tailwind": True, "mongo": {"auto": False}})
 
 	app.run(debug=False)
@@ -655,8 +656,8 @@ def test_a_watcher_that_cant_start_is_logged_not_raised(tmp_path, monkeypatch, c
 
 def test_app_run_in_debug_watches(tmp_path, fake_cli, monkeypatch, stop_watchers):
 
-	import domino.asgi
-	monkeypatch.setattr(domino.asgi, "serve", lambda *args, **kwargs: None)
+	import domino._asgi
+	monkeypatch.setattr(domino._asgi, "serve", lambda *args, **kwargs: None)
 	app = make_app(tmp_path / "app", {"tailwind": True, "mongo": {"auto": False}})
 
 	app.run(debug=True)
@@ -668,7 +669,7 @@ def test_app_run_in_debug_watches(tmp_path, fake_cli, monkeypatch, stop_watchers
 
 WATCHING_PROCESS = '''\
 import sys, time
-from domino import tailwind
+from domino import _tailwind as tailwind
 tailwind.watch(sys.argv[1], tailwind.options({"tailwind": True}, sys.argv[1]))
 print("watching", flush=True)
 if sys.argv[2] == "exit":
@@ -752,8 +753,8 @@ def test_tailwind_alone_prints_its_help(capsys):
 
 def test_serve_builds_before_starting_the_workers(tmp_path, fake_cli, monkeypatch):
 
-	import domino.workers
-	monkeypatch.setattr(domino.workers, "serve", lambda *args: 0)
+	import domino._workers
+	monkeypatch.setattr(domino._workers, "serve", lambda *args: 0)
 	make_app(tmp_path / "app", {"tailwind": True}, {"app.py": "", "pages/index.py": 'x = "tw-served"'})
 
 	assert cli.main(["serve", str(tmp_path / "app"), "--workers", "2"]) == 0

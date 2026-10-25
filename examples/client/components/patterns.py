@@ -22,10 +22,10 @@ class Patterns(t.section):
 		return [
 			Life(on_save=self.save),
 			t.h3() ["Saved on the server"],
-			t.ol()([
+			t.ol() [[
 				t.li() [f"Generation {pattern['generation']}: {pattern['alive']} cells alive"]
 				for pattern in self.saved
-			]) if self.saved else t.p(class_="empty") ["Nothing yet: press “Save to server”."],
+			]] if self.saved else t.p(class_="empty") ["Nothing yet: press “Save to server”."],
 		]
 
 

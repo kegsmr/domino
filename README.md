@@ -56,7 +56,7 @@ import domino.tags as t
 
 def page(id):
 
-	return t.h1() [
+	return t.h1 [
 		f"User {id}"
 	]
 ```
@@ -65,11 +65,11 @@ A page can also be a component class named `Page`. Each visit gets a new one, an
 
 ```python
 # pages/counter.py  ->  /counter
-from domino import State
+from domino import Component, State
 import domino.tags as t
 
 
-class Page(t.div):
+class Page(Component):
 
 	count = State(0)
 
@@ -117,7 +117,7 @@ A layout is the document and navigation pages share. It's a file of its own, by 
 ```
 
 - A page in a layout is the whole document: Domino adds the doctype, its script and the components' CSS. `<page>` without `layout=` is just its markup (or a whole document of its own, with `<html>`).
-- A layout needs no Python class. What a page gives it (`title="About"`) are its values, and a value it isn't given shows nothing. A class with the layout's name (`layouts/main.py`, `class Main(t.div)`) adds what any component has: helpers (the signed-in user for the nav), `State` and handlers (a menu that opens), live data. Its handlers are answered by the server rather than predicted.
+- A layout needs no Python class. What a page gives it (`title="About"`) are its values, and a value it isn't given shows nothing. A class with the layout's name (`layouts/main.py`, `class Main(Component)`) adds what any component has: helpers (the signed-in user for the nav), `State` and handlers (a menu that opens), live data. Its handlers are answered by the server rather than predicted.
 - Layouts nest: `<layout name="Admin" layout="Main">` goes inside Main (given the same values), so `<page layout="Admin">` gets the site's document with an admin frame around the page.
 - From Python, a page returns it like any component: `return Main(title="About") [Article()]`.
 - Links between pages keep the layout's elements as they are (see [Moving between pages](#moving-between-pages)), and saving it updates open pages.
@@ -127,14 +127,14 @@ The older way still works: a `layout.py` in `pages/` or a subfolder wraps every 
 
 ```python
 # pages/layout.py
+from domino import Document
 import domino.tags as t
-from domino.components import Document
 
 
 def layout(content):
 
 	return Document(title="My site") [
-		t.nav() [
+		t.nav [
 			t.a(href="/") ["Home"],
 			t.a(href="/about") ["About"]
 		],
@@ -196,7 +196,7 @@ domino: hot reloaded components/counter.py (2 pages) in 12 ms
 - A syntax error, or any error while reloading, shows in the open tabs (the debug overlay, with the traceback) and the old code keeps running; the next save that works clears it.
 - Pages are made again for the current URL with the cookies they were loaded with, so they work with logins.
 
-Some changes can't be swapped in safely, so the server restarts instead (`domino: restarting: app.py changed`) and the open tabs reload by themselves once it's back: `app.py` (or any module that imports it), `settings.json` and `settings.local.json`, a deleted module, and modules that start threads, processes or apps, or add routes, when they're imported, since running them again would do it twice. That last one is a guess from the module's code (calls such as `threading.Thread(...).start()`, `Domino(...)` or `@app.route` outside functions; see `domino/hot.py`); a module can decide for itself with `__hot_reload__ = False` (always restart) or `__hot_reload__ = True` (always hot reload). Files outside the app's folder (Domino itself, installed packages) aren't watched; restart for those.
+Some changes can't be swapped in safely, so the server restarts instead (`domino: restarting: app.py changed`) and the open tabs reload by themselves once it's back: `app.py` (or any module that imports it), `settings.json` and `settings.local.json`, a deleted module, and modules that start threads, processes or apps, or add routes, when they're imported, since running them again would do it twice. That last one is a guess from the module's code (calls such as `threading.Thread(...).start()`, `Domino(...)` or `@app.route` outside functions; see `domino/_hot.py`); a module can decide for itself with `__hot_reload__ = False` (always restart) or `__hot_reload__ = True` (always hot reload). Files outside the app's folder (Domino itself, installed packages) aren't watched; restart for those.
 
 `{"domino": {"hot_reload": false}}` in `settings.json` restarts the server on every change instead, as uvicorn's reloader does. Production servers (`domino serve`, `app.run()` without debug mode) never watch files.
 
@@ -222,6 +222,17 @@ Keyword arguments become HTML attributes; underscores turn into hyphens (`aria_l
 ```python
 t.button(class_="btn btn-primary", aria_pressed="false", style={"font_weight": "bold"})
 ```
+
+A component's class attributes are Python, never HTML: `placeholder = "What needs doing?"` is a setting the component uses, not `<div placeholder=...>`. HTML attributes its element always has go in `attrs`, which subclasses add to; keyword arguments and `configure()` win over them:
+
+```python
+class TaskList(Component):
+
+	attrs = {"role": "list", "aria_label": "Tasks"}   # <div role="list" aria-label="Tasks">
+	empty_text = "Nothing to do"                       # a setting (a prop), not an attribute
+```
+
+Before 0.4, a class attribute holding a string or number was also written on the element as an HTML attribute (`title = "Tasks"` gave every card a tooltip); move those that were meant as HTML attributes into `attrs`.
 
 ## Styles
 
@@ -320,11 +331,10 @@ A component is a Python class with its markup in HTML. **Markup lives in `.html`
 
 ```python
 # components/counter.py
-from domino import State
-import domino.tags as t
+from domino import Component, State
 
 
-class Counter(t.div):
+class Counter(Component):
 
 	count = State(0)  # per component, like React's useState
 
@@ -345,7 +355,7 @@ class Counter(t.div):
 Changing state re-renders the component, and only what changed is updated in the browser. A component that only decides *which* components to show writes that in Python, in `render()`, and passes them data and its own handlers:
 
 ```python
-class Tasks(t.div):
+class Tasks(Component):
 
 	items = State([])
 
@@ -358,14 +368,18 @@ class Tasks(t.div):
 		return [TaskForm(on_add=self.add), TaskList(items=self.items)]
 ```
 
-See [Templates](#templates) for the template syntax. Components can also be written entirely in Python, with tag classes, which suits small pieces and generated markup:
+**Attributes are set by the parent; `State` is the component's own memory.** A class attribute (`items = []`, `on_add = None`) is a prop: `TaskList(items=found)` sets it, and other keyword arguments are HTML attributes. A misspelled prop holding a list, dict or object (`TaskList(itmes=found)`) gets a warning in debug mode, with the name it probably meant. A handler prop (`on_add = None`) is the parent's method, which the child calls (`self.on_add(text)`); the event then re-renders the parent.
+
+`Component` renders as a `<div>`; `tag = "section"` on the class makes it another element (a template's `as="section"` must agree). Subclassing a tag, `class Card(t.article)`, works too.
+
+See [Templates](#templates) for the template syntax. Components can also be written entirely in Python, with tag classes, which suits small or dynamic pieces and generated markup:
 
 ```python
-from domino import Domino, State
+from domino import Component, State
 import domino.tags as t
 
 
-class Counter(t.div):
+class Counter(Component):
 
 	count = State(0)  # per component, like React's useState
 
@@ -373,7 +387,7 @@ class Counter(t.div):
 	def render(self):
 
 		return [
-			t.p() [f"Count: {self.count}"],
+			t.p [f"Count: {self.count}"],
 			t.button(on_click=self.increment) ["+"],
 		]
 
@@ -383,10 +397,32 @@ class Counter(t.div):
 		self.count += 1
 ```
 
+- A tag's children go in square brackets: `t.p ["text"]`, or `t.a(href="/") ["text"]` with attributes. Lists, tuples and generators in them are flattened and `None`/`False` skipped, so `t.ul [[t.li [item] for item in items]]` and `t.p ["Hi", user and t.b [user]]` work (a bare generator needs its own brackets: `t.ul [(t.li [x] for x in xs)]`). Numbers become text.
 - `on_<event>=handler` (`on_click`, `on_submit`, `on_input`, `on_change`, ...) runs `handler` on the server. Add `debounce=ms` to wait until the user pauses.
-- A handler that returns nothing re-renders whatever its changes affected (or the component it belongs to); returning a component re-renders that one.
-- `init(self)` runs once when the component is created, for setup that isn't state.
-- The older style, `self([...])` with `element.bind("click", callback)` and `return self`, still works.
+- In a loop, give the handler its arguments as a tuple: `on_click=(self.remove, index)` calls `self.remove(index)`, and a handler that takes one more argument gets the event after them. (A `lambda` in a loop sees the loop variable's last value unless you write `index=index`.) Such handlers are [instant](#instant-updates) like any other.
+- `render()` returns the children; a handler that returns nothing re-renders whatever its changes affected (or the component it belongs to); returning a component re-renders that one.
+- `init(self)` runs once when the component is created, for setup that isn't state. Events it binds (`self.configure(on_click=...)`) keep working after re-renders.
+- Inline elements add no stray spaces: `t.p ["Built with ", t.a(href="/") ["Domino"], "."]` renders `<p>Built with <a href="/">Domino</a>.</p>`, while blocks stay one element per line.
+
+#### Older styles
+
+They still work, most with a `DeprecationWarning`, for at least one more release:
+
+| Older | Now |
+|---|---|
+| `self([children])` in `render()`, then `return self` | `return [children]` |
+| `t.ul()([items])` | `t.ul [items]` |
+| `t.h1(parent, "text")` (adds itself to `parent`) | `parent [t.h1 ["text"]]`, or return it from `render()` |
+| `element.bind("click", handler)` | `on_click=handler` |
+| `lambda event, i=i: self.remove(i)` | `on_click=(self.remove, i)` (lambdas aren't deprecated) |
+| `live = True` for components that are `refresh()`ed | nothing (see [Server push](#server-push)) |
+| class attributes as HTML attributes (`role = "list"`, no longer rendered) | `attrs = {"role": "list"}` |
+| `class X(t.div)` | `class X(Component)` (both work, no warning) |
+| `from domino.components import Document`, `domino.core`, ... | `from domino import Document`; the other modules are internal now (see [Imports](#imports)) |
+
+### Imports
+
+`from domino import ...` has what apps use: `Domino`, `Component`, `Document`, `State`, `Collection`, `Event`, `redirect`, `batch`, `wait`, `html`, `template` and `TemplateError`, plus Flask's `request`, `session`, `g`, `abort` and `url_for`. The public modules are `domino.tags` (`import domino.tags as t`), `domino.accounts`, `domino.forms`, `domino.testing`, `domino.mail`, `domino.mongo` and `domino.bootstrap`. Everything else is internal, in modules whose names start with an underscore; the old paths (`domino.core`, `domino.components`, ...) work for one more release, with a `DeprecationWarning`.
 
 ### State
 
@@ -427,7 +463,7 @@ Domino templates are plain HTML with three additions: components are capitalized
 
 ```python
 # components/todos.py
-class TodoList(t.div):
+class TodoList(Component):
 
 	items = State([])
 
@@ -460,7 +496,7 @@ class TodoList(t.div):
 
 - Attributes become what the component declares: a `State` (its starting value), a property with a setter, or a class attribute (`heading = ""`). Plain attributes are strings; `items="{{ visible }}"` passes the value itself. Other attributes (`class`, `id`, `aria-*`, ...) go on its element, as in Python.
 - `on-add="add"` passes a handler: if the component declares `on_add = None`, the handler is its prop, which it calls itself (`self.on_add(text)`), and the event then re-renders the parent; otherwise it's a DOM event on the component's element.
-- What's between `<Card>` and `</Card>` goes where Card's template has `<slot />` (`<slot>fallback</slot>` shows its own content when there's none). Python composition works the same way: `Card(heading="Tips") [t.p() ["..."]]`.
+- What's between `<Card>` and `</Card>` goes where Card's template has `<slot />` (`<slot>fallback</slot>` shows its own content when there's none). Python composition works the same way: `Card(heading="Tips") [t.p ["..."]]`.
 
 **Values.** `{{ name }}`, `{{ item.text }}` and `{{ item["text"] }}` read the component's `State`, properties, attributes and helper methods (called without arguments: helpers are how logic stays in Python), and loop variables. `.name` also reads a dict's key, and a missing key is nothing; an unknown name, or an object's unknown attribute, is an error naming the template's file, line and column, with the names that exist. `helper(item, "text")` calls a method with values; `not x` is the one operator. Nothing else: no comparisons, arithmetic or filters, so write a helper (`is_open(index)`, `remaining`).
 
@@ -488,11 +524,10 @@ Jinja stays available, for pages and existing templates. A file is Jinja when it
 `html()` turns a [template string](https://peps.python.org/pep-0750/) (`t"..."`) into the same Domino elements tag classes make, so events, `State`, escaping, instant updates and in-place patching all work as before:
 
 ```python
-from domino import State, html
-import domino.tags as t
+from domino import Component, State, html
 
 
-class Counter(t.div):
+class Counter(Component):
 
 	count = State(0)
 	items = State(["a", "b"])
@@ -547,7 +582,7 @@ Components can have Jinja templates too, the older way: a component without a `r
 
 ```python
 # components/counter.py
-class Counter(t.div):
+class Counter(Component):
 
 	count = State(0)
 
@@ -567,7 +602,7 @@ Domino templates are the recommended way to write markup; Jinja suits existing t
 
 ## Events
 
-`element.bind("click", callback)` (or `on_click=callback`) runs `callback` on the server. A callback that takes an argument receives an `Event`:
+`on_click=callback` (or `on-click="callback"` in a template) runs `callback` on the server. A callback that takes an argument receives an `Event` (after the arguments of `on_click=(callback, *args)`):
 
 - `event.type`: the DOM event name (`"click"`, `"submit"`, `"change"`, ...)
 - `event.value`: the element's value (`True`/`False` for checkboxes)
@@ -609,6 +644,7 @@ In debug mode (`domino run`, `app.run(debug=True)`), Domino helps you find what 
 - **The component inspector**: press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> or run `Domino.inspect()` in the browser console, hover a component to outline it, and click it. The panel shows its class and source file, its `State` values (kept up to date as the component re-renders), its attributes, the events it bound and their handlers, whether each is [instant](#instant-updates) and if not, why not (`add() line 70: it reads the event...`), what its last render subscribed to, and its parents and children (click one to inspect it). `Domino.inspect(element)` inspects a given element's component.
 - **The event log**, the panel's Events tab: this page's last 50 events, each with its element, handler, time on the server, round trip, size each way, and whether a predicted state was shown and matched the server's answer.
 - **Startup warnings**: a debug server warns about module-level `Collection()`s (in memory, so each `domino serve` worker would have its own) and named Collections with no MongoDB to go to.
+- **Changes that can't show**: a handler that changes a plain attribute of its component (not a `State`) when nothing re-renders the component logs `Counter.count changed in increment() but isn't a State, so the page didn't update — use count = State(0)`. A keyword argument that isn't a prop and holds a list, dict or object (`TaskList(itmes=found)`) logs `TaskList got itmes=[...], which isn't an attribute of TaskList, so it was written as an HTML attribute. Did you mean items?`
 
 None of this exists outside debug mode: pages are byte for byte what they'd be without it (the tools are a separate script, `/_domino/debug.js`, linked only from debug pages), and its URLs answer 404. The inspector only shows a page the components it shows, asked with the page's own id. Page tests run with `app.testing` rather than debug mode, so a failing handler or page fails the test with its traceback, as before. See `examples/devtools/`.
 
@@ -624,7 +660,7 @@ class Avatar(t.div):
 			t.form(on_submit=self.save) [
 				t.input(type="file", name="photo", accept="image/*"),
 				t.input(type="file", name="extras", multiple=True),
-				t.button() ["Upload"],
+				t.button ["Upload"],
 			],
 			t.input(type="file", name="quick", on_change=self.quick),  # uploads as soon as a file is picked
 		]
@@ -663,7 +699,7 @@ The latency simulator delays uploads too (a round trip of their own before the e
 
 ### Server push
 
-`component.refresh()` re-renders a component and sends it to every open page showing it, without waiting for a browser event. It can be called from anywhere, including a background thread. Mark components that will be refreshed with the class attribute `live = True`, so pages showing one listen for updates (see [How the browser talks to the server](#how-the-browser-talks-to-the-server)); pages without one don't. A component shown on several pages is rendered once per refresh. See `examples/clock/`.
+`component.refresh()` re-renders a component and sends it to every open page showing it, without waiting for a browser event. It can be called from anywhere, including a background thread. There's nothing to mark: pages showing a component that gets refreshed keep a channel open for its updates (see [How the browser talks to the server](#how-the-browser-talks-to-the-server)), and pages without one don't. Domino knows from the first page on when the component's own module refreshes it (`clock = Clock()` and `clock.refresh()` at its top level, or `self.refresh()` in its methods), and otherwise from its first `refresh()`; `live = True` on the class still marks one explicitly (for a component refreshed only from elsewhere, before any refresh), and `live = False` opts out. A component shown on several pages is rendered once per refresh. See `examples/clock/`.
 
 ### Reactive data
 
@@ -678,7 +714,7 @@ online = State(0)
 class Chat(t.ul):
 
 	def render(self):
-		return [t.li() [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)]
+		return [t.li [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)]
 
 	def send(self, event):
 		messages.insert({"text": event.form["text"], "sent": time.time()})  # every Chat updates
@@ -760,7 +796,7 @@ def login():
 @accounts.login_required                           # under @app.route, or on a page's page()
 def private():
 	user = accounts.current_user()
-	return Document() [t.p() [f"Hello {user['email']}"]]
+	return Document() [t.p [f"Hello {user['email']}"]]
 ```
 
 - `accounts.current_user()` is the signed-in user's document (without its password hash), or None; `accounts.user_id()` is just the id. Both are reactive: a component that reads them in `render()` re-renders when the user logs in or out on that page.
@@ -878,28 +914,28 @@ Settings work as a dict or with attributes: `app.settings.mongo.url`, `app.setti
 
 - `domino` sets Domino's Flask config: `page_ttl` becomes `app.config["DOMINO_PAGE_TTL"]`, and so on. Changes to `app.config` made in code afterwards still win. From the environment, these are `DOMINO_DOMINO__PAGE_TTL=600` and so on.
 - `secret_key` sets `app.secret_key`.
-- `public` is sent to the browser, where it's available as `Domino.settings` (like `Meteor.settings.public`). `Document` adds it to the page head; pages built without `Document` can add `PublicSettings()` from `domino.components` to theirs. Nothing outside `public` is sent.
+- `public` is sent to the browser, where it's available as `Domino.settings` (like `Meteor.settings.public`). `Document` adds it to the page head; pages built without `Document` can add `PublicSettings()` (`from domino import PublicSettings`) to theirs. Nothing outside `public` is sent.
 
 See `examples/settings/`.
 
 ### Instant updates
 
-Handlers that only change their component's own `State` with plain expressions — `self.count += 1`, `self.open = not self.open`, `if len(self.items) < 3: ...` — feel instant even on a slow connection, with nothing to configure. So do lambdas that only call such a method with plain values, like `on_click=lambda event, index=index: self.select(index)` (the method's parameters can be read like constants). Domino decides which handlers qualify by reading their code: anything that calls functions (like `messages.insert(...)`), uses the event's value, or touches anything but the component's `State` is never run ahead of time.
+Handlers that only change their component's own `State` with plain expressions — `self.count += 1`, `self.open = not self.open`, `if len(self.items) < 3: ...` — feel instant even on a slow connection, with nothing to configure. So do such methods given plain values, `on_click=(self.select, index)` (the method's parameters can be read like constants), and lambdas that only call one, like `on_click=lambda event, index=index: self.select(index)`. Domino decides which handlers qualify by reading their code: anything that calls functions (like `messages.insert(...)`), uses the event's value, or touches anything but the component's `State` is never run ahead of time.
 
 When the server renders such a component it follows those handlers from its current state to every state they lead to, renders each state once, and ships them inside the component (inert JSON) with which event leads to which state. Menus, tabs, accordions, toggles, a stepper with bounds or a carousel have only a few states, so the browser can show any number of clicks in a row the moment they happen, without waiting for the server even once. The events still go to the server, in order, and the server stays the source of truth: its answer to the last click in flight confirms what's shown, or puts it right if something changed on the server meanwhile (answers to earlier clicks don't undo later ones). If an event fails, the component goes back to what the server last showed. While the page shows something the server hasn't confirmed, the component has a `data-predicted` attribute.
 
 A component whose states could go on forever (a counter) gets the states one click away instead, as do those with more than 16 states or more than 32 KB of HTML for them; set `optimistic_states = n` on the class to change the number. Set `optimistic = False` to turn it all off (each state costs a render on the server). See `examples/instant/`.
 
 ```python
-class Tabs(t.div):
+class Tabs(Component):
 
 	active = State(0)
 
 	def render(self):
 		return [
-			t.button(on_click=lambda event, index=index: self.select(index)) [name]
-			for index, name in enumerate(["Overview", "How", "Truth"])
-		] + [t.p() [f"Tab {self.active}"]]
+			[t.button(on_click=(self.select, index)) [name] for index, name in enumerate(["Overview", "How", "Truth"])],
+			t.p [f"Tab {self.active}"],
+		]
 
 	def select(self, index):
 		self.active = index

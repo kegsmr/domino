@@ -9,7 +9,7 @@ from pathlib import Path
 
 import domino.tags as t
 from domino import Collection, Domino, State
-from domino.components import Document
+from domino import Document
 
 
 app = Domino(__name__, pages=False)

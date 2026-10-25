@@ -19,7 +19,7 @@ def page(topic):
 	source = f"{markup.REPOSITORY}/blob/main/README.md#{content.SECTIONS[topic.sections[0]].slug}"
 
 	return t.div(class_="doc") [
-		t.article()([
+		t.article [[
 			t.p(class_="eyebrow") [
 				topic.group
 			],
@@ -35,6 +35,6 @@ def page(topic):
 					"This page is made from README.md: edit it on GitHub"
 				]
 			]
-		]),
+		]],
 		Toc(headings)
 	]

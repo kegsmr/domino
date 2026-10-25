@@ -62,7 +62,7 @@ class Search(t.div):
 
 		results = []
 		if query:
-			results = [t.ul(class_="results", aria_label="Search results")([
+			results = [t.ul(class_="results", aria_label="Search results") [[
 				t.li() [
 					t.a(href=entry.url, tabindex="0") [
 						highlighted(entry.title, query),
@@ -76,12 +76,12 @@ class Search(t.div):
 				t.li(class_="empty") [
 					f"Nothing found for “{query}”"
 				]
-			])]
+			]]]
 
 		# Without the script (or before it loads) the form still works, as a plain GET. Its events
 		# are bound while rendering, so each render of the results binds them again
 		return [
-			t.form(role="search", action="/search", on_submit=self.go)([
+			t.form(role="search", action="/search", on_submit=self.go) [[
 				t.span(class_="icon", aria_hidden="true") [
 					MAGNIFIER
 				],
@@ -90,7 +90,7 @@ class Search(t.div):
 				t.span(class_="key", aria_hidden="true") [
 					"/"
 				],
-			] + results)
+			] + results]
 		]
 
 

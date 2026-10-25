@@ -37,16 +37,16 @@ class Carousel(t.div):
 					f"{name} ({self.index + 1}/{count})"
 				]
 			],
-			t.nav()([
+			t.nav() [
 				# Each render works out where previous and next go, so they're plain values
-				t.button(aria_label="Previous", on_click=lambda event, index=(self.index - 1) % count: self.show(index)) ["‹"],
-				*[
+				t.button(aria_label="Previous", on_click=(self.show, (self.index - 1) % count)) ["‹"],
+				[
 					t.button(class_="dot", aria_label=slide, aria_current="true" if number == self.index else "false",
-						on_click=lambda event, number=number: self.show(number))
+						on_click=(self.show, number))
 					for number, (slide, _) in enumerate(SLIDES)
 				],
-				t.button(aria_label="Next", on_click=lambda event, index=(self.index + 1) % count: self.show(index)) ["›"],
-			])
+				t.button(aria_label="Next", on_click=(self.show, (self.index + 1) % count)) ["›"],
+			]
 		]
 
 

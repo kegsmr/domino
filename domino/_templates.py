@@ -13,10 +13,10 @@ from jinja2 import BaseLoader, TemplateNotFound
 from markupsafe import Markup, escape
 
 from . import tags
-from .components import Core, PublicSettings
-from .core import Element, Page, VOID_TAGS, current_styles, render_stack
-from .optimistic import state_names
-from .settings import script_json
+from ._components import Core, PublicSettings
+from ._core import Element, Page, VOID_TAGS, current_styles, render_stack
+from ._optimistic import state_names
+from ._settings import script_json
 
 
 class TemplateError(Exception):
@@ -569,7 +569,7 @@ def _component(node, values, kwargs):
 SKIPPED_FOLDERS = ("node_modules", "static", "__pycache__", "site-packages")
 
 # A file that starts (after comments and an optional {# domino #}) with a capitalized tag defines
-# components; see domino.dtemplates
+# components; see domino._dtemplates
 DEFINITION_START = re.compile(r"\A(?:\s|<!--.*?-->|\{#\s*domino\s*#\})*<(?:component|layout)\b", re.S)
 
 
@@ -590,7 +590,7 @@ class TemplateFinder(BaseLoader):
 		# Templates in pages/ are pages, found by their URL, so names there may repeat
 		self.pages = os.path.join(self.root, pages) if pages else None
 		if self.pages:
-			from .dtemplates import pages_folders
+			from ._dtemplates import pages_folders
 			pages_folders.add(self.pages)
 		self.setting = setting  # {"templates": "jinja"} reads every file as Jinja
 		self.paired = {}  # paired component templates, by path
@@ -674,7 +674,7 @@ class TemplateFinder(BaseLoader):
 		"""{component name: [files defining it]} from the files whose top level is component
 		definitions (<TodoList>...</TodoList>). Pages, Jinja templates and partials are skipped."""
 
-		from . import dtemplates
+		from . import _dtemplates as dtemplates
 
 		definitions = {}
 		for path in paths:
@@ -767,7 +767,7 @@ class TemplateFinder(BaseLoader):
 
 def template(name, /, **context):
 	"""A template as an element: templates/<name>, or <name> anywhere in the app's folder. A Domino
-	template (see domino.dtemplates) shows components as tags, <Counter />, found in the context,
+	template (see domino._dtemplates) shows components as tags, <Counter />, found in the context,
 	the calling module, or the app's components; a Jinja one with {{ component(Counter) }}.
 	"""
 
@@ -782,7 +782,7 @@ def template(name, /, **context):
 		path = finder.path(name, auto_reload=bool(app.debug or app.config.get("TEMPLATES_AUTO_RELOAD")))
 
 	if path is not None and template_format(path) != "jinja":
-		from .dtemplates import DominoTemplate
+		from ._dtemplates import DominoTemplate
 		return DominoTemplate(path, context, sys._getframe(1).f_globals)
 
 	return JinjaTemplate(name, **context)
@@ -795,7 +795,7 @@ def page_template(path, /, **context):
 		_app().template_finder.paired[path] = path
 		return JinjaTemplate(path, **context)
 
-	from .dtemplates import DominoTemplate
+	from ._dtemplates import DominoTemplate
 
 	return DominoTemplate(path, context)
 
@@ -803,7 +803,7 @@ def page_template(path, /, **context):
 def template_format(path):
 	""""components", "domino" or "jinja" for a template file (see dtemplates.file_format)."""
 
-	from .dtemplates import file_format
+	from ._dtemplates import file_format
 
 	setting = None
 	try:
@@ -946,7 +946,7 @@ def snake_case(name):
 
 def paired_template(cls):
 	"""The template file of a component without render(), or None: the file defining it
-	(<TodoList>...</TodoList>, see domino.dtemplates), the one next to its module winning when
+	(<TodoList>...</TodoList>, see domino._dtemplates), the one next to its module winning when
 	several classes share the name; or a Jinja template next to its module named after the class
 	(TodoList -> todo_list.html) or the module (counter.py -> counter.html)."""
 
@@ -995,7 +995,7 @@ def render_paired(element, path):
 	"""Render a component with its paired template; the HTML becomes its children."""
 
 	if template_format(path) == "components":
-		from .dtemplates import render_component
+		from ._dtemplates import render_component
 		return render_component(element, path)
 
 	app = _app()

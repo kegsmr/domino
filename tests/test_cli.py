@@ -9,10 +9,11 @@ import pytest
 
 # Imported by module path: `from domino import cli` finds flask.cli, which core's
 # `from flask import *` brings into the package namespace
-import domino.asgi
-import domino.hot
-import domino.cli as cli
-from domino import Domino, devmongo
+import domino._asgi
+import domino._hot
+import domino._cli as cli
+from domino import Domino
+from domino import _devmongo as devmongo
 
 
 # The test database conftest.py sets up, read before clean_environ removes it
@@ -51,7 +52,7 @@ def started(monkeypatch):
 		calls["run"].append(dict(host=host, port=port, reload=reload, debug=app.debug, **options))
 
 	monkeypatch.setattr(devmongo, "start", fake_start)
-	monkeypatch.setattr(domino.asgi, "serve", fake_serve)
+	monkeypatch.setattr(domino._asgi, "serve", fake_serve)
 
 	return calls
 
@@ -447,11 +448,11 @@ def test_flask_run_serves_the_app_itself(tmp_path, started, monkeypatch):
 @pytest.fixture
 def workers_serve(monkeypatch):
 
-	import domino.workers
+	import domino._workers
 
 	calls = []
-	monkeypatch.setattr(domino.workers, "serve", lambda *args: calls.append(args) or 0)
-	monkeypatch.setattr(domino.workers, "default_count", lambda: 6)
+	monkeypatch.setattr(domino._workers, "serve", lambda *args: calls.append(args) or 0)
+	monkeypatch.setattr(domino._workers, "default_count", lambda: 6)
 
 	return calls
 
@@ -529,7 +530,7 @@ def uvicorn_runs(monkeypatch):
 	calls = []
 	monkeypatch.setattr(uvicorn, "run", lambda target, **kwargs: calls.append((target, kwargs)))
 	# Hot reloading serves with uvicorn too, never for real here
-	monkeypatch.setattr(domino.hot, "serve", lambda target, root, **kwargs: calls.append(("hot", target, root, kwargs)))
+	monkeypatch.setattr(domino._hot, "serve", lambda target, root, **kwargs: calls.append(("hot", target, root, kwargs)))
 	# Recorded as unset, so what serve() sets is undone after the test
 	monkeypatch.setenv("DOMINO_ASGI_HOT", "")
 	monkeypatch.delenv("DOMINO_ASGI_HOT")
@@ -541,7 +542,7 @@ def test_serve_without_reload_runs_the_asgi_app(tmp_path, uvicorn_runs):
 
 	app = cli.find_app(cli.load_module(write_app(tmp_path / "plain")))
 
-	domino.asgi.serve(app, "127.0.0.1", 5000)
+	domino._asgi.serve(app, "127.0.0.1", 5000)
 
 	assert uvicorn_runs == [(app.asgi, {"host": "127.0.0.1", "port": 5000, "timeout_graceful_shutdown": 3, "ws_per_message_deflate": True})]
 	assert "DOMINO_ASGI_APP" not in os.environ
@@ -555,10 +556,10 @@ def test_serve_with_reload_names_the_app_for_new_processes(tmp_path, uvicorn_run
 	# Restarting on every change rather than hot reloading (see test_hot_reload.py)
 	app.config["DOMINO_HOT_RELOAD"] = False
 
-	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+	domino._asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
 	((target, options),) = uvicorn_runs
-	assert target == "domino.asgi:from_environ"
+	assert target == "domino._asgi:from_environ"
 	assert options["factory"] is True and options["reload"] is True
 	assert options["reload_dirs"] == [app.root_path]
 	assert os.environ["DOMINO_ASGI_APP"] == f"{path.resolve()}:app"
@@ -570,7 +571,7 @@ def test_serve_reload_needs_a_module_level_app(tmp_path, uvicorn_runs):
 
 	app = make_app(tmp_path / "inline")
 
-	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+	domino._asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
 	assert uvicorn_runs[0][0] is app.asgi
 	assert "reload" not in uvicorn_runs[0][1]
@@ -581,7 +582,7 @@ def test_from_environ_loads_the_app_from_its_file(tmp_path, monkeypatch):
 	path = write_app(tmp_path / "child")
 	monkeypatch.setenv("DOMINO_ASGI_APP", f"{path.resolve()}:app")
 
-	asgi = domino.asgi.from_environ()
+	asgi = domino._asgi.from_environ()
 
 	assert asgi.app.root_path == str(tmp_path / "child")
 	assert asgi.app is sys.modules[cli.module_name(path)].app
@@ -596,7 +597,7 @@ def test_from_environ_reuses_the_main_module(tmp_path, monkeypatch):
 	monkeypatch.setattr(cli, "load_module", None)
 	monkeypatch.setenv("DOMINO_ASGI_APP", f"{path.resolve()}:app")
 
-	assert domino.asgi.from_environ() is main.app.asgi
+	assert domino._asgi.from_environ() is main.app.asgi
 
 
 def test_database_name_is_sanitized():
@@ -878,14 +879,14 @@ def test_a_folder_with_just_pages_reloads_too(tmp_path, uvicorn_runs, monkeypatc
 	# Restarting on every change rather than hot reloading (see test_hot_reload.py)
 	app.config["DOMINO_HOT_RELOAD"] = False
 
-	domino.asgi.serve(app, "127.0.0.1", 5000, reload=True)
+	domino._asgi.serve(app, "127.0.0.1", 5000, reload=True)
 
 	# The new process makes the app again from the folder, as `domino run` did
 	((target, options),) = uvicorn_runs
-	assert target == "domino.asgi:from_environ" and options["reload"] is True
+	assert target == "domino._asgi:from_environ" and options["reload"] is True
 	assert os.environ["DOMINO_ASGI_APP"] == str(folder.resolve())
 
-	child = domino.asgi.from_environ()
+	child = domino._asgi.from_environ()
 	assert child.app is not app
 	assert child.app.root_path == str(folder.resolve())
 	assert child.app.test_client().get("/").get_data(as_text=True) == "hi"

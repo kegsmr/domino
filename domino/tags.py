@@ -1,4 +1,4 @@
-from .core import Element
+from ._core import Element
 
 
 # Every class in this module is an Element named after the HTML tag it renders,
@@ -40,3 +40,15 @@ for _name in TAGS:
 	globals()[_name] = _make_tag(_name)
 
 del _name
+
+
+class Component(Element):
+	"""A component that isn't a particular tag: class TaskList(Component) renders as a <div>, and
+	`tag = "section"` on the class picks another element. The same as subclassing t.div."""
+
+	tag = "div"
+
+
+	def __init__(self, parent=None, inner=None, *args, **kwargs):
+
+		super().__init__(type(self).tag, parent, inner, *args, **kwargs)

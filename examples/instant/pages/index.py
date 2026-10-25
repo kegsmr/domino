@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 from components.accordion import Accordion
 from components.carousel import Carousel

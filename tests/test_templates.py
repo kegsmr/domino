@@ -9,7 +9,7 @@ import pytest
 
 import domino.tags as t
 from domino import Domino, State, TemplateError, html, template, wait
-from domino.components import Document
+from domino import Document
 
 
 # Template strings are Python 3.14 syntax, so their tests live in a module this one imports there

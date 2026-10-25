@@ -35,7 +35,7 @@ from pathlib import Path
 
 from flask import Response, abort, request, send_from_directory
 
-from . import devmongo, optimistic
+from . import _devmongo as devmongo, _optimistic as optimistic
 
 
 HERE = Path(__file__).parent
