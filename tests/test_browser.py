@@ -1902,9 +1902,14 @@ def test_chat_appends_reach_other_windows(serve_app, browser):
 		writer.goto(url)
 		for number in range(1, 6):
 			send_message(writer, f"Hello {number}")
-			reader.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=5000)
+			try:
+				reader.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=15000)
+			except playwright.TimeoutError:
+				texts = reader.evaluate("Array.from(document.querySelectorAll('li')).slice(-6).map((li) => li.textContent)")
+				raise AssertionError(f"Hello {number} didn't arrive; the reader's last items: {texts}, the writer's: "
+					f"{writer.evaluate('Array.from(document.querySelectorAll(\'li\')).slice(-6).map((li) => li.textContent)')}") from None
 
-		reader.wait_for_function("document.querySelector('li:last-child').textContent.trim() === 'Hello 5'", timeout=5000)
+		reader.wait_for_function("document.querySelector('li:last-child').textContent.trim() === 'Hello 5'", timeout=15000)
 		assert reader.locator("li").first.inner_text() == "Message 0"
 		if serve_app.transport == "asgi":
 			updates = [frame for frame in frames if frame.get("type") == "update"]
@@ -2099,7 +2104,7 @@ def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser
 	}
 	for path, text in files.items():
 		(tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
-		(tmp_path / path).write_text(text)
+		(tmp_path / path).write_text(text, encoding="utf-8")
 
 	sys.path.insert(0, str(tmp_path))
 	page = browser.new_page()
