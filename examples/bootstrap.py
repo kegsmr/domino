@@ -1,3 +1,7 @@
+import sys
+
+sys.path.append("")
+
 
 from domino import Domino, Style
 import domino.tags as t
@@ -11,7 +15,7 @@ stylesheet = Style()
 
 # Define reusable components
 class Navbar(t.div):
-    def inner(self):
+    def init(self):
         BootstrapCSS(self)  # Add Bootstrap CSS
         JQuery(self)  # Add JQuery
         PopperJS(self)  # Add Popper.js
@@ -51,7 +55,7 @@ class Navbar(t.div):
             )
 
 class HeroSection(t.section):
-    def inner(self):
+    def init(self):
         stylesheet.style(
             self,
             display="flex",
@@ -84,7 +88,7 @@ class HeroSection(t.section):
         )
 
 class FeaturesSection(t.section):
-    def inner(self):
+    def init(self):
         self.__attributes__["id"] = "features"
         stylesheet.style(
             self,
@@ -124,7 +128,7 @@ class FeaturesSection(t.section):
             stylesheet.style("p", color="#555", line_height="1.6")
 
 class Footer(t.footer):
-    def inner(self):
+    def init(self):
         stylesheet.style(
             self,
             text_align="center",
@@ -136,7 +140,7 @@ class Footer(t.footer):
         t.p(self, "© 2025 Domino Showcase. All rights reserved.")
 
 class ShowcasePage(t.html):
-    def inner(self):
+    def init(self):
         head = t.head(self)
         t.title(head, "Domino Showcase")
 
@@ -151,12 +155,13 @@ class ShowcasePage(t.html):
 
         stylesheet.compute(head)
 
+page = ShowcasePage()
+
 @app.route("/")
 def index():
     return page._render()
 
 if __name__ == "__main__":
-    page = ShowcasePage()
     with open("output.html", "w") as file:
         file.write(page._render())
     app.run(debug=True)
