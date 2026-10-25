@@ -82,6 +82,14 @@ app = "{name}"
 [build]
   dockerfile = "Dockerfile"
 
+[env]
+  # Fly's proxy connects from private addresses and adds the visitor's to X-Forwarded-For.
+  # Trusting it (and only it) lets the per-visitor limits on logins and emails tell visitors
+  # apart; never "*", which would trust what visitors send
+  FORWARDED_ALLOW_IPS = "{proxies}"
+  # Links in emails (password resets) are built on it; change it for a domain of your own
+  DOMINO_PUBLIC_URL = "https://{name}.fly.dev"
+
 [http_service]
   internal_port = {port}
   force_https = true
@@ -128,7 +136,16 @@ services:
       # Worker processes; raise it on plans with more CPU
       - key: WEB_CONCURRENCY
         value: "1"
+      # Render's proxy connects from private addresses and adds the visitor's to X-Forwarded-For.
+      # Trusting it (and only it) lets the per-visitor limits on logins and emails tell visitors
+      # apart; never "*", which would trust what visitors send
+      - key: FORWARDED_ALLOW_IPS
+        value: "{proxies}"
 '''
+
+# Private networks, where platform proxies connect from (uvicorn and the router take the
+# visitor's address as the last one in X-Forwarded-For that isn't one of these)
+PLATFORM_PROXIES = "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
 
 COMPOSE_TEMPLATE = '''\
 # Written by `domino deploy docker`: the app and a MongoDB for it, on http://localhost:{port}.
@@ -450,7 +467,7 @@ def deploy_fly(path, name=None, mongo_url=None, force=False, environ=None):
 
 	folder = build(path, force)
 	app = fly_app_name(folder, name, force)
-	write_file(folder / "fly.toml", FLY_TEMPLATE.format(name=app, port=PORT, health=HEALTH_PATH), force)
+	write_file(folder / "fly.toml", FLY_TEMPLATE.format(name=app, port=PORT, health=HEALTH_PATH, proxies=PLATFORM_PROXIES), force)
 	say()
 
 	mongo, source = find_mongo_url(folder, mongo_url, environ)
@@ -538,7 +555,7 @@ def deploy_render(path, name=None, mongo_url=None, force=False, environ=None):
 		paths = f"    rootDir: {relative}\n    dockerContext: ./{relative}\n    dockerfilePath: ./{relative}/Dockerfile\n"
 
 	app = slug(name or folder.name)
-	write_file(folder / "render.yaml", RENDER_TEMPLATE.format(name=app, port=PORT, health=HEALTH_PATH, paths=paths), force)
+	write_file(folder / "render.yaml", RENDER_TEMPLATE.format(name=app, port=PORT, health=HEALTH_PATH, paths=paths, proxies=PLATFORM_PROXIES), force)
 	say()
 
 	mongo, source = find_mongo_url(folder, mongo_url, environ)
@@ -555,7 +572,8 @@ def deploy_render(path, name=None, mongo_url=None, force=False, environ=None):
 		"    git push\n\n"
 		f"2. In the Render dashboard, choose New > Blueprint and pick the repository: {RENDER_BLUEPRINTS_URL}{blueprint}\n"
 		f"3. Render asks for DOMINO_MONGO__URL: enter {value}.\n"
-		"   It makes DOMINO_SECRET_KEY itself.\n"
+		"   It makes DOMINO_SECRET_KEY itself. If the app sends email (password resets), add\n"
+		f"   DOMINO_PUBLIC_URL with the app's address (https://{app}.onrender.com, or your domain).\n"
 		"4. Apply it. Each push to the branch deploys again.\n\n"
 		f"Render keeps the app on one instance; don't scale it to more, since a page lives in the memory of the\n"
 		f"instance that made it.\n\n{MONGO_NOTE}")

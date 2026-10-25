@@ -407,6 +407,7 @@ def serve(args):
 	# One process needs no router: the app served by uvicorn, as `uvicorn app:app.asgi` would
 	if count == 1:
 		app = load_app(args.app)
+		workers.warn_if_debug(app)
 		tailwind.prepare(app.root_path, app.tailwind)
 		print(f"domino: App: http://{args.host}:{args.port}/ (1 worker)", file=sys.stderr, flush=True)
 		asgi.serve(app, args.host, args.port, False)

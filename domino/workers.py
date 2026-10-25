@@ -69,6 +69,15 @@ def log(message):
 	print(f"domino: {message}", file=sys.stderr, flush=True)
 
 
+def warn_if_debug(app):
+	"""`domino serve` is for production, where debug mode shows visitors tracebacks with source
+	code, the component inspector and its data: say so loudly if it's on (FLASK_DEBUG=1, say)."""
+
+	if app.debug:
+		log("WARNING: the app is in debug mode (is FLASK_DEBUG set?): visitors can see tracebacks with "
+			"source code and the inspector's data. Don't serve it like this in production.")
+
+
 def serve(location, host="127.0.0.1", port=8000, workers=None):
 	"""Serve the app at `location` (its folder, its file, or "path/to/app.py:attribute") with
 	`workers` processes behind a router on host:port. Returns the exit status."""
@@ -650,6 +659,8 @@ def worker_main(location, worker_id, sock, ready):
 	watch_parent()
 
 	asgi = load_asgi(location)
+	if worker_id == 1:
+		warn_if_debug(asgi.app)
 
 	config = uvicorn.Config(asgi, timeout_graceful_shutdown=GRACEFUL,
 		ws_per_message_deflate=bool(asgi.app.config["DOMINO_WS_COMPRESSION"]))

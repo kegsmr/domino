@@ -394,6 +394,51 @@ def test_oauth_callback_url_uses_public_url(users):
 	assert query["redirect_uri"] == ["https://example.com/_domino/accounts/github/callback"]
 
 
+# Deployment ----------------------------------------------------------------------------------
+
+
+def test_platform_configs_trust_only_the_platform_proxy(tmp_path, monkeypatch, capsys):
+
+	from domino import deploy
+
+	(tmp_path / "app.py").write_text("from domino import Domino\napp = Domino(__name__)\n", encoding="utf-8")
+	for name in ("DOMINO_MONGO__URL", "MONGO_URL", "DOMINO_SECRET_KEY"):
+		monkeypatch.delenv(name, raising=False)
+	monkeypatch.setattr(deploy.shutil, "which", lambda name: None)
+
+	# Without it every visitor has the proxy's address: 20 wrong passwords from anyone lock
+	# everyone out of logging in (the per-address limit), and 12 reset emails stop all emails
+	deploy.deploy_fly(tmp_path, name="shop")
+	fly = (tmp_path / "fly.toml").read_text()
+	assert f'FORWARDED_ALLOW_IPS = "{deploy.PLATFORM_PROXIES}"' in fly
+	assert 'DOMINO_PUBLIC_URL = "https://shop.fly.dev"' in fly
+
+	deploy.deploy_render(tmp_path, name="shop")
+	assert f'value: "{deploy.PLATFORM_PROXIES}"' in (tmp_path / "render.yaml").read_text()
+	assert "DOMINO_PUBLIC_URL" in capsys.readouterr().out
+
+	assert "*" not in deploy.PLATFORM_PROXIES
+	trusted = {entry for entry in deploy.PLATFORM_PROXIES.split(",")}
+	assert workers.is_trusted("10.0.3.4", trusted) and workers.is_trusted("fdaa:0:1::2", trusted)
+	assert not workers.is_trusted("203.0.113.9", trusted)
+
+	# A visitor's own X-Forwarded-For entry doesn't count: the proxy appends the real address
+	lines = [b"GET / HTTP/1.1", b"X-Forwarded-For: 10.9.9.9, 203.0.113.9"]
+	assert workers.forward_head(lines, "10.0.3.4", trusted).endswith(b"X-Forwarded-For: 10.9.9.9, 203.0.113.9, 10.0.3.4\r\n\r\n")
+
+
+def test_serve_warns_about_debug_mode(capsys):
+
+	app = Domino(__name__)
+	app.debug = True
+	workers.warn_if_debug(app)
+	assert "debug mode" in capsys.readouterr().err
+
+	app.debug = False
+	workers.warn_if_debug(app)
+	assert capsys.readouterr().err == ""
+
+
 # Limits (denial of service) ----------------------------------------------------------------
 
 
