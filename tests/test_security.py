@@ -206,6 +206,114 @@ def test_client_components_render_names_and_scripts_the_same_way():
 	assert html == "<script>a = '<\\/Script><img src=x onerror=alert(1)>'</script>"
 
 
+# Limits (denial of service) ----------------------------------------------------------------
+
+
+def slow_app():
+
+	import time as time_
+
+	import domino.tags as t
+	from domino.components import Document
+
+	app = Domino(__name__)
+	app.config["DOMINO_MAX_EVENT_MB"] = 0.01  # 10 KB
+
+	class Slow(t.div):
+
+		def render(self):
+			return [t.button(on_click=self.wait) ["wait"]]
+
+		def wait(self):
+			time_.sleep(0.05)
+
+	@app.route("/")
+	def index():
+		return Document() [Slow()]
+
+	return app
+
+
+def page_and_event(html):
+
+	import re
+
+	return re.search(r'data-domino-page="([^"]+)"', html).group(1), re.search(r'data-event-id="([^"]+)"', html).group(1)
+
+
+def test_huge_event_bodies_are_refused_unread():
+
+	app = slow_app()
+	client = app.test_client()
+	page_id, event_id = page_and_event(client.get("/").get_data(as_text=True))
+
+	big = {"page_id": page_id, "event_id": event_id, "data": {"value": "x" * 20000}}
+	assert client.post("/_domino/events", json=big).status_code == 413
+	assert client.post("/_domino/events", json={"page_id": page_id, "event_id": event_id}).status_code == 200
+
+	# Ids of the wrong type, or JSON nested too deep, aren't errors on the server
+	assert client.post("/_domino/events", json={"page_id": ["x"], "event_id": {"a": 1}}).status_code == 404
+	assert client.post("/_domino/events", data="[" * 5000 + "]" * 5000, content_type="application/json").status_code == 404
+
+
+def test_websocket_messages_are_limited_in_size_and_number(asgi_server):
+
+	import json
+	import urllib.request
+
+	from websockets.exceptions import ConnectionClosed
+	from websockets.sync.client import connect
+
+	server = asgi_server(slow_app())
+	page_id, event_id = page_and_event(urllib.request.urlopen(server.url).read().decode())
+
+	with connect(f"{server.ws_url}?page={page_id}", open_timeout=5) as ws:
+		ws.send(json.dumps({"type": "hello", "page_id": page_id}))
+		assert json.loads(ws.recv(5)) == {"type": "ready"}
+		ws.send(json.dumps({"type": "event", "ref": 1, "page_id": page_id, "event_id": event_id, "data": {"value": "x" * 20000}}))
+		with pytest.raises(ConnectionClosed) as closed:
+			while True:
+				ws.recv(5)
+		assert closed.value.rcvd.code == 1009
+
+	# Events sent far faster than they're handled (each takes 50 ms) aren't queued without end
+	with connect(f"{server.ws_url}?page={page_id}", open_timeout=5) as ws:
+		ws.send(json.dumps({"type": "hello", "page_id": page_id}))
+		assert json.loads(ws.recv(5)) == {"type": "ready"}
+		with pytest.raises(ConnectionClosed) as closed:
+			for ref in range(1000):
+				ws.send(json.dumps({"type": "event", "ref": ref, "page_id": page_id, "event_id": event_id, "data": {}}))
+			while True:
+				ws.recv(5)
+		assert closed.value.rcvd.code == 1008
+
+
+def test_unclaimed_uploads_cant_pile_up():
+
+	import io
+
+	from werkzeug.datastructures import FileStorage, MultiDict
+
+	from domino.uploads import Uploads
+
+	uploads = Uploads({"DOMINO_MAX_UPLOAD_MB": 1, "DOMINO_MAX_PENDING_UPLOADS_MB": 3, "DOMINO_UPLOAD_TTL": 600})
+	megabyte = b"x" * (1024 * 1024)
+
+	def upload(page_id):
+		return uploads.add(page_id, MultiDict([("file", FileStorage(io.BytesIO(megabyte), "a.bin"))]))["file"][0]
+
+	# One page uploading again and again without sending its events keeps two uploads' worth
+	tokens = [upload("page-1") for _ in range(10)]
+	assert len(uploads) == 2
+	assert set(uploads.files) == set(tokens[-2:])
+
+	# And all pages together DOMINO_MAX_PENDING_UPLOADS_MB
+	for number in range(10):
+		upload(f"other-{number}")
+	assert sum(entry[2].size for entry in uploads.files.values()) <= 3 * 1024 * 1024
+	assert len(uploads) == 3
+
+
 # The session hand-off (/_domino/session/<token>) ---------------------------------------------
 
 

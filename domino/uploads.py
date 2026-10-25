@@ -60,7 +60,35 @@ class Uploads:
 				self.files[token] = (page_id, now, UploadedFile(storage))
 				tokens.setdefault(name, []).append(token)
 
+			# Unclaimed uploads can't pile up (on disk) until they expire: a page keeps at most two
+			# uploads' worth, and all pages together DOMINO_MAX_PENDING_UPLOADS_MB; beyond that the
+			# oldest go (an upload is normally claimed by its event a moment after it's made)
+			upload = self.config["DOMINO_MAX_UPLOAD_MB"] * 1024 * 1024
+			pending = self.config.get("DOMINO_MAX_PENDING_UPLOADS_MB", 256) * 1024 * 1024
+			expired = self.evict(page_id, 2 * upload) + self.evict(None, max(pending, upload))
+
+		for file in expired:
+			file.close()
+
 		return tokens
+
+
+	def evict(self, page_id, limit):
+		"""Take the oldest files out (of `page_id`'s, or anyone's for None) until those left add up
+		to `limit` bytes; returns them. Call with self.lock held."""
+
+		entries = [(token, entry) for token, entry in self.files.items() if page_id is None or entry[0] == page_id]
+		total = sum(entry[2].size for _, entry in entries)
+		evicted = []
+
+		for token, entry in entries:
+			if total <= limit:
+				break
+			del self.files[token]
+			total -= entry[2].size
+			evicted.append(entry[2])
+
+		return evicted
 
 
 	@contextmanager
