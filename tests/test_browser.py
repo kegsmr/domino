@@ -330,3 +330,21 @@ def test_submit_marks_the_form_and_its_submit_button(serve, page):
 	assert page.locator("[data-loading]").count() == 0
 	assert page.locator("button[type=submit]").is_enabled()
 	assert page.errors == []
+
+
+def test_latency_simulator_delays_round_trips(serve, page):
+
+	page.goto(serve("counter"))
+	page.evaluate("Domino.enableLatencySim(600)")
+
+	page.get_by_text("Increment").click()
+	page.wait_for_timeout(300)
+	assert "Current Count: 0" in page.locator("p").inner_text()
+
+	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 1')", timeout=3000)
+
+	# Kept for the tab, so it survives a reload
+	page.reload()
+	assert page.evaluate("sessionStorage.getItem('domino-latency')") == "600"
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []

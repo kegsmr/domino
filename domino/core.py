@@ -515,6 +515,9 @@ class Domino(Flask):
 				# Check if the result has a `render` method
 				if hasattr(result, "_render"):
 					result.configure(data_domino_page=page.id)
+					# Only while debugging, so the latency setting can't slow down production
+					if self.debug and self.config.get("DOMINO_LATENCY"):
+						result.configure(data_domino_latency=int(self.config["DOMINO_LATENCY"]))
 					html = result._render()
 				else:
 					html = result

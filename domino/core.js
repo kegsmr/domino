@@ -205,7 +205,10 @@ window.Domino = (() => {
         if (!id) return;
 
         stream = new EventSource('/_domino/stream?page=' + encodeURIComponent(id));
-        stream.onmessage = (e) => apply(JSON.parse(e.data), null);
+        stream.onmessage = async (e) => {
+            await wait(latency / 2);
+            apply(JSON.parse(e.data), null);
+        };
     }
 
     // Requests in flight, so overlapping ones keep <html data-domino-loading> until the last ends
@@ -304,10 +307,41 @@ window.Domino = (() => {
         document.body.appendChild(overlay);
     }
 
+    // A development aid, like LiveView's latency simulator: every round trip to the server
+    // takes this many ms (half each way), so you can feel the app on a slow connection.
+    // Set with Domino.enableLatencySim(ms) (kept for the tab) or the domino.latency setting.
+    let latency = 0;
+
+    function readLatency() {
+        try {
+            const stored = parseInt(sessionStorage.getItem('domino-latency'), 10);
+            if (stored >= 0) return stored;
+        } catch (err) {
+            // Storage can be unavailable (private windows); fall back to the page's setting
+        }
+        const root = document.querySelector('[data-domino-latency]');
+        return root ? parseInt(root.dataset.dominoLatency, 10) || 0 : 0;
+    }
+
+    function enableLatencySim(ms) {
+        latency = Math.max(0, parseInt(ms, 10) || 0);
+        try { sessionStorage.setItem('domino-latency', String(latency)); } catch (err) { /* see readLatency */ }
+        console.info(`Domino: simulating ${latency} ms of latency per round trip`);
+    }
+
+    function disableLatencySim() {
+        enableLatencySim(0);
+    }
+
+    function wait(ms) {
+        return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+    }
+
     async function triggerEvent(eventId, payload = {}, reset = null, el = null) {
         const unmark = el ? markBusy(el, reset && reset.submit) : null;
         if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
+            await wait(latency / 2);
             const response = await fetch('/_domino/events', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -319,6 +353,7 @@ window.Domino = (() => {
                 return;
             }
             const data = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+            await wait(latency / 2);
             if (!response.ok) {
                 reportError(el, eventId, data);
                 return;
@@ -407,10 +442,11 @@ window.Domino = (() => {
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+        latency = readLatency();
         listen();
         scheduleAfterEvents();
         openStream();
     });
 
-    return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen };
+    return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen, enableLatencySim, disableLatencySim };
 })();

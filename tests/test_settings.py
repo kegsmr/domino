@@ -235,3 +235,27 @@ def test_attribute_access(tmp_path):
 
 	with pytest.raises(AttributeError, match="No setting 'missing'.*mongo"):
 		settings.missing
+
+
+def test_latency_setting_only_applies_while_debugging():
+
+	import domino.tags as t
+	from domino import Domino
+	from domino.components import Document
+
+	app = Domino(__name__)
+	app.config["DOMINO_LATENCY"] = 300
+
+	class Box(t.div):
+
+		def render(self):
+			return [t.button(on_click=lambda: None) ["x"]]
+
+	@app.route("/")
+	def index():
+		return Document() [Box()]
+
+	assert "data-domino-latency" not in app.test_client().get("/").get_data(as_text=True)
+
+	app.debug = True
+	assert 'data-domino-latency="300"' in app.test_client().get("/").get_data(as_text=True)
