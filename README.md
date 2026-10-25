@@ -198,6 +198,28 @@ Handlers that only change their component's own `State` with plain expressions â
 
 Locally every click feels instant. To feel the app the way users on a slow connection will, run `Domino.enableLatencySim(300)` in the browser console: each round trip to the server then takes 300 ms (pushes are delayed too), for that tab, until `Domino.disableLatencySim()`. Or set it for the whole app while debugging with `{"domino": {"latency": 300}}` in `settings.json`; it's ignored when the app isn't in debug mode.
 
+## Testing your app
+
+`app.test_page(path)` loads a page in a simulated browser, so you can test your app in plain pytest, with no real browser and no server running. Clicks, typing and form submits go through the same code as in a real browser: handlers, `State`, collections and pushed updates all run for real.
+
+```python
+from counter import app
+
+def test_counter():
+	page = app.test_page("/")
+	page.click("button", text="Increment")
+	assert page.text("p") == "Current Count: 1"
+
+def test_todo():
+	page = app.test_page("/todo")
+	page.fill("input[name=text]", "Buy milk")
+	page.click("button", text="Add")      # a submit button submits its form
+	assert page.text("ul") == "Buy milk"
+	assert page.value("input[name=text]") == ""
+```
+
+Each test page is its own browser tab. Find elements with simple CSS selectors (`tag`, `.class`, `#id`, `[attr=value]`, and descendants like `form input`), optionally narrowed with `text=`. Pages can be driven with `click`, `fill` (set a value without firing events), `type` (fires `input`), `select`, `check`, and `submit`. Inspect them with `text`, `value`, `find`/`find_all` and `html`. `sync()` applies changes other pages pushed to this one, and `run_timers()` fires pending `after()` timers right away. A failing handler, or a selector that matches nothing, fails the test with the traceback and the page's text. See [examples/test_examples_headless.py](examples/test_examples_headless.py).
+
 ## Deployment
 
 Components and their event handlers live in the memory of the server process that rendered the page. Each page load gets its own state, which expires after `DOMINO_PAGE_TTL` seconds of inactivity (default 1800). At most `DOMINO_MAX_PAGES` pages are kept (default 1000); when a page has expired, the browser reloads it.

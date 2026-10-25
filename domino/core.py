@@ -298,6 +298,14 @@ class Domino(Flask):
 			self.secret_key = self.settings["secret_key"]
 
 
+	def test_page(self, path="/", client=None):
+		"""Load `path` in a simulated browser, to click, type and check it in tests."""
+
+		from .testing import TestPage
+
+		return TestPage(self, path, client)
+
+
 	def run(self, host=None, port=None, debug=None, load_dotenv=True, **options):
 
 		# Like `meteor run`: in debug mode an app without a mongo.url setting gets a local

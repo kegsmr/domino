@@ -10,7 +10,9 @@ from domino.bootstrap import BootstrapCSS
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 
 # Single-file examples, and examples with their own folder (e.g. for settings.json)
-EXAMPLES = sorted(EXAMPLES_DIR.glob("*.py")) + sorted(EXAMPLES_DIR.glob("*/app.py"))
+# (test_*.py files are tests of the examples, not examples)
+EXAMPLES = sorted(path for path in EXAMPLES_DIR.glob("*.py") if not path.name.startswith("test_"))
+EXAMPLES += sorted(EXAMPLES_DIR.glob("*/app.py"))
 
 
 def example_name(path):
