@@ -98,7 +98,7 @@ class ASGIApp:
 			payload, status = self.app.handle_event(page, message.get("event_id"), message.get("data"))
 
 			# A socket can't set cookies: the browser fetches a changed session with a token
-			token, cookies = self.app.session_handoff(context.session)
+			token, cookies = self.app.session_handoff(context.session, page)
 			if token:
 				payload = dict(payload, session=token)
 				# and this socket's later events see the new session

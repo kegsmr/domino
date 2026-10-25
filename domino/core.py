@@ -1080,10 +1080,11 @@ class Domino(Flask):
 		self.add_url_rule(route, route, stream, methods=["GET"])
 
 
-	def session_handoff(self, session):
+	def session_handoff(self, session, page=None):
 		"""For events that ran over the WebSocket, which can't set cookies: the Set-Cookie headers
 		for a session the handler changed, kept under a one-time token (or None if unchanged).
-		The browser POSTs the token to /_domino/session/<token> to get the cookie."""
+		The browser POSTs the token to /_domino/session/<token> to get the cookie, naming `page`
+		(the page the event ran on) in an X-Domino-Page header."""
 
 		if not session.modified:
 			return None, []
@@ -1098,10 +1099,11 @@ class Domino(Flask):
 		now = time.monotonic()
 		with self._handoffs_lock:
 			# Unclaimed tokens (the tab closed) expire after a minute
-			for old, (created, _) in list(self._handoffs.items()):
+			for old, (created, _, _) in list(self._handoffs.items()):
 				if now - created > SESSION_HANDOFF_TTL:
 					del self._handoffs[old]
-			self._handoffs[token] = (now, cookies)
+			page_id = page.id if page is not None and page is not DEFAULT_PAGE else None
+			self._handoffs[token] = (now, cookies, page_id)
 
 		return token, cookies
 
@@ -1113,8 +1115,18 @@ class Domino(Flask):
 
 		def handoff(token):
 
+			# Like uploads: a cross-site form can POST here but can't add a header, so another
+			# site can't plant a session it got a token for (its own login) in a visitor's browser
+			page_id = request.headers.get("X-Domino-Page")
+			if not page_id:
+				return jsonify({"error": "Expected an X-Domino-Page header"}), 403
+
 			with self._handoffs_lock:
-				created, cookies = self._handoffs.pop(token, (None, None))
+				created, cookies, owner = self._handoffs.get(token, (None, None, None))
+				# Only for the page whose event changed the session
+				if cookies is not None and owner is not None and owner != page_id:
+					return jsonify({"error": "This session token is for another page"}), 403
+				self._handoffs.pop(token, None)
 
 			if cookies is None or time.monotonic() - created > SESSION_HANDOFF_TTL:
 				return jsonify({"error": "Unknown or expired session token"}), 404
