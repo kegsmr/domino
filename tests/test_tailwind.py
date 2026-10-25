@@ -382,7 +382,11 @@ def test_the_watch_stream_says_the_version_and_only_in_debug(tmp_path):
 		assert json.loads(next(chunks).decode()[len("data: "):]) == {"version": digest}
 
 		(tmp_path / "app" / ".domino" / "tailwind.css").write_text(".p-8{padding:2rem}")
-		assert json.loads(next(chunks).decode()[len("data: "):]) == {"version": tailwind.version(tmp_path / "app" / ".domino" / "tailwind.css")}
+		# Keep-alive comments may come first on a slow machine
+		chunk = next(chunks)
+		while not chunk.startswith(b"data: "):
+			chunk = next(chunks)
+		assert json.loads(chunk.decode()[len("data: "):]) == {"version": tailwind.version(tmp_path / "app" / ".domino" / "tailwind.css")}
 	finally:
 		response.close()
 
