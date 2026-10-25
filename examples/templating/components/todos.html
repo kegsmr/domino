@@ -7,11 +7,13 @@
 
 <TodoList>
 	<ul>
-		<li each="index, item in enumerate(items)" :class="item_class(item)">
+		{{ for index, item in enumerate(items) }}
+		<li :class="item_class(item)">
 			<input type="checkbox" :checked="item.done" on-change="on_toggle(index)" aria-label="Done">
 			<span>{{ item.text }}</span>
 			<button class="remove" on-click="on_remove(index)" aria-label="Remove">×</button>
 		</li>
+		{{ /for }}
 	</ul>
 	<p class="hint">{{ remaining }} left.</p>
 </TodoList>

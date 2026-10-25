@@ -67,6 +67,15 @@ CLOSE_TAG = re.compile(r"</\s*([A-Za-z][A-Za-z0-9:_.-]*)\s*>")
 ATTRIBUTE = re.compile(r"""([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?""")
 SPACE = re.compile(r"\s*")
 VALUE_TAG = re.compile(r"\{\{(.*?)\}\}", re.S)
+
+# Blocks, in Python's words, closed like HTML: {{ if x }}, {{ elif x }}, {{ else }}, {{ /if }},
+# {{ for item in items }}, {{ /for }}
+BLOCK = re.compile(r"\s*(if|elif|else|for|/\s*if|/\s*for)\b(.*)", re.S)
+
+DIRECTIVE_ATTRIBUTE = (
+	"{name}= isn't how Domino templates show or repeat elements: wrap them in "
+	"{{{{ if x }}}}...{{{{ else }}}}...{{{{ /if }}}} or {{{{ for item in items }}}}...{{{{ /for }}}}"
+)
 LEAD = re.compile(r"\n[ \t]*$")
 MARKER = re.compile(r"\A\s*\{#\s*(domino|jinja)\s*#\}[ \t]*\n?")
 
@@ -106,6 +115,8 @@ def source_format(path, source, setting=None):
 		return "jinja"
 
 	for match in VALUE_TAG.finditer(source):
+		if BLOCK.match(match.group(1)):
+			continue
 		try:
 			expression = parse_expression(match.group(1))
 		except TemplateError:
@@ -532,7 +543,7 @@ class Raw:
 
 class Tag:
 
-	__slots__ = ("name", "attributes", "children", "where", "self_closing", "component", "end")
+	__slots__ = ("name", "attributes", "children", "where", "self_closing", "component", "end", "block", "opener")
 
 
 	def __init__(self, name, where):
@@ -544,6 +555,10 @@ class Tag:
 		self.self_closing = False
 		self.component = is_component_name(name)
 		self.end = None
+		# A block ({{ if x }}...{{ else }}...{{ /if }}) is a <template> with a directive: its
+		# kind ("if", "elif", "else", "each") and the statement that opened it ("if" or "for")
+		self.block = None
+		self.opener = None
 
 
 	def attribute(self, name):
@@ -557,6 +572,8 @@ class Tag:
 
 	def directive(self):
 
+		if self.block is None:
+			return None
 		for name in DIRECTIVES:
 			if self.attribute(name) is not None:
 				return name
@@ -630,6 +647,8 @@ class Parser:
 
 		if len(self.stack) > 1:
 			tag = self.stack[-1]
+			if tag.block is not None:
+				raise TemplateError(f"{tag.where}: {{{{ {tag.opener} }}}} is never closed; add {{{{ /{tag.opener} }}}}")
 			raise TemplateError(f"{tag.where}: <{tag.name}> is never closed; add </{tag.name}>")
 
 		return self.root.children
@@ -641,7 +660,6 @@ class Parser:
 		if start >= end:
 			return
 
-		parent = self.stack[-1]
 		text = self.source[start:end]
 		parts = []
 		pos = 0
@@ -652,10 +670,27 @@ class Parser:
 			close = text.find("}}", open_ + 2)
 			if close == -1:
 				raise self.error(start + open_, "{{ is never closed with }}")
-			if open_ > pos:
-				parts.append(text[pos:open_])
 			code = text[open_ + 2:close]
 			where = self.where(start + open_, f"{{{{{code}}}}}")
+			if raw is None and BLOCK.match(code):
+				before, after = text[pos:open_], close + 2
+				# A block tag alone on its line takes the line with it, so it leaves no blank line
+				line_start = before.rfind("\n")
+				line_end = text.find("\n", after)
+				rest = text[after:line_end if line_end != -1 else len(text)]
+				at_line_start = line_start != -1 or start + pos == 0 or self.source[start + pos - 1] == "\n"
+				if at_line_start and not before[line_start + 1:].strip() and not rest.strip():
+					before = before[:line_start + 1]
+					after = line_end + 1 if line_end != -1 else len(text)
+				if before:
+					parts.append(before)
+				self.add_text(parts, start + pos)
+				parts = []
+				self.block(code, where)
+				pos = after
+				continue
+			if open_ > pos:
+				parts.append(text[pos:open_])
 			try:
 				expression = parse_expression(code)
 			except TemplateError as error:
@@ -665,11 +700,84 @@ class Parser:
 		if pos < len(text):
 			parts.append(text[pos:])
 
+		self.add_text(parts, start, raw)
+
+
+	def add_text(self, parts, start, raw=None):
+
+		if not parts:
+			return
+		parent = self.stack[-1]
+
 		# Text next to text (a "<" that wasn't a tag) joins it
 		if parent.children and isinstance(parent.children[-1], Text) and raw is None:
 			parent.children[-1].parts.extend(parts)
 		else:
 			parent.children.append(Text(parts, start))
+
+
+	def block(self, code, where):
+		"""{{ if x }}, {{ elif x }}, {{ else }}, {{ /if }}; {{ for item in items }}, {{ else }}
+		(shown when the list is empty), {{ /for }}."""
+
+		match = BLOCK.match(code)
+		keyword, value = match.group(1).replace(" ", ""), match.group(2).strip()
+		top = self.stack[-1]
+		opened = next((tag for tag in reversed(self.stack) if tag.block is not None), None)
+
+		if keyword in ("if", "for"):
+			if not value:
+				raise where.error("{{ for item in items }} needs the item and the list" if keyword == "for" else "{{ if }} needs a condition: {{ if done }}")
+			tag = Tag("template", where)
+			tag.opener = keyword
+			if keyword == "for":
+				if not re.search(r"\sin\s", f" {value} "):
+					raise where.error(f"name the item: {{{{ for item in {value} }}}}")
+				tag.block = "each"
+				tag.attributes.append(("each", value, code, where))
+			else:
+				tag.block = "if"
+				tag.attributes.append(("if", value, code, where))
+			top.children.append(tag)
+			self.stack.append(tag)
+			return
+
+		if keyword in ("/if", "/for"):
+			if value:
+				raise where.error(f"{{{{ {keyword} }}}} takes nothing")
+			if opened is None:
+				raise where.error(f"{{{{ {keyword} }}}} closes nothing")
+			if top is not opened:
+				raise where.error(
+					f"{{{{ {keyword} }}}} closes {{{{ {opened.opener} }}}} from line {opened.where.line}, but <{top.name}> "
+					f"from line {top.where.line} is still open inside it; a block wraps whole elements"
+				)
+			if keyword != f"/{opened.opener}":
+				raise where.error(f"{{{{ {keyword} }}}} doesn't close {{{{ {opened.opener} }}}} from line {opened.where.line}; that needs {{{{ /{opened.opener} }}}}")
+			self.stack.pop()
+			return
+
+		# {{ elif x }} or {{ else }}
+		if opened is None:
+			raise where.error(f"{{{{ {keyword} }}}} goes inside {{{{ if }}}}...{{{{ /if }}}}" + (" or {{ for }}...{{ /for }}" if keyword == "else" else ""))
+		if top is not opened:
+			raise where.error(f"{{{{ {keyword} }}}} belongs to {{{{ {opened.opener} }}}} from line {opened.where.line}, but <{top.name}> from line {top.where.line} is still open; close it first")
+		if top.block == "else":
+			raise where.error(f"{{{{ {opened.opener} }}}} from line {opened.where.line} already has an {{{{ else }}}}")
+		if keyword == "elif":
+			if top.opener == "for":
+				raise where.error("{{ for }} can have an {{ else }} (shown when the list is empty), not {{ elif }}")
+			if not value:
+				raise where.error("{{ elif }} needs a condition: {{ elif loading }}")
+		elif value:
+			raise where.error("{{ else }} takes nothing; for another condition, use {{ elif x }}")
+		self.stack.pop()
+		tag = Tag("template", where)
+		tag.opener = top.opener
+		tag.block = keyword
+		tag.attributes.append((keyword, value or None, code, where))
+		self.stack[-1].children.append(tag)
+		self.stack.append(tag)
 
 
 	def open_tag(self):
@@ -740,6 +848,11 @@ class Parser:
 			raise self.error(start, f"</{name}>: <{name}> is a void element, with no closing tag")
 		if tag is self.root:
 			raise self.error(start, f"</{name}> closes nothing")
+		if tag.block is not None:
+			raise self.error(
+				start, f"</{name}> comes before {{{{ /{tag.opener} }}}} for the {{{{ {tag.opener} }}}} from line "
+				f"{tag.where.line}; a block wraps whole elements, so end it inside the element it starts in"
+			)
 		if name != tag.name and not (not tag.component and name.lower() == tag.name.lower()):
 			raise self.error(start, f"</{name}> doesn't close <{tag.name}> from line {tag.where.line}, column {tag.where.col}")
 
@@ -931,7 +1044,8 @@ class Compiler:
 				index += 1
 				continue
 
-			lead = _lead(ops)
+			# An element with each/if takes the line break before it along; a block's lines are gone
+			lead = "" if node.block is not None else _lead(ops)
 			if directive == "each":
 				names, iterable, where = self.each(node)
 				condition = node.attribute("if")
@@ -997,6 +1111,9 @@ class Compiler:
 		"""The ops of an element with a directive; <template each=...> renders only its content."""
 
 		ops = []
+		# A block's content is kept as written (the lines of its {{ }} tags are already gone)
+		if node.block is not None:
+			return self.nodes(list(node.children))
 		if node.name == "template" and not node.component:
 			if any(name not in DIRECTIVES for name, *_ in node.attributes):
 				raise node.where.error("<template each/if> only renders its content, so it takes no other attributes")
@@ -1082,7 +1199,7 @@ class Compiler:
 			elif name.startswith(":"):
 				bound[name[1:]] = (value, where)
 			elif name in DIRECTIVES:
-				raise where.error(f"{name} can't be used here")
+				raise where.error(DIRECTIVE_ATTRIBUTE.format(name=name))
 
 		# class="a" with :class="b" (and style with :style) is one attribute
 		done = set()
@@ -1131,7 +1248,7 @@ class Compiler:
 			elif name == "debounce":
 				debounce = self.debounce(value, where)
 			elif name in DIRECTIVES:
-				raise where.error(f"{name} can't be used here")
+				raise where.error(DIRECTIVE_ATTRIBUTE.format(name=name))
 			else:
 				self.literal(value, where)
 				static.append((prop_name(name), True if value is None else unescape(value)))

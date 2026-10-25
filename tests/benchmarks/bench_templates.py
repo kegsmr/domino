@@ -78,7 +78,9 @@ JINJA = '''<h2>Items</h2>
 DOMINO = '''<DominoList>
 	<h2>Items</h2>
 	<ul>
-		<li each="index, item in enumerate(items)" :class="item_class(item)"><span>{{ item.name }}</span><button on-click="remove(index)">x</button></li>
+		{{ for index, item in enumerate(items) }}
+		<li :class="item_class(item)"><span>{{ item.name }}</span><button on-click="remove(index)">x</button></li>
+		{{ /for }}
 	</ul>
 </DominoList>
 '''

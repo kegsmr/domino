@@ -114,7 +114,9 @@ COMPONENT_HTML_TEMPLATE = '''\
 
 <TaskList>
 	<ul>
-		<li each="task in tasks">{{ task.text }}</li>
+		{{ for task in tasks }}
+		<li>{{ task.text }}</li>
+		{{ /for }}
 	</ul>
 </TaskList>
 
@@ -188,7 +190,9 @@ TAILWIND_COMPONENT_HTML_TEMPLATE = '''\
 
 <TaskList>
 	<ul class="mt-4 space-y-2">
-		<li each="task in tasks" class="rounded-lg bg-white px-3 py-2 shadow-sm dark:bg-slate-900">{{ task.text }}</li>
+		{{ for task in tasks }}
+		<li class="rounded-lg bg-white px-3 py-2 shadow-sm dark:bg-slate-900">{{ task.text }}</li>
+		{{ /for }}
 	</ul>
 </TaskList>
 

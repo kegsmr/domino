@@ -400,21 +400,27 @@ class Counter(t.div):
 
 ## Templates
 
-Domino templates are plain HTML with three additions: components are capitalized tags, lists and conditions are attributes, and every value comes from Python. There's no logic in them, so there's nothing new to learn beyond HTML, and nothing to debug in them but HTML. See `examples/templating/`.
+Domino templates are plain HTML with three additions: components are capitalized tags, lists and conditions are blocks in Python's words (`{{ for task in tasks }}` ... `{{ /for }}`), and every value comes from Python. There's no other logic in them: anything more than a name, an attribute or a helper call is a helper method in Python. See `examples/templating/`.
 
 ```html
 <!-- components/todos.html -->
 <TodoList class="todos">
 	<ul>
-		<li each="index, item in enumerate(items)" :class="item_class(item)">
+		{{ for index, item in enumerate(items) }}
+		<li :class="item_class(item)">
 			<input type="checkbox" :checked="item.done" on-change="toggle(index)">
 			{{ item.text }}
 			<button on-click="remove(index)" aria-label="Remove">×</button>
 		</li>
-		<li else>Nothing to do!</li>
+		{{ else }}
+		<li>Nothing to do!</li>
+		{{ /for }}
 	</ul>
-	<p if="remaining">{{ remaining }} left</p>
-	<p else>All done.</p>
+	{{ if remaining }}
+	<p>{{ remaining }} left</p>
+	{{ else }}
+	<p>All done.</p>
+	{{ /if }}
 	<Card heading="Tips"><p>Click an item to finish it.</p></Card>
 </TodoList>
 ```
@@ -461,13 +467,13 @@ class TodoList(t.div):
 - Text is escaped; `Markup` values and Domino elements are inserted as they are; `None` and `False` show nothing. In `<script>` values are inserted as JSON.
 - Plain attributes are written as they are: `{{ }}` doesn't work in them (it's an error saying what to write instead).
 
-**Lists and conditions** are attributes: `each="item in items"` repeats the element (`each="key, value in prices.items"` unpacks, `enumerate(items)` numbers), `if="name"` shows it when the value is true, and `elif="name"` / `else` on the next elements continue the condition. `else` after an `each` shows when the list is empty. On one element, `each` comes first and `if` filters the items. `<template each="..."> ... </template>` repeats its content without an element of its own.
+**Lists and conditions** are blocks, in Python's words and closed like HTML: `{{ for item in items }}` ... `{{ /for }}` repeats what's inside (`{{ for key, value in prices.items }}` unpacks, `enumerate(items)` numbers), and `{{ if done }}` ... `{{ elif loading }}` ... `{{ else }}` ... `{{ /if }}` shows one part (`{{ if not items }}` too). `{{ else }}` inside a `for` shows when the list is empty. A block wraps whole elements: one that starts inside an element ends inside it, so `{{ if x }}<div>{{ /if }}` is an error at startup, with the file and line. A block on a line of its own takes the line with it.
 
 **Bound attributes**: `:disabled="at_zero"` writes `disabled` when the value is true and leaves it out when it's false or None; other values are written escaped. `:class` takes a string, a list or a dict `{class: bool}`, and adds to `class="..."`; `:style` takes a dict (`{"font_weight": "bold"}`) and adds to `style="..."`.
 
 **Events**: `on-click="increment"` binds a method; `on-click="remove(index)"` binds it with values, so each item of a list gets its own. `on-input="search(event)"` passes the `Event`; `debounce="250"` waits until the user pauses. Handlers that only change the component's own `State` are [instant](#instant-updates), with values too.
 
-**Whitespace** is kept as written: nothing is added around inline elements (`<a>Domino</a>.` has no space before the dot), and `each`/`if` take the line break before their element along, so each item is on a line of its own and a hidden element leaves no empty line.
+**Whitespace** is kept as written: nothing is added around inline elements (`<a>Domino</a>.` has no space before the dot), and a block's own lines leave nothing behind, so each item is on a line of its own and a hidden element leaves no empty line.
 
 **Pages and layouts.** An `.html` file in `pages/` without a `.py` of the same name is a page: `pages/about.html` is `/about`, with the URL's parameters as its values (`pages/users/[name].html` reads `{{ name }}`). A capitalized tag at a page's top level uses that component: `<Layout title="About">...</Layout>` puts the page in the layout (see [Pages](#pages)). A component whose markup is a whole `<html>` document, like a layout, makes the page that uses it a whole document. A page with `<html>`, or `<head>` and `<body>` without `<html>` (like Meteor's `index.html`), is a whole document itself, used without layouts. Domino adds the doctype, its script and the components' CSS to documents. `template("home.html", title="Home")` renders any template from Python.
 

@@ -2091,7 +2091,7 @@ def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser
 	<html lang="en">
 		<head><title>{{ title }} · Site</title></head>
 		<body>
-			<nav><button class="menu" on-click="toggle">Menu</button> <span if="open">open</span></nav>
+			<nav><button class="menu" on-click="toggle">Menu</button> {{ if open }}<span>open</span>{{ /if }}</nav>
 			<main><slot /></main>
 		</body>
 	</html>

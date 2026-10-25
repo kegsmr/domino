@@ -156,8 +156,16 @@ def test_a_page_template_keeps_its_doctype_and_entities(tmp_path):
 	("<W><p class=\"{{ kind }}\">x</p></W>", ":class=\"helper\""),
 	("<W>{{ a + b }}</W>", "unexpected '+'"),
 	("<W>{{ x</W>", "{{ is never closed"),
-	("<W><p else>x</p></W>", "needs an element with if="),
-	("<W><p each=\"items\">x</p></W>", "each=\"item in items\""),
+	("<W><p if=\"x\">x</p></W>", "wrap them in {{ if x }}"),
+	("<W>{{ for items }}<p>x</p>{{ /for }}</W>", "name the item: {{ for item in items }}"),
+	("<p>a</p>\n{{ if x }}\n<p>x</p>", "{{ if }} is never closed; add {{ /if }}"),
+	("<W>{{ if x }}<p>x{{ /if }}</p></W>", "a block wraps whole elements"),
+	("<W><p>{{ if x }}x</p>{{ /if }}</W>", "end it inside the element it starts in"),
+	("<W>{{ for x in xs }}<p>x</p>{{ /if }}</W>", "{{ /if }} doesn't close {{ for }}"),
+	("<W>{{ /for }}</W>", "{{ /for }} closes nothing"),
+	("<W>{{ else }}</W>", "{{ else }} goes inside"),
+	("<W>{{ for x in xs }}x{{ elif y }}y{{ /for }}</W>", "not {{ elif }}"),
+	("<W>{{ if x }}x{{ else }}y{{ else }}z{{ /if }}</W>", "already has an {{ else }}"),
 	("<W><p on-click>x</p></W>", "an event needs a handler"),
 ])
 def test_syntax_errors_say_where(tmp_path, source, message):
@@ -259,17 +267,34 @@ def test_each_if_elif_else(tmp_path):
 	""", """
 		<Widget>
 			<ul>
-				<li each="item in items">{{ item }}</li>
-				<li else>none</li>
+				{{ for item in items }}
+				<li>{{ item }}</li>
+				{{ else }}
+				<li>none</li>
+				{{ /for }}
 			</ul>
-			<p each="row in rows"><b each="cell in row">{{ cell }}</b></p>
-			<i each="name, price in prices.items">{{ name }}={{ price }}</i>
-			<i each="index, item in enumerate(items)">{{ index }}:{{ item }}</i>
-			<template each="item in items"><dt>{{ item }}</dt><dd>-</dd></template>
-			<p if="is_one">one</p>
-			<p elif="is_two">two</p>
-			<p else>other</p>
-			<p if="not items">empty</p>
+			{{ for row in rows }}
+			<p>{{ for cell in row }}<b>{{ cell }}</b>{{ /for }}</p>
+			{{ /for }}
+			{{ for name, price in prices.items }}
+			<i>{{ name }}={{ price }}</i>
+			{{ /for }}
+			{{ for index, item in enumerate(items) }}
+			<i>{{ index }}:{{ item }}</i>
+			{{ /for }}
+			{{ for item in items }}
+			<dt>{{ item }}</dt><dd>-</dd>
+			{{ /for }}
+			{{ if is_one }}
+			<p>one</p>
+			{{ elif is_two }}
+			<p>two</p>
+			{{ else }}
+			<p>other</p>
+			{{ /if }}
+			{{ if not items }}
+			<p>empty</p>
+			{{ /if }}
 		</Widget>
 	""")
 	widget = module.Widget()
@@ -293,12 +318,12 @@ def test_each_if_elif_else(tmp_path):
 	assert "<p>other</p>" in inner(html_of(app), "Widget")
 
 
-def test_each_with_if_filters(tmp_path):
+def test_an_if_inside_a_for_filters(tmp_path):
 
 	module = component(tmp_path, """
 		class Widget(t.ul):
 			items = [{"text": "a", "done": True}, {"text": "b", "done": False}]
-	""", '<Widget><li each="item in items" if="item.done">{{ item.text }}</li></Widget>')
+	""", '<Widget>{{ for item in items }}{{ if item.done }}<li>{{ item.text }}</li>{{ /if }}{{ /for }}</Widget>')
 
 	assert inner(html_of(serve(tmp_path, module.Widget)), "Widget") == "<li>a</li>"
 
@@ -351,7 +376,9 @@ class Widget(t.div):
 LIST_HTML = """
 <Widget>
 	<ul>
-		<li each="index, item in enumerate(items)">{{ item }} <button on-click="remove(index)">x</button></li>
+		{{ for index, item in enumerate(items) }}
+		<li>{{ item }} <button on-click="remove(index)">x</button></li>
+		{{ /for }}
 	</ul>
 	<input on-input="rename(items[0], event)" debounce="250">
 	<p>{{ searched }}</p>
@@ -437,7 +464,7 @@ def test_predictions_for_handlers_with_values(tmp_path):
 			def is_active(self, index):
 				return self.active == index
 	""", """
-		<Tabs><button each="index, name in enumerate(names)" on-click="select(index)" :aria-pressed="is_active(index)">{{ name }}</button></Tabs>
+		<Tabs>{{ for index, name in enumerate(names) }}<button on-click="select(index)" :aria-pressed="is_active(index)">{{ name }}</button>{{ /for }}</Tabs>
 	""", name="tabs")
 	app = serve(tmp_path, module.Tabs)
 	graph = json.loads(html_of(app).split("data-domino-predict>")[1].split("</script>")[0])
@@ -504,7 +531,7 @@ CARDS_HTML = """
 	<Card :heading="title" :count="items_count" />
 	<Plain on-click="add_one" />
 	<Adder on-add="add" />
-	<ul><li each="item in items">{{ item }}</li></ul>
+	<ul>{{ for item in items }}<li>{{ item }}</li>{{ /for }}</ul>
 </Page>
 
 <Card class="card">
@@ -585,7 +612,7 @@ def test_python_composition_passes_props_and_handlers(tmp_path):
 			label = ""
 	""", """
 		<Form on-submit="submit"><input name="text"><button>Add</button></Form>
-		<List><p>{{ label }}</p><ul><li each="item in items">{{ item }}</li></ul></List>
+		<List><p>{{ label }}</p><ul>{{ for item in items }}<li>{{ item }}</li>{{ /for }}</ul></List>
 	""", name="tasks")
 	page = serve(tmp_path, module.Tasks).test_page("/")
 
@@ -912,7 +939,7 @@ def test_the_scaffold_uses_templates(tmp_path):
 	cli.create(str(tmp_path / "site"))
 	html = (tmp_path / "site" / "components" / "tasks.html").read_text()
 
-	assert "<TaskForm on-submit=\"submit\">" in html and '<li each="task in tasks">{{ task.text }}</li>' in html
+	assert "<TaskForm on-submit=\"submit\">" in html and "{{ for task in tasks }}" in html
 	assert dtemplates.parse_file(str(tmp_path / "site" / "components" / "tasks.html")).definitions.keys() == {"TaskForm", "TaskList", "NoTasks"}
 	assert "def render" in (tmp_path / "site" / "components" / "tasks.py").read_text()
 
