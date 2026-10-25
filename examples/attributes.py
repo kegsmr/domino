@@ -46,17 +46,17 @@ class Settings(t.div):
 						"Display name"
 					],
 					t.input(id="display-name", class_="form-control mb-3", value="Ada"),
-					toggle := t.button(
+					(toggle := t.button(
 						type="button",
 						class_=["btn", toggle_class, "mr-2"],
 						aria_pressed=str(self.notifications).lower(),
 						data_state=state,
 					) [
 						f"Notifications: {state}"
-					],
-					save := t.button(type="button", class_="btn btn-primary") [
+					]),
+					(save := t.button(type="button", class_="btn btn-primary") [
 						"Save"
-					],
+					]),
 					self.message()
 				]
 			]

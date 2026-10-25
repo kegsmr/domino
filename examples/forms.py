@@ -64,7 +64,7 @@ class SignupForm(t.div):
 					],
 					t.label() [
 						"Seats ",
-						seats := t.input(type="range", name="seats", min=1, max=20, value=self.seat_count.seats),
+						(seats := t.input(type="range", name="seats", min=1, max=20, value=self.seat_count.seats)),
 						" ",
 						self.seat_count
 					],
