@@ -49,8 +49,9 @@ MIN_PASSWORD_LENGTH = 8
 # Hashing a huge "password" is slow, so longer ones are refused before hashing
 MAX_PASSWORD_LENGTH = 1024
 
-# No characters that separate or quote addresses in a To: header ("a,b@c.d" is two addresses)
-EMAIL_PATTERN = re.compile(r"^[^@\s,;:<>()\[\]\\\"]+@[^@\s,;:<>()\[\]\\\"]+\.[^@\s,;:<>()\[\]\\\"]+\Z")
+# No characters that separate or quote addresses in a To: header ("a,b@c.d" is two addresses).
+# Domain labels can't hold dots, so matching takes linear time (no backtracking over "a.a.a...")
+EMAIL_PATTERN = re.compile(r"^[^@\s,;:<>()\[\]\\\"]+@(?:[^@\s.,;:<>()\[\]\\\"]+\.)+[^@\s.,;:<>()\[\]\\\"]+\Z")
 
 WRONG_LOGIN = "Wrong email or password"
 TOO_MANY_EMAILS = "Too many emails sent. Try again in a few minutes."
@@ -245,7 +246,7 @@ def create_user(email, password, name=None):
 	Raises AccountError with a message for the user when the input won't do."""
 
 	email = normalize_email(email)
-	if not EMAIL_PATTERN.match(email) or len(email) > 254:
+	if len(email) > 254 or not EMAIL_PATTERN.match(email):
 		raise AccountError("Enter a valid email address", "email")
 	_check_new_password(password)
 	if _users().find_one({"email": email}):
