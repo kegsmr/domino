@@ -11,43 +11,42 @@ from domino.components import Document
 app = Domino(__name__)
 
 
-class CounterComponent(t.div):
+class RandomNumber(t.div):
 
 
 	def __init__(self, *args, **kwargs):
 
 		super().__init__(*args, **kwargs)
 
-		self.count = 0
+		self.number = 0
 
 
 	def render(self):
 
 		self([
 			t.p() [
-				f"Current Count: {self.count}"
+				f"Current number: {self.number}"
 			]
 		])
 
-		self.after(100, self.update_count)
+		self.after(1000, self.roll)
 
 
-	def update_count(self):
+	def roll(self):
 
-		self.count = random.randint(0, 1000)
+		self.number = random.randint(0, 1000)
 
 		return self
-
 
 
 @app.route("/")
 def index():
 
-	return Document(title="Counter") [
+	return Document(title="Random Number") [
 		t.h1() [
-			"Counter"
+			"Random Number"
 		],
-		CounterComponent()
+		RandomNumber()
 	]
 
 

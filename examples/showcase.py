@@ -4,6 +4,7 @@ sys.path.append("")
 
 
 from domino import Domino, Style
+from domino.components import Core
 import domino.tags as t
 
 # Initialize the Domino app
@@ -51,6 +52,7 @@ class Navbar(t.div):
 
 class HeroSection(t.section):
 	def init(self):
+		self.id("home")
 		stylesheet.style(
 			self,
 			display="flex",
@@ -59,16 +61,14 @@ class HeroSection(t.section):
 			justify_content="center",
 			text_align="center",
 			height="90vh",
-			background_image="url('https://via.placeholder.com/1920x1080')",
-			background_size="cover",
-			background_position="center",
+			background_image="linear-gradient(135deg, #1E3C72, #2A5298 50%, #1E90FF)",
 			color="#fff",
 			padding="0 20px",
 		)
 		t.h1(self, "Welcome to Domino")
-		stylesheet.style("h1", font_size="3.5rem", margin_bottom="15px", text_shadow="2px 2px 4px rgba(0, 0, 0, 0.5)")
+		stylesheet.style(".HeroSection h1", font_size="3.5rem", margin_bottom="15px", text_shadow="2px 2px 4px rgba(0, 0, 0, 0.5)")
 		t.p(self, "Build web pages with ease and elegance.")
-		stylesheet.style("p", font_size="1.2rem", margin_bottom="25px", text_shadow="1px 1px 2px rgba(0, 0, 0, 0.5)")
+		stylesheet.style(".HeroSection p", font_size="1.2rem", margin_bottom="25px", text_shadow="1px 1px 2px rgba(0, 0, 0, 0.5)")
 		cta = t.a(self, "Learn More", href="#features")
 		stylesheet.style(
 			cta,
@@ -105,7 +105,7 @@ class FeaturesSection(t.section):
 		stylesheet.style(
 			grid,
 			display="grid",
-			grid_template_columns="repeat(auto-fit, minmax(300px, 1fr))",
+			grid_template_columns="repeat(auto-fit, minmax(250px, 1fr))",
 			gap="30px",
 		)
 
@@ -119,9 +119,9 @@ class FeaturesSection(t.section):
 				box_shadow="0 4px 6px rgba(0, 0, 0, 0.1)",
 			)
 			t.h3(card, title)
-			stylesheet.style("h3", font_size="1.5rem", margin_bottom="15px", color="#333")
+			stylesheet.style(".FeaturesSection h3", font_size="1.5rem", margin_bottom="15px", color="#333")
 			t.p(card, desc)
-			stylesheet.style("p", color="#555", line_height="1.6")
+			stylesheet.style(".FeaturesSection p", color="#555", line_height="1.6")
 
 
 class GallerySection(t.section):
@@ -135,15 +135,22 @@ class GallerySection(t.section):
 		stylesheet.style(
 			gallery,
 			display="grid",
-			grid_template_columns="repeat(auto-fit, minmax(180px, 1fr))",
+			grid_template_columns="repeat(auto-fit, minmax(250px, 1fr))",
 			gap="20px",
 		)
 
+		# Generated tiles instead of images, so the example needs no network
 		for i in range(1, 7):
-			img = t.img(gallery, src=f"https://via.placeholder.com/150?text=Image+{i}")
+			tile = t.div(gallery, f"Image {i}")
 			stylesheet.style(
-				img,
-				width="100%",
+				tile,
+				aspect_ratio="1",
+				display="flex",
+				align_items="center",
+				justify_content="center",
+				color="#fff",
+				font_weight="600",
+				background_image=f"linear-gradient(135deg, hsl({i * 50}, 70%, 55%), hsl({i * 50 + 40}, 70%, 40%))",
 				border_radius="10px",
 				box_shadow="0 2px 4px rgba(0, 0, 0, 0.1)",
 			)
@@ -152,6 +159,22 @@ class GallerySection(t.section):
 class ContactSection(t.section):
 	def init(self):
 		self.__attributes__["id"] = "contact"
+		self.sender = None
+
+		# Shared rules go here, before the page computes its stylesheet
+		stylesheet.style(
+			".ContactSection input, .ContactSection textarea",
+			padding="12px",
+			border="1px solid #ccc",
+			border_radius="8px",
+			font="inherit",
+		)
+
+
+	def render(self):
+
+		# Rebuilt on every render, so start from no children
+		self([])
 		stylesheet.style(
 			self,
 			padding="60px 20px",
@@ -161,7 +184,12 @@ class ContactSection(t.section):
 		t.h2(self, "Contact Us")
 		stylesheet.style("h2", font_size="2.5rem", margin_bottom="30px", color="#333")
 
-		form = t.form(self, action="#", method="post")
+		if self.sender:
+			t.p(self, f"Thanks, {self.sender}! We'll be in touch.")
+			return
+
+		form = t.form(self)
+		form.bind("submit", self.send)
 		stylesheet.style(
 			form,
 			display="flex",
@@ -171,9 +199,9 @@ class ContactSection(t.section):
 			margin="0 auto",
 		)
 
-		t.input(form, type="text", placeholder="Your Name")
-		t.input(form, type="email", placeholder="Your Email")
-		t.textarea(form, placeholder="Your Message", rows="4")
+		t.input(form, type="text", name="name", placeholder="Your Name", required=True)
+		t.input(form, type="email", name="email", placeholder="Your Email")
+		t.textarea(form, name="message", placeholder="Your Message", rows="4")
 		submit = t.button(form, "Send Message", type="submit")
 		stylesheet.style(
 			submit,
@@ -186,6 +214,13 @@ class ContactSection(t.section):
 			cursor="pointer",
 			hover={"background_color": "#0056b3"},
 		)
+
+
+	def send(self, event):
+
+		self.sender = event.form.get("name") or "friend"
+
+		return self
 
 
 class Footer(t.footer):
@@ -206,10 +241,13 @@ class ShowcasePage(t.html):
 		
 		head = t.head(self)
 		t.title(head, "Domino Showcase")
+
+		# Domino's client script, needed for events (Document adds this itself)
+		head.add_children([Core()])
 		
 		body = t.body(self)
 
-		stylesheet.style(body, font_family="Segoe UI")
+		stylesheet.style(body, font_family="'Segoe UI', system-ui, sans-serif", margin="0")
 
 		Navbar(body)
 		HeroSection(body)
@@ -221,15 +259,11 @@ class ShowcasePage(t.html):
 		stylesheet.compute(head)
 
 
-page = ShowcasePage()
-
-
 @app.route("/")
 def index():
-	return page._render()
+	# A new page per visit, so each visitor's contact form has its own state
+	return ShowcasePage()
 
 
 if __name__ == "__main__":
-	with open("output.html", "w") as file:
-		file.write(page._render())
 	app.run(debug=True)
