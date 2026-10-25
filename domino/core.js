@@ -96,6 +96,26 @@ window.Domino = (() => {
         return el.getAttribute('value') + '|' + el.hasAttribute('checked');
     }
 
+    // Set the fields inside the element that fired to the values the server last rendered,
+    // which morph keeps in their attributes (what form.reset() restores)
+    function resetFields(reset) {
+        if (!reset.root.isConnected) return;
+        const fields = Array.from(reset.root.querySelectorAll('input, select, textarea'));
+        if (FIELDS.includes(reset.root.tagName)) fields.push(reset.root);
+
+        for (const field of fields) {
+            const typing = field === document.activeElement && !reset.submit && !TOGGLES.includes(field.type);
+            if (typing) continue;
+            if (field.type === 'checkbox' || field.type === 'radio') {
+                field.checked = field.defaultChecked;
+            } else if (field.tagName === 'SELECT') {
+                for (const option of field.options) option.selected = option.defaultSelected;
+            } else {
+                field.value = field.defaultValue;
+            }
+        }
+    }
+
     function morphChildren(from, to, reset) {
         // Children with an id are matched by id, so reordered lists keep their nodes
         const keyed = new Map();
@@ -133,7 +153,13 @@ window.Domino = (() => {
     }
 
     function apply(data, reset) {
-        if (!data.id || !data.html || latest.get(data.id) >= data.version) return;
+        if (!data.id || !data.html) return;
+        if (latest.get(data.id) >= data.version) {
+            // A newer update (e.g. pushed by the server) got here first, so the page already
+            // shows the server's state; still reset the fields of the element that fired
+            if (reset) resetFields(reset);
+            return;
+        }
         latest.set(data.id, data.version);
 
         const target = document.getElementById(data.id);
