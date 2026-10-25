@@ -10,7 +10,7 @@ or, with Domino installed (`pip install -e .`), `domino run examples/counter`. `
 
 The examples run in debug mode. Only `chat` stores data in MongoDB, so the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it; running `chat` starts one, as `domino run` does.
 
-Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms` and `functional`. Run them all with `python -m pytest examples`.
+Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms`, `functional` and `uploads`. Run them all with `python -m pytest examples`.
 
 | Example | Shows |
 |---|---|
@@ -25,6 +25,7 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `chat/` | Meteor-style reactivity: a shared `Collection` in `data.py`; every open window re-renders live when a message is inserted |
 | `accounts/` | Sign-up, login and logout with `domino.accounts`: a `UserMenu` that updates when you log in or out, and a `login_required` page with notes only their owner sees. Needs MongoDB (started for you in debug mode) |
 | `styles/` | Component `css` (nested selectors, `:hover`, `::before`, `@media`, plain CSS strings, inheritance), written once per page; a theme with a dark variant; CSS arriving with the event response that first shows a component |
+| `uploads/` | File uploads: a `multiple` file input submitted with its form, read with `event.files.getlist()`, and an avatar input that uploads `on_change=`; thumbnails served back by a page (`pages/images/[id].py`) after checking the files really are images; a progress bar styled with `data-uploading` and `--domino-upload-progress` in CSS alone; tests with `page.upload()` |
 | `loading/` | Styling a slow event's loading state with `[data-loading]`, and the debug error overlay when a callback raises |
 | `attributes/` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
 | `bootstrap/` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |

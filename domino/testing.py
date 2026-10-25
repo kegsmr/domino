@@ -8,8 +8,12 @@ Events go through the same endpoint the browser uses, so handlers, State, reacti
 updates pushed from other pages all run for real; only the browser is simulated.
 """
 
+import mimetypes
+import os
 import re
 from html.parser import HTMLParser
+from io import BytesIO
+from pathlib import Path
 
 from . import reactive
 
@@ -34,6 +38,7 @@ class Node:
 		self.children = []
 		self.parent = parent
 		self.value = None  # what the user typed or picked, when it differs from the HTML
+		self.files = None  # a file input's picked files: [(filename, bytes, content_type)]
 
 
 	def __repr__(self):
@@ -295,6 +300,22 @@ class TestPage:
 		return self
 
 
+	def upload(self, selector, *files):
+		"""Pick files in a file input and fire its change event, like a user choosing them.
+		Each file is a path, or (filename, bytes) or (filename, bytes, content_type). They're
+		uploaded with the input's change event and with its form's submit, like in a browser."""
+
+		node = self.find(selector)
+		if node.tag != "input" or node.attrs.get("type") != "file":
+			raise DominoTestError(f"{node!r} isn't a file input")
+		if len(files) > 1 and "multiple" not in node.attrs:
+			raise DominoTestError(f"{node!r} takes one file (it has no multiple attribute)")
+		node.files = [read_file(file) for file in files]
+		self.dispatch(node, "change")
+
+		return self
+
+
 	def click(self, selector, text=None):
 		"""Click an element; a submit button also submits its form, like in a browser."""
 
@@ -344,6 +365,11 @@ class TestPage:
 		if form is not None:
 			data["form"] = form_data(form)
 
+		# Like the browser, files go up first, to get a token per file for the event
+		files = selected_files(element)
+		if files:
+			data["files"] = self.upload_files(files)
+
 		response = self.client.post("/_domino/events", json={"page_id": self.page_id, "event_id": event_id, "data": data})
 		payload = response.get_json(silent=True) or {}
 		if response.status_code == 404:
@@ -358,8 +384,24 @@ class TestPage:
 			return
 
 		# Like the browser, the fields of the element that fired take the server's state
+		for node in [element, *element.elements()]:
+			node.files = None
 		self.apply(payload, element)
 		self.sync()
+
+
+	def upload_files(self, files):
+
+		body = {}
+		for name, (filename, content, content_type) in files:
+			body.setdefault(name, []).append((BytesIO(content), filename, content_type))
+
+		response = self.client.post("/_domino/upload", data=body, headers={"X-Domino-Page": self.page_id or ""})
+		payload = response.get_json(silent=True) or {}
+		if response.status_code != 200:
+			raise DominoTestError(f"The upload failed: {payload.get('error') or response.status_code}")
+
+		return payload["files"]
 
 
 	def run_timers(self):
@@ -436,6 +478,9 @@ def form_data(form):
 		name = node.attrs.get("name")
 		if node.tag not in FIELDS or not name or "disabled" in node.attrs:
 			continue
+		# Files go up on their own (see selected_files)
+		if node.attrs.get("type") == "file":
+			continue
 		if node.attrs.get("type") in TOGGLES:
 			if not node.field_value():
 				continue
@@ -450,6 +495,41 @@ def form_data(form):
 			data[name] = value
 
 	return data
+
+
+def selected_files(element):
+	"""[(name, file)] an event on `element` uploads, as the browser does: a file input's own
+	files, or those of every file input in a submitted form."""
+
+	if element.tag == "input" and element.attrs.get("type") == "file":
+		inputs = [element]
+	elif element.tag == "form":
+		inputs = [node for node in element.elements() if node.tag == "input" and node.attrs.get("type") == "file"]
+	else:
+		return []
+
+	files = []
+	for node in inputs:
+		name = node.attrs.get("name") or ("file" if node is element else None)
+		if name and node.files and "disabled" not in node.attrs:
+			files.extend((name, file) for file in node.files)
+
+	return files
+
+
+def read_file(file):
+	"""(filename, bytes, content_type) for a path or a (filename, bytes[, content_type]) tuple."""
+
+	if isinstance(file, (str, os.PathLike)):
+		path = Path(file)
+		file = (path.name, path.read_bytes())
+	if isinstance(file, tuple) and len(file) == 2:
+		file = (*file, mimetypes.guess_type(file[0])[0] or "application/octet-stream")
+	filename, content, content_type = file
+	if isinstance(content, str):
+		content = content.encode()
+
+	return filename, content, content_type
 
 
 def render(node):

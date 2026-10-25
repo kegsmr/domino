@@ -1,9 +1,12 @@
 """End-to-end tests of core.js in a real browser. Skipped when Playwright isn't installed."""
 
 import json
+import os
+import struct
 import sys
 import threading
 import time
+import zlib
 
 import pytest
 
@@ -135,8 +138,9 @@ def test_partial_update_keeps_other_fields(serve, page):
 
 def test_form_checks_in_the_browser_then_on_the_server(serve, page):
 
-	page.goto(serve("forms"))
+	# Listening before the page opens its WebSocket, so its frames are all seen
 	sent = sent_events(page)
+	page.goto(serve("forms"))
 
 	# The browser's own check stops an empty required field; nothing is sent
 	page.click("button[type=submit]")
@@ -1026,3 +1030,87 @@ def test_a_newer_navigation_cancels_the_one_in_flight(serve, page):
 	page.evaluate("Domino.disableLatencySim()")
 	assert documents == [url]
 	assert page.errors == []
+
+
+def png(width, height, color):
+	"""A PNG image of one color, made without an image library."""
+
+	def chunk(kind, data):
+		return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+	rows = b"".join(b"\x00" + bytes(color) * width for _ in range(height))
+	header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+
+	return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+def image_file(name, color, size=64):
+
+	return {"name": name, "mimeType": "image/png", "buffer": png(size, size, color)}
+
+
+def test_uploads_show_thumbnails_and_clear_the_form(serve, page):
+
+	uploads = []
+	page.on("request", lambda request: "/_domino/upload" in request.url and uploads.append(request))
+	page.goto(serve("uploads"))
+
+	page.set_input_files("input[name=photos]", [image_file("red.png", (220, 40, 40)), image_file("blue.png", (40, 80, 220))])
+	page.get_by_text("Upload", exact=True).click()
+	page.wait_for_function("document.querySelectorAll('ul img').length === 2", timeout=5000)
+
+	# Each thumbnail loads from the server
+	page.wait_for_function("Array.from(document.querySelectorAll('ul img')).every((img) => img.complete && img.naturalWidth === 64)", timeout=5000)
+	# The submitted form is reset, file input included
+	assert page.evaluate("document.querySelector('input[name=photos]').files.length") == 0
+	# One multipart POST, whichever transport carried the event
+	assert len(uploads) == 1
+	assert uploads[0].headers["x-domino-page"] == page.get_attribute("[data-domino-page]", "data-domino-page")
+
+	# A file input's change event uploads as soon as a file is picked
+	page.set_input_files("input[name=avatar]", [image_file("me.png", (40, 160, 80))])
+	page.wait_for_function("document.querySelector('.avatar img') && document.querySelector('.avatar img').naturalWidth === 64", timeout=5000)
+	assert page.errors == []
+
+
+def test_upload_progress_is_marked_for_css(serve, page):
+
+	page.goto(serve("uploads"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	page.set_input_files("input[name=photos]", [image_file("big.png", (200, 150, 0), 256)])
+	page.get_by_text("Upload", exact=True).click()
+
+	form = page.locator("form")
+	page.wait_for_selector("form[data-uploading]", timeout=2000)
+	assert form.get_attribute("aria-busy") == "true"
+	progress = page.evaluate("getComputedStyle(document.querySelector('form')).getPropertyValue('--domino-upload-progress')")
+	assert 0 <= float(progress) <= 1
+	# The example's bar is the form's ::after, sized by the custom property
+	assert page.evaluate("getComputedStyle(document.querySelector('form'), '::after').display") == "block"
+
+	page.wait_for_function("document.querySelectorAll('ul img').length === 1", timeout=8000)
+	assert form.get_attribute("data-uploading") is None
+	assert form.get_attribute("style") is None
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_too_large_upload_shows_an_error(serve, page):
+
+	def small_limit(module):
+		module.app.debug = True
+		module.app.config["DOMINO_MAX_UPLOAD_MB"] = 0.05
+
+	page.goto(serve("uploads", small_limit))
+
+	# Random bytes, well over the 50 KB limit
+	page.set_input_files("input[name=photos]", [{"name": "huge.png", "mimeType": "image/png", "buffer": os.urandom(300 * 1024)}])
+	page.get_by_text("Upload", exact=True).click()
+
+	overlay = page.locator("#domino-error")
+	overlay.wait_for(timeout=5000)
+	assert "Upload too large: the limit is 0.05 MB" in overlay.inner_text()
+	assert page.locator("ul img").count() == 0
+	assert page.locator("button[data-loading]").count() == 0
+	assert [error for error in page.errors if "413" not in error and "Domino event error" not in error] == []

@@ -18,10 +18,12 @@ from flask.helpers import get_debug_flag, get_load_dotenv
 from flask.sessions import SecureCookieSessionInterface
 from jinja2 import ChoiceLoader
 from markupsafe import Markup, escape
+from werkzeug.datastructures import MultiDict
 
 from .settings import Settings, load_settings
 from .util import *
 from . import css, optimistic, reactive
+from .uploads import Uploads
 from .settings import script_json
 
 
@@ -390,18 +392,20 @@ class MemoryPageStore(PageStore):
 
 
 class Event:
-	"""What the browser sent with an event: the element's value and its form's fields."""
+	"""What the browser sent with an event: the element's value, its form's fields, and the
+	files it uploaded (a MultiDict of UploadedFile: `files["photo"]`, `files.getlist("photos")`)."""
 
 
-	def __init__(self, type, value=None, form=None):
+	def __init__(self, type, value=None, form=None, files=None):
 
 		self.type = type
 		self.value = value
 		self.form = form or {}
+		self.files = files if files is not None else MultiDict()
 
 
 	@staticmethod
-	def from_request(event_id, data):
+	def from_request(event_id, data, files=None):
 
 		if not isinstance(data, dict):
 			data = {}
@@ -412,7 +416,7 @@ class Event:
 
 		type_ = "after" if event_id.startswith("after-") else event_id.rsplit("-", 1)[-1]
 
-		return Event(type_, data.get("value"), form)
+		return Event(type_, data.get("value"), form, files)
 
 
 	def __repr__(self):
@@ -483,6 +487,8 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_WEBSOCKET", True)  # one WebSocket per tab when served over ASGI
 		self.config.setdefault("DOMINO_WORKERS", 32)  # threads for event handlers (and for requests) over ASGI
 		self.config.setdefault("DOMINO_NAVIGATION", True)  # links to other pages swap them in without reloading
+		self.config.setdefault("DOMINO_MAX_UPLOAD_MB", 16)  # per upload request (all its files)
+		self.config.setdefault("DOMINO_UPLOAD_TTL", 10 * 60)  # seconds an upload waits for its event
 
 		# settings.json < settings.local.json < DOMINO_* environment variables
 		self.settings = load_settings(self.root_path, settings)
@@ -504,6 +510,7 @@ class Domino(Flask):
 
 		self._add_static_route('/_domino/core', CORE_JS)
 		self._add_event_handler('/_domino/events')
+		self._add_upload_handler('/_domino/upload')
 		self._add_stream('/_domino/stream')
 		self._add_oauth_routes('/_domino/accounts/<provider>/<action>')
 		self._add_session_handoff('/_domino/session/<token>')
@@ -665,6 +672,43 @@ class Domino(Flask):
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
 
 
+	def _add_upload_handler(self, route):
+
+		from werkzeug.exceptions import RequestEntityTooLarge
+		from .uploads import parse
+
+		self.uploads = Uploads(self.config)
+
+		def upload_handler():
+
+			# A cross-site form can post multipart, but can't add a header (and a cross-site
+			# fetch with one needs a CORS preflight, never granted), so this is CSRF-safe
+			page_id = request.headers.get("X-Domino-Page")
+			if not page_id:
+				return jsonify({"error": "Expected an X-Domino-Page header"}), 403
+
+			page = self._get_page(page_id)
+			if page is None:
+				return jsonify({"error": "Unknown or expired page"}), 404
+
+			limit = self.config["DOMINO_MAX_UPLOAD_MB"]
+			too_large = {"error": f"Upload too large: the limit is {limit:g} MB"}
+			if self.debug or self.testing:
+				too_large["debug"] = True  # for the browser's error overlay
+			# Refused before reading the body when its size is known; parse() checks as it reads
+			max_bytes = int(limit * 1024 * 1024)
+			if (request.content_length or 0) > max_bytes:
+				return jsonify(too_large), 413
+			try:
+				files = parse(request.environ, max_bytes)
+			except RequestEntityTooLarge:
+				return jsonify(too_large), 413
+
+			return jsonify({"files": self.uploads.add(page.id, files)})
+
+		self.add_url_rule(route, route, upload_handler, methods=["POST"])
+
+
 	def _event_response(self, response):
 
 		if g.get("domino_redirect"):
@@ -680,11 +724,14 @@ class Domino(Flask):
 
 		# Reactive changes the callback makes re-render their subscribers once the page
 		# lock is released (updating other pages while holding it could deadlock)
-		with reactive.batch(background=True) as changes, page.lock:
+		# Files the event uploaded first, by token; deleted once it's handled
+		with reactive.batch(background=True) as changes, page.lock, self.uploads.claim(page, data) as files:
 
 			event = page.events.get(event_id) or DEFAULT_PAGE.events.get(event_id)
 			if event is None:
 				return {"error": "Unknown or expired event"}, 404
+			if files is None:
+				return {"error": "Unknown or expired upload"}, 400
 
 			g.domino_page = page
 			g.domino_redirect = None  # set by redirect()
@@ -693,7 +740,7 @@ class Domino(Flask):
 
 			try:
 				if accepts_argument(callback):
-					result = callback(Event.from_request(event_id, data))
+					result = callback(Event.from_request(event_id, data, files))
 				else:
 					result = callback()
 

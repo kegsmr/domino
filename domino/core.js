@@ -37,7 +37,7 @@ window.Domino = (() => {
         if (form) {
             data.form = {};
             new FormData(form).forEach((value, name) => {
-                if (typeof value !== 'string') return; // files aren't supported
+                if (typeof value !== 'string') return; // files go up on their own (see upload)
                 data.form[name] = name in data.form ? [].concat(data.form[name], value) : value;
             });
         }
@@ -68,6 +68,7 @@ window.Domino = (() => {
         if (pending && to.hasAttribute('disabled')) pending.disabled = false;
         for (const { name } of Array.from(from.attributes)) {
             if (pending && (name === 'aria-busy' || name === 'data-loading' || (name === 'disabled' && pending.disabled))) continue;
+            if (name === 'data-uploading' && uploading.has(from)) continue;
             if (!to.hasAttribute(name)) from.removeAttribute(name);
         }
         for (const { name, value } of Array.from(to.attributes)) {
@@ -570,11 +571,91 @@ window.Domino = (() => {
         return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
     }
 
+    // The files an event sends: a file input's own (on_change=), or those of a submitted form
+    function selectedFiles(el) {
+        if (el.tagName === 'INPUT' && el.type === 'file') {
+            return Array.from(el.files || []).map((file) => [el.name || 'file', file]);
+        }
+        const files = [];
+        if (el.tagName !== 'FORM') return files;
+        new FormData(el).forEach((value, name) => {
+            // An empty file input still sends a nameless file
+            if (typeof value !== 'string' && value.name) files.push([name, value]);
+        });
+        return files;
+    }
+
+    // Elements uploading now, whose data-uploading a re-render mustn't remove
+    const uploading = new WeakSet();
+
+    // Files go up in a multipart POST of their own, never through the socket, and the event
+    // then carries a token per file. XMLHttpRequest because fetch has no upload progress: the
+    // element (and its form) get data-uploading="<percent>" and --domino-upload-progress (0 to 1)
+    // for CSS. Resolves to the server's { status, data }.
+    async function upload(el, files) {
+        const form = el.closest('form');
+        const marked = form && form !== el ? [el, form] : [el];
+        const progress = (fraction) => {
+            for (const node of marked) {
+                uploading.add(node);
+                node.setAttribute('data-uploading', String(Math.round(fraction * 100)));
+                node.style.setProperty('--domino-upload-progress', String(fraction));
+            }
+        };
+        progress(0);
+
+        try {
+            // A round trip of its own for the latency simulator
+            await wait(latency / 2);
+            const result = await postFiles(files, progress);
+            await wait(latency / 2);
+            return result;
+        } finally {
+            for (const node of marked) {
+                uploading.delete(node);
+                node.removeAttribute('data-uploading');
+                node.style.removeProperty('--domino-upload-progress');
+                if (node.getAttribute('style') === '') node.removeAttribute('style');
+            }
+        }
+    }
+
+    function postFiles(files, progress) {
+        return new Promise((resolve) => {
+            const body = new FormData();
+            for (const [name, file] of files) body.append(name, file);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/_domino/upload');
+            // A cross-site form can't send this header, which makes the upload CSRF-safe
+            xhr.setRequestHeader('X-Domino-Page', pageId());
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) progress(e.loaded / e.total);
+            };
+            xhr.onload = () => {
+                let data;
+                try { data = JSON.parse(xhr.responseText); } catch (err) { data = { error: `${xhr.status} ${xhr.statusText}` }; }
+                resolve({ status: xhr.status, data });
+            };
+            xhr.onerror = () => resolve({ status: 0, data: { error: 'Upload failed: no answer from the server' } });
+            xhr.send(body);
+        });
+    }
+
     async function triggerEvent(eventId, payload = {}, reset = null, el = null) {
+        const files = el ? selectedFiles(el) : [];
         const unmark = el ? markBusy(el, reset && reset.submit) : null;
         const page = pageId();
         if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
+            if (files.length) {
+                const uploaded = await upload(el, files);
+                if (uploaded.status !== 200) {
+                    // Shown like a failed event (and an expired page reloads)
+                    await handleMessage(uploaded.data, uploaded.status, { el, eventId, reset, unmark });
+                    return;
+                }
+                payload = Object.assign({}, payload, { files: uploaded.data.files });
+            }
             await wait(latency / 2);
             const { status, data } = await sendEvent(eventId, payload);
             await wait(latency / 2);
