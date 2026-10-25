@@ -189,6 +189,7 @@ class Page:
 		self.user_id = reactive.State(None)
 		self.css = set()  # components whose CSS the browser has (see PageStyles)
 		self.wake = None  # the newest stream's callback for pushes, if it runs in an event loop
+		self.cookie = None  # the browser's Cookie header once it had this page, if swapped in by core.js
 		self.touch()
 
 
@@ -481,6 +482,7 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_KEEPALIVE", 15)  # seconds between stream keepalives
 		self.config.setdefault("DOMINO_WEBSOCKET", True)  # one WebSocket per tab when served over ASGI
 		self.config.setdefault("DOMINO_WORKERS", 32)  # threads for event handlers (and for requests) over ASGI
+		self.config.setdefault("DOMINO_NAVIGATION", True)  # links to other pages swap them in without reloading
 
 		# settings.json < settings.local.json < DOMINO_* environment variables
 		self.settings = load_settings(self.root_path, settings)
@@ -911,6 +913,12 @@ class Domino(Flask):
 	def _render_view(self, function, *args, **kwargs):
 		"""Call a view (a route or a file in pages/) and render the component it returns."""
 
+		# core.js is swapping this page in for the one it names, and has no WebSocket to say it's
+		# leaving that one (see navigate() in core.js), so drop it now
+		leaving = request.headers.get("X-Domino-Leave")
+		if leaving:
+			self.page_store.delete(leaving)
+
 		# Events bound while building and rendering this response belong to a new page
 		page = self._new_page()
 
@@ -926,6 +934,9 @@ class Domino(Flask):
 			# Served through app.asgi, so the browser can open a WebSocket instead of POST + SSE
 			if request.environ.get("domino.websocket"):
 				result.configure(data_domino_ws=True)
+			# Links then load pages from scratch, as without core.js
+			if not self.config["DOMINO_NAVIGATION"]:
+				result.configure(data_domino_reload=True)
 			with collect_styles() as styles:
 				html = result._render()
 			html = styles.finish(html)
@@ -939,6 +950,21 @@ class Domino(Flask):
 			self._drop_page(page)
 
 		return html
+
+
+	def process_response(self, response):
+
+		response = super().process_response(response)
+
+		# A page core.js swaps in keeps the tab's WebSocket, whose handshake sent older cookies;
+		# remember the ones the browser has now (the session is saved by this point), for the
+		# socket's events on this page
+		page = g.get("domino_page")
+		if page is not None and request.headers.get("X-Domino-Navigate") and request.environ.get("domino.websocket"):
+			from .asgi import with_cookies
+			page.cookie = with_cookies(request.headers.get("Cookie", ""), response.headers.getlist("Set-Cookie"))
+
+		return response
 
 
 	def style(self, href="", external=False):

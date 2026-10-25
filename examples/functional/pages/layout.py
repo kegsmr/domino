@@ -8,6 +8,7 @@ LINKS = [
 	("Home", "/"),
 	("About", "/about"),
 	("Contact", "/contact"),
+	("Counter", "/counter"),
 ]
 
 
@@ -23,10 +24,17 @@ def link(text, href):
 	]
 
 
-# Wraps every page in this folder and below, so each page only returns its own content
+# Wraps every page in this folder and below, so each page only returns its own content. Clicking
+# a link swaps the next page in without reloading, and this navigation stays as it is
 def layout(content):
 
-	page = Document(title="My Website") [
+	# Each page's title names it, like "About · My Website"
+	title = "My Website"
+	for text, href in LINKS:
+		if request.path == href:
+			title = f"{text} · My Website"
+
+	page = Document(title=title) [
 		t.nav()([
 			link(text, href)
 			for text, href in LINKS

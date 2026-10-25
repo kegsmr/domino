@@ -160,6 +160,7 @@ class Subscription:
 		self.app = app
 		self.page = page
 		self.expired = False
+		self.left = False  # the socket moved on to another page (see Connection.leave)
 		self.ready = asyncio.Event()
 		self.stream = page.open_stream(waker(asyncio.get_running_loop(), self.ready))
 
@@ -192,6 +193,8 @@ class Subscription:
 class Connection:
 	"""One tab's WebSocket. JSON messages; the browser sends
 		{"type": "hello", "page_id"} first, then {"type": "event", "ref", "page_id", "event_id", "data"},
+		and when it swaps in another page without reloading (see navigate() in core.js), a new
+		{"type": "hello", "page_id"}, or {"type": "leave"} if that page needs nothing from the server,
 	and receives
 		{"type": "ready"} once bound to the page, or {"type": "expired"} if it's unknown,
 		{"type": "result", "ref", "status", ...} with what POST /_domino/events would answer,
@@ -208,6 +211,8 @@ class Connection:
 		self.raw_send = send
 		self.environ = handshake_environ(scope)
 		self.page_id = None
+		self.subscription = None  # to the page it's bound to
+		self.listening = None  # the task sending that page's pushes
 		self.closed = False
 		self.events = asyncio.Queue()
 
@@ -232,17 +237,26 @@ class Connection:
 				if message["type"] == "websocket.disconnect":
 					break
 				data = parse(message)
-				if data.get("type") == "event":
+				# Hellos go in line with events, so a page's last events reach it before the
+				# socket moves on to the next page
+				if data.get("type") in ("event", "hello", "leave"):
 					self.events.put_nowait(data)
-				elif data.get("type") == "hello" and self.page_id is None:
-					tasks.append(asyncio.ensure_future(self.hello(data.get("page_id"))))
 		finally:
 			self.closed = True
 			for task in tasks:
 				task.cancel()
+			if self.listening is not None:
+				self.listening.cancel()
 
 
 	async def hello(self, page_id):
+		"""Bind the socket to a page: the tab's first, or one it swapped in without reloading."""
+
+		if page_id is not None and page_id == self.page_id:
+			await self.send({"type": "ready"})
+			return
+
+		self.leave()
 
 		page = None
 		if isinstance(page_id, str):
@@ -252,16 +266,45 @@ class Connection:
 			await self.close(1000)
 			return
 
+		# Loaded after the socket's handshake, maybe with newer cookies
+		if page.cookie is not None:
+			self.environ["HTTP_COOKIE"] = page.cookie
+
 		self.page_id = page.id
-		subscription = Subscription(self.app, page)
+		self.subscription = Subscription(self.app, page)
+		self.listening = asyncio.ensure_future(self.listen(self.subscription))
+
+
+	def leave(self):
+		"""Stop sending the bound page's pushes. The tab has moved on to another page, so the page
+		is dropped too, unless another socket (a duplicated tab) has taken it over."""
+
+		subscription = self.subscription
+		if subscription is None:
+			return
+		self.subscription = self.listening = self.page_id = None
+
+		# Not cancelled, which could cut a message short: woken, it sees it should stop
+		subscription.left = True
+		subscription.ready.set()
+		subscription.close()
+
+		if subscription.page.stream is subscription.stream:
+			self.app._drop_page(subscription.page)
+
+
+	async def listen(self, subscription):
+
 		try:
 			await self.send({"type": "ready"})
-			while not self.closed:
+			while not self.closed and not subscription.left:
 				updates = await subscription.next(self.app.config["DOMINO_KEEPALIVE"])
-				if updates is None:
+				if updates is None or subscription.left:
 					break
 				for update in updates:
 					await self.send(dict(update, type="update"))
+			if subscription.left:
+				return
 			if subscription.expired:
 				await self.send({"type": "expired"})
 				await self.close(1000)
@@ -278,6 +321,12 @@ class Connection:
 		loop = asyncio.get_running_loop()
 		while True:
 			message = await self.events.get()
+			if message.get("type") == "hello":
+				await self.hello(message.get("page_id"))
+				continue
+			if message.get("type") == "leave":
+				self.leave()
+				continue
 			page_id = self.page_id or message.get("page_id")
 			try:
 				payload, status = await loop.run_in_executor(self.asgi.executor, self.asgi.run_event, self.environ, page_id, message)

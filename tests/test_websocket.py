@@ -378,6 +378,79 @@ def test_an_open_socket_keeps_its_page_alive_and_expiry_is_sent(asgi_server):
 		assert receive(ws) == {"type": "expired"}
 
 
+def test_a_hello_for_another_page_moves_the_socket_and_drops_the_old_page(asgi_server):
+
+	counter = Counter()
+	app = make_app(counter)
+	server = asgi_server(app)
+	_, old, (increment, *_) = load(server)
+	_, new, _ = load(server)
+
+	with connect(server, old) as ws:
+		# Sent before the hello, so handled on the old page before the socket moves on
+		event(ws, 1, old, increment)
+		ws.send(json.dumps({"type": "hello", "page_id": new}))
+		assert receive(ws)["status"] == 200
+		assert receive(ws) == {"type": "ready"}
+		assert old not in app.page_store.pages
+
+		# The new page's pushes come down the same socket
+		counter.count = 7
+		counter.refresh()
+		assert "Count: 7" in receive(ws)["html"]
+
+
+def test_leave_drops_the_page_and_keeps_the_socket(asgi_server):
+
+	app = make_app()
+	server = asgi_server(app)
+	_, old, _ = load(server)
+	_, new, (increment, *_) = load(server)
+
+	with connect(server, old) as ws:
+		ws.send(json.dumps({"type": "leave"}))
+		# Not told the page expired, though it's gone
+		with pytest.raises(TimeoutError):
+			ws.recv(0.3)
+		assert old not in app.page_store.pages
+
+		ws.send(json.dumps({"type": "hello", "page_id": new}))
+		assert receive(ws) == {"type": "ready"}
+		event(ws, 1, new, increment)
+		assert receive(ws)["status"] == 200
+
+
+def test_a_second_hello_for_the_same_page_keeps_it(asgi_server):
+
+	app = make_app()
+	server = asgi_server(app)
+	_, page_id, _ = load(server)
+
+	with connect(server, page_id) as ws:
+		ws.send(json.dumps({"type": "hello", "page_id": page_id}))
+		assert receive(ws) == {"type": "ready"}
+
+	assert page_id in app.page_store.pages
+
+
+def test_a_page_swapped_in_brings_its_cookies_to_the_socket(asgi_server):
+
+	server = asgi_server(make_app())
+	_, first, _ = load(server)
+
+	# core.js fetches the next page with this header; the browser's cookies changed since the handshake
+	request = urllib.request.Request(server.url, headers={"X-Domino-Navigate": "1", "Cookie": "flavor=vanilla"})
+	html = urllib.request.urlopen(request).read().decode()
+	second = html.split('data-domino-page="')[1].split('"')[0]
+	cookie = [part.split('"')[0] for part in html.split('data-event-id="')[1:]][3]
+
+	with connect(server, first, additional_headers={"Cookie": "flavor=mint"}) as ws:
+		ws.send(json.dumps({"type": "hello", "page_id": second}))
+		assert receive(ws) == {"type": "ready"}
+		event(ws, 1, second, cookie)
+		assert "Count: vanilla /" in receive(ws)["html"]
+
+
 def stream(server, page_id):
 
 	connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)

@@ -102,6 +102,20 @@ def test_concurrent_events_on_one_page_are_serialized():
 	assert counter.count == 50
 
 
+def test_a_page_swapped_in_drops_the_page_it_leaves():
+
+	app, _ = make_app()
+	client = app.test_client()
+	html = client.get("/").get_data(as_text=True)
+	left = html.split('data-domino-page="')[1].split('"')[0]
+
+	# What core.js sends when it swaps in the next page without a WebSocket to say it's leaving
+	html = client.get("/", headers={"X-Domino-Navigate": "1", "X-Domino-Leave": left}).get_data(as_text=True)
+	shown = html.split('data-domino-page="')[1].split('"')[0]
+
+	assert list(app.page_store.pages) == [shown]
+
+
 def test_event_ids_are_stable_across_rerenders():
 
 	app, _ = make_app()

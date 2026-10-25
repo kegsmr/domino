@@ -237,6 +237,25 @@ def test_attribute_access(tmp_path):
 		settings.missing
 
 
+def test_navigation_setting_off_marks_pages_to_load_as_usual(tmp_path):
+
+	import domino.tags as t
+	from domino.components import Document
+
+	write(tmp_path / "settings.json", {"domino": {"navigation": False}})
+	app = make_app(tmp_path)
+
+	@app.route("/")
+	def index():
+		return Document() [t.a(href="/") ["Home"]]
+
+	assert app.config["DOMINO_NAVIGATION"] is False
+	assert "data-domino-reload" in app.test_client().get("/").get_data(as_text=True)
+
+	app.config["DOMINO_NAVIGATION"] = True
+	assert "data-domino-reload" not in app.test_client().get("/").get_data(as_text=True)
+
+
 def test_latency_setting_only_applies_while_debugging():
 
 	import domino.tags as t

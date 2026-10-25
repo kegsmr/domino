@@ -226,8 +226,9 @@ window.Domino = (() => {
     // same way. `request` is the event it answers, if any.
     async function handleMessage(data, status = 200, request = null) {
         if (status === 404) {
-            // The server no longer knows this page (expired or restarted)
-            window.location.reload();
+            // The server no longer knows this page (expired or restarted), or is told it's
+            // being left for the one a navigation in flight will show
+            if (!navigation) window.location.reload();
             return;
         }
         if (data.type === 'expired') {
@@ -246,7 +247,11 @@ window.Domino = (() => {
         }
         // The handler called domino.redirect(); the server only allows paths on this site
         if (data.redirect && data.redirect.startsWith('/') && !data.redirect.startsWith('//')) {
-            window.location.assign(data.redirect);
+            if (navigationOn()) {
+                navigate(data.redirect, true);
+            } else {
+                window.location.assign(data.redirect);
+            }
             return;
         }
         // Unmark first, so the server's HTML decides whether the element ends up disabled
@@ -266,8 +271,9 @@ window.Domino = (() => {
 
     let socket = null;
     let socketReady = null; // resolves to true once the server has bound the socket to this page
+    let settleReady = null; // resolves it
     let failures = 0; // closes in a row, without a connection that lasted
-    let useHttp = false; // for the rest of this page's life
+    let useHttp = false; // for the rest of this page's life, and pages swapped in after it
     let nextRef = 0;
     const waiting = new Map(); // ref -> the event sent over the socket that awaits its result
 
@@ -278,23 +284,34 @@ window.Domino = (() => {
             return;
         }
         if (socket || !pageId()) return;
-        // Nothing to send or receive (e.g. a static page)
-        if (!document.querySelector('[data-event-id], [data-after-id], [data-live]')) return;
+        if (!needsServer()) return;
         openSocket();
+    }
+
+    // Nothing to send or receive (e.g. a static page)
+    function needsServer() {
+        return !!document.querySelector('[data-event-id], [data-after-id], [data-live]');
     }
 
     function openSocket() {
         const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
         const ws = new WebSocket(scheme + location.host + '/_domino/ws');
-        let settle;
         let readyAt = 0;
         socket = ws;
-        socketReady = new Promise((resolve) => { settle = resolve; });
+        socketReady = new Promise((resolve) => { settleReady = resolve; });
 
         // A proxy may hold the handshake forever; events wait for it, so don't wait long
         const timer = setTimeout(() => ws.close(), CONNECT_TIMEOUT);
 
-        ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+        // For the page shown now, which may not be the one that opened it (see rebind)
+        ws.onopen = () => {
+            if (needsServer()) {
+                ws.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+            } else {
+                clearTimeout(timer);
+                settleReady(true);
+            }
+        };
 
         ws.onmessage = async (e) => {
             let data;
@@ -303,7 +320,7 @@ window.Domino = (() => {
             if (data.type === 'ready') {
                 clearTimeout(timer);
                 readyAt = Date.now();
-                settle(true);
+                settleReady(true);
             } else if (data.type === 'result') {
                 const request = waiting.get(data.ref);
                 if (!request) return;
@@ -319,7 +336,7 @@ window.Domino = (() => {
 
         ws.onclose = (e) => {
             clearTimeout(timer);
-            settle(false);
+            settleReady(false);
             if (socket === ws) {
                 socket = null;
                 socketReady = null;
@@ -404,6 +421,27 @@ window.Domino = (() => {
             await wait(latency / 2);
             handleMessage(JSON.parse(e.data));
         };
+    }
+
+    // Another page was swapped in (see navigate): move the socket over to it, or open what it needs
+    function rebind() {
+        if (stream) {
+            stream.close();
+            stream = null;
+        }
+        if (!socket) {
+            connect();
+            return;
+        }
+        // A socket still connecting says hello for whatever page is shown when it opens
+        if (socket.readyState !== WebSocket.OPEN) return;
+        if (needsServer()) {
+            socketReady = new Promise((resolve) => { settleReady = resolve; });
+            socket.send(JSON.stringify({ type: 'hello', page_id: pageId() }));
+        } else {
+            socket.send(JSON.stringify({ type: 'leave' }));
+            socketReady = Promise.resolve(true);
+        }
     }
 
     // Requests in flight, so overlapping ones keep <html data-domino-loading> until the last ends
@@ -534,11 +572,14 @@ window.Domino = (() => {
 
     async function triggerEvent(eventId, payload = {}, reset = null, el = null) {
         const unmark = el ? markBusy(el, reset && reset.submit) : null;
+        const page = pageId();
         if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
         try {
             await wait(latency / 2);
             const { status, data } = await sendEvent(eventId, payload);
             await wait(latency / 2);
+            // Another page has been swapped in meanwhile; the answer was for the old one
+            if (pageId() !== page) return;
             await handleMessage(data, status, { el, eventId, reset, unmark });
         } catch (err) {
             reportError(el, eventId, { error: String(err) });
@@ -594,7 +635,8 @@ window.Domino = (() => {
         clearTimeout(timers.get(eventId));
         timers.set(eventId, setTimeout(() => {
             timers.delete(eventId);
-            fire(el, eventId);
+            // Not if another page has been swapped in meanwhile
+            if (el.isConnected) fire(el, eventId);
         }, delay));
     }
 
@@ -645,12 +687,171 @@ window.Domino = (() => {
         }
     }
 
+    // Links to other pages of the app swap the new page in instead of loading it from scratch,
+    // like a single-page app with no router to write: this script, the WebSocket and the parts of
+    // the page that stay the same (the layout's navigation, say) are kept. Links inside an element
+    // with data-domino-reload load as usual; {"domino": {"navigation": false}} marks pages so.
+    let navigation = null; // the AbortController of the navigation in flight
+    let shown = location.pathname + location.search; // the page shown, to tell #hash changes apart
+    let entry = null; // the history entry shown, for its scroll position
+    const scrolls = new Map();
+    let announcer = null;
+
+    function navigationOn() {
+        return !!window.history.pushState && !document.querySelector('[data-domino-page][data-domino-reload]');
+    }
+
+    function onClick(e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const link = e.target.closest ? e.target.closest('a[href]') : null;
+        if (!link || typeof link.href !== 'string' || link.closest('[data-domino-reload]') || !navigationOn()) return;
+        if ((link.target && link.target !== '_self') || link.hasAttribute('download')) return;
+
+        // mailto: and other schemes have another origin too
+        const url = new URL(link.href);
+        if (url.origin !== location.origin) return;
+        // A #hash on this page scrolls, as usual
+        if (url.hash && url.pathname + url.search === shown) return;
+
+        e.preventDefault();
+        navigate(url.href, true, link);
+    }
+
+    function onPopState(e) {
+        // Only the #hash changed, or the page's own script added this entry
+        if (location.pathname + location.search === shown || !navigationOn()) return;
+        if (e.state && !e.state.domino) return;
+
+        scrolls.set(entry, [window.scrollX, window.scrollY]);
+        entry = e.state ? e.state.domino : null;
+        navigate(location.href, false, null, scrolls.get(entry));
+    }
+
+    // Show the page at `url` in place of this one: a new history entry (`push`), or the one
+    // back/forward went to. Anything that isn't a page of this app loads as usual.
+    async function navigate(url, push = true, link = null, scroll = null) {
+        // With no socket to tell, the request says which page this tab leaves, so the server
+        // can drop it; not while events are in flight, which still need it
+        const headers = { 'X-Domino-Navigate': '1' };
+        const events = inFlight - (navigation ? 1 : 0);
+        if (!socket && events === 0 && pageId()) headers['X-Domino-Leave'] = pageId();
+
+        if (navigation) navigation.abort();
+        const controller = navigation = new AbortController();
+
+        const unmark = link ? markBusy(link, false) : null;
+        if (inFlight++ === 0) document.documentElement.setAttribute('data-domino-loading', '');
+        try {
+            await wait(latency / 2);
+            const response = await fetch(url, { headers, signal: controller.signal });
+            const html = (response.headers.get('Content-Type') || '').includes('text/html') ? await response.text() : null;
+            await wait(latency / 2);
+            if (controller.signal.aborted) return;
+
+            // Redirects within the site are followed (e.g. to the login page)
+            const target = new URL(response.url || url);
+            const doc = html === null ? null : new DOMParser().parseFromString(html, 'text/html');
+            if (!doc || !doc.querySelector('[data-domino-page]') || target.origin !== location.origin) {
+                loadAsUsual(url, push);
+                return;
+            }
+            if (!response.redirected) target.hash = new URL(url).hash;
+
+            if (push) {
+                if (!history.state || !history.state.domino) {
+                    entry = entry || String(Math.random());
+                    history.replaceState({ domino: entry }, '');
+                }
+                scrolls.set(entry, [window.scrollX, window.scrollY]);
+                entry = String(Math.random());
+                history.scrollRestoration = 'manual';
+                history.pushState({ domino: entry }, '', target.href);
+            } else if (response.redirected) {
+                history.replaceState({ domino: entry }, '', target.href);
+            }
+
+            swap(doc);
+            arrive(target.hash, scroll);
+        } catch (err) {
+            if (!controller.signal.aborted) loadAsUsual(url, push);
+        } finally {
+            if (unmark) unmark();
+            if (--inFlight === 0) document.documentElement.removeAttribute('data-domino-loading');
+            if (navigation === controller) navigation = null;
+        }
+    }
+
+    function loadAsUsual(url, push) {
+        if (push) {
+            window.location.assign(url);
+        } else {
+            window.location.replace(url);
+        }
+    }
+
+    // Do what a page load does, keeping what's the same: the whole document is morphed into the
+    // new one, its fields taking the new page's values
+    function swap(doc) {
+        const scripts = new Set(document.scripts);
+        latest.clear();
+
+        morph(document.documentElement, doc.documentElement, { root: document.documentElement, submit: true });
+        document.documentElement.setAttribute('data-domino-loading', '');
+        shown = location.pathname + location.search;
+
+        // Scripts the new page adds run, as they would on a page load (this one only once)
+        for (const old of Array.from(document.scripts)) {
+            if (scripts.has(old) || !/^$|javascript|module/.test(old.type) || old.src.endsWith('/_domino/core')) continue;
+            const script = document.createElement('script');
+            for (const { name, value } of Array.from(old.attributes)) script.setAttribute(name, value);
+            script.textContent = old.textContent;
+            old.replaceWith(script);
+        }
+
+        latency = readLatency();
+        listen();
+        scheduleAfterEvents();
+        rebind();
+    }
+
+    // Scroll as a page load would, and move focus to the new page and announce it, as a
+    // screen reader would on a page load
+    function arrive(hash, scroll) {
+        const anchor = hash ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+        if (scroll) {
+            window.scrollTo(scroll[0], scroll[1]);
+        } else if (anchor) {
+            anchor.scrollIntoView();
+        } else {
+            window.scrollTo(0, 0);
+        }
+
+        const focus = ['[autofocus]', 'main h1', 'h1', 'main'].map((selector) => document.querySelector(selector)).find(Boolean);
+        if (focus) {
+            if (focus.tabIndex < 0 && !focus.hasAttribute('tabindex')) focus.setAttribute('tabindex', '-1');
+            focus.focus({ preventScroll: true });
+        } else if (document.activeElement) {
+            document.activeElement.blur();
+        }
+
+        if (!announcer) {
+            announcer = document.createElement('div');
+            announcer.setAttribute('aria-live', 'polite');
+            announcer.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap';
+        }
+        announcer.textContent = '';
+        document.body.appendChild(announcer);
+        setTimeout(() => { announcer.textContent = document.title; }, 100);
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         latency = readLatency();
         listen();
         scheduleAfterEvents();
         connect();
+        document.addEventListener('click', onClick);
+        window.addEventListener('popstate', onPopState);
     });
 
-    return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen, enableLatencySim, disableLatencySim };
+    return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen, enableLatencySim, disableLatencySim, navigate };
 })();

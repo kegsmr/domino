@@ -110,6 +110,16 @@ def layout(content):
 
 Pages are on when the app's folder (the folder of the module passed to `Domino(__name__)`) has a `pages/` folder. `Domino(__name__, pages="views")` uses another folder and `pages=False` turns them off. `@app.route` keeps working alongside pages; a route for a URL a page already serves is an error, naming both, when the app starts. Pages are found once, when the app is created, and each file is imported once; while debugging, the reloader restarts the server when one changes. Pages render exactly like `@app.route` views, with events, reactive data and server push.
 
+### Moving between pages
+
+Clicking a link to another page of the app swaps that page in without reloading, like a single-page app, with nothing to write: Domino fetches the page as usual (a normal GET, marked with an `X-Domino-Navigate: 1` header), morphs the document into it, keeping the nodes that stay the same (the layout's navigation, say), and adds the URL to the history, so back and forward work too. The title, `<head>` styles and component CSS follow the new page, and scripts it adds run. Domino's script and the tab's WebSocket stay, so the new page's events work right away; its `after()` timers start, the page scrolls to the top (or to the link's `#hash`, or back where it was for back/forward), focus moves to its main heading, and its title is announced to screen readers. The page left is dropped on the server at once.
+
+- Redirects on this site are followed, ending at the final URL (e.g. a `login_required` page sends you to `/login?next=...`). `domino.redirect()` in an event handler goes the same way.
+- Anything else loads as usual: links to other sites, a response that isn't a Domino page (or a network error), links with `target`, `download` or a modifier key (to open a new tab), and `#hash` links within the page.
+- While the page loads, `<html>` has `data-domino-loading` and the clicked link `aria-busy`/`data-loading`, as for events; a click on another link cancels it. The latency simulator applies too.
+- `data_domino_reload=True` on a link, or any element around links, makes them load from scratch; `{"domino": {"navigation": false}}` does this for the whole app.
+- Each page shown is a new page load as far as your code is concerned: components start fresh, as on a reload.
+
 ## Command line
 
 Installing the package adds a `domino` command, modeled on `meteor`:
@@ -483,7 +493,7 @@ Settings work as a dict or with attributes: `app.settings.mongo.url`, `app.setti
 ```json
 {
     "secret_key": "...",
-    "domino": {"page_ttl": 600, "max_pages": 500, "keepalive": 15, "websocket": true, "workers": 32},
+    "domino": {"page_ttl": 600, "max_pages": 500, "keepalive": 15, "websocket": true, "workers": 32, "navigation": true},
     "public": {"greeting": "Hello"}
 }
 ```
@@ -542,6 +552,7 @@ Served through `app.asgi` (with uvicorn, which `app.run()` and `domino run` use)
 - Event handlers are still plain (sync) Python. They run in a pool of worker threads (`{"domino": {"workers": 32}}`, the default), so a slow handler never holds up other tabs. A tab's events run one at a time, in the order they were sent, under the page's lock, exactly as over HTTP.
 - Handlers get a request context made from the WebSocket's handshake: `request.cookies`, `session` and `url_for` work. A socket can't set cookies, so when a handler changes the session (logging in, say), the result carries a one-time token that the page exchanges for the new cookie with a quick same-origin POST before it goes on. The socket's later events see the new session too.
 - The handshake is refused when its `Origin` isn't this site, so other sites can't open a socket with your visitors' cookies.
+- Moving to another page of the app (see [Moving between pages](#moving-between-pages)) keeps the socket: it's moved over to the new page, which also brings the cookies the browser had when it loaded that page. Over HTTP, the Server-Sent Events stream is reopened for the new page if it needs one.
 - An open socket keeps its page alive. If the page is gone (expired, or the server restarted), a page showing a live component reloads; others reload on their next event, as over HTTP.
 - Where the socket can't connect or keeps dropping (some proxies block WebSockets), the page falls back by itself after a few tries to POSTing each event to `/_domino/events` and, if it shows a live component, Server-Sent Events from `/_domino/stream`. That's also what pages use when the app is served as plain WSGI (`gunicorn app:app`, `flask run`), which keeps working as before.
 - `{"domino": {"websocket": false}}` turns the socket off; pages then always use HTTP and Server-Sent Events.

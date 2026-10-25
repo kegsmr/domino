@@ -539,7 +539,7 @@ def test_file_routed_pages_share_a_layout(serve, page):
 	response = page.goto(url + "nowhere")
 	assert response.status == 404
 	assert page.locator("h1").inner_text() == "Page not found"
-	assert page.locator("nav a").count() == 3
+	assert page.locator("nav a").count() == 4
 
 
 def test_component_css_from_an_event_response_is_added_once(page):
@@ -605,13 +605,13 @@ def test_counter_paired_with_a_jinja_template_in_a_jinja_page(serve, page):
 
 	counter.get_by_text("+1").click()
 	# Predicted from the paired template, before the server answers
-	page.wait_for_function("document.querySelector('.Counter strong').textContent === '1'", timeout=500)
+	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '1'", timeout=500)
 	counter.get_by_text("+1").click()
-	page.wait_for_function("document.querySelector('.Counter strong').textContent === '2'", timeout=5000)
+	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '2'", timeout=5000)
 	page.wait_for_function("!document.querySelector('.Counter').hasAttribute('data-predicted')", timeout=5000)
 
 	counter.get_by_text("Reset").click()
-	page.wait_for_function("document.querySelector('.Counter strong').textContent === '0'", timeout=5000)
+	page.wait_for_function("document.querySelector('.Counter strong').textContent.trim() === '0'", timeout=5000)
 	assert counter.get_by_text("Reset").is_disabled()
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []
@@ -730,4 +730,299 @@ def test_live_page_reloads_when_its_socket_hears_it_expired(serve_asgi, page):
 	sys.modules["example_clock"].app.page_store.delete(first)
 
 	page.wait_for_function(f"document.querySelector('[data-domino-page]').dataset.dominoPage !== {first!r}", timeout=5000)
+	assert page.errors == []
+
+
+def watch_loads(page):
+	"""Every document the page loads from scratch; pages swapped in by core.js are fetched instead."""
+
+	documents = []
+	page.on("request", lambda request: request.resource_type == "document" and request.frame == page.main_frame and documents.append(request.url))
+
+	return documents
+
+
+def mark(page):
+
+	# Gone if the page is loaded from scratch; the <nav> is kept if swapped in
+	page.evaluate("() => { window.__marker = 1; window.__nav = document.querySelector('nav'); window.__domino = window.Domino; }")
+
+
+def kept(page):
+
+	return page.evaluate("() => window.__marker === 1 && window.__nav === document.querySelector('nav')")
+
+
+def test_links_swap_pages_in_without_reloading(serve, page):
+
+	documents = watch_loads(page)
+	url = serve("functional")
+	page.goto(url)
+	mark(page)
+
+	page.get_by_role("link", name="About").click()
+	page.wait_for_url("**/about")
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'About'")
+
+	assert kept(page)
+	assert page.title() == "About · My Website"
+	assert page.locator("nav a[aria-current=page]").inner_text() == "About"
+	# The new page's heading has focus, and its title is announced
+	assert page.evaluate("document.activeElement.tagName") == "H1"
+	page.wait_for_function("document.querySelector('[aria-live]').textContent.trim() === 'About · My Website'")
+	assert page.evaluate("document.documentElement.hasAttribute('data-domino-loading')") is False
+
+	page.get_by_role("link", name="Home").click()
+	page.get_by_role("link", name="Grace").click()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Hello, Grace!'")
+	assert page.url == url + "hello/Grace"
+	assert kept(page)
+	assert documents == [url]
+	assert page.errors == []
+
+
+def test_back_and_forward_swap_pages_too(serve, page):
+
+	documents = watch_loads(page)
+	url = serve("functional")
+	page.goto(url)
+	mark(page)
+
+	page.get_by_role("link", name="About").click()
+	page.wait_for_url("**/about")
+	page.get_by_role("link", name="Contact").click()
+	page.wait_for_url("**/contact")
+
+	page.go_back()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'About'")
+	assert page.url == url + "about"
+	page.go_back()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Welcome to My Website'")
+	assert page.url == url
+	page.go_forward()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'About'")
+
+	assert page.title() == "About · My Website"
+	assert kept(page)
+	assert documents == [url]
+	assert page.errors == []
+
+
+def test_events_work_on_a_page_swapped_in(serve, page):
+
+	page.goto(serve("functional"))
+
+	for _ in range(2):
+		page.get_by_role("link", name="Counter").click()
+		page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Counter'")
+		for _ in range(2):
+			page.get_by_role("button", name="Click me").click()
+		page.wait_for_function("document.querySelector('main p').textContent.includes('Clicked 2 times')", timeout=5000)
+		page.get_by_role("link", name="About").click()
+		page.wait_for_url("**/about")
+
+	assert page.errors == []
+
+
+def test_one_websocket_for_the_whole_visit(serve_asgi, page):
+
+	seen = watch_transport(page)
+	frames = []
+	page.on("websocket", lambda ws: ws.on("framesent", lambda payload: frames.append(json.loads(payload)["type"])))
+	page.goto(serve_asgi("functional"))
+
+	# The home page needs nothing from the server; the counter opens the socket
+	for _ in range(2):
+		page.get_by_role("link", name="Counter").click()
+		page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Counter'")
+		page.get_by_role("button", name="Click me").click()
+		page.wait_for_function("document.querySelector('main p').textContent.includes('Clicked 1 times')", timeout=5000)
+		page.get_by_role("link", name="About").click()
+		page.wait_for_url("**/about")
+
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'About'")
+	page.wait_for_timeout(100)
+	assert len(seen["websockets"]) == 1
+	assert seen["posts"] == [] and seen["streams"] == []
+	assert frames == ["hello", "event", "leave", "hello", "event", "leave"]
+	assert page.errors == []
+
+
+def test_the_page_left_is_dropped_on_the_server(serve, page):
+
+	url = serve("functional")
+	app = sys.modules["example_functional"].app
+	page.goto(url + "counter")
+	page.get_by_role("button", name="Click me").click()
+	page.wait_for_function("document.querySelector('main p').textContent.includes('Clicked 1 times')", timeout=5000)
+	left = page.get_attribute("[data-domino-page]", "data-domino-page")
+	assert left in app.page_store.pages
+
+	page.get_by_role("link", name="Counter").click()
+	page.wait_for_function(f"document.querySelector('[data-domino-page]').dataset.dominoPage !== {left!r}")
+	shown = page.get_attribute("[data-domino-page]", "data-domino-page")
+
+	deadline = time.monotonic() + 5
+	while left in app.page_store.pages:
+		assert time.monotonic() < deadline, "the page left is still kept"
+		time.sleep(0.01)
+	assert list(app.page_store.pages) == [shown]
+	assert page.errors == []
+
+
+@pytest.fixture
+def site():
+	"""A small app with a login_required page and a page that isn't Domino's."""
+
+	from flask import Response
+
+	import domino.tags as t
+	from domino import Domino, accounts
+	from domino.components import Document
+
+	app = Domino(__name__)
+	app.secret_key = "test"
+
+	@app.route("/")
+	def index():
+		return Document(title="Home") [
+			t.nav() [
+				t.a(href="/private") ["Private"],
+				t.a(href="/plain") ["Plain"],
+				t.a(href="/login", data_domino_reload=True) ["Reload"],
+				t.a(href="/login", target="_blank") ["New tab"],
+				t.a(href="#bottom") ["Bottom"],
+			],
+			t.h1() ["Home"],
+			t.p(style={"height": "3000px"}) ["Tall"],
+			t.p(id="bottom") ["Bottom"],
+		]
+
+	@app.route("/private")
+	@accounts.login_required
+	def private():
+		return Document(title="Private") [t.h1() ["Private"]]
+
+	@app.route("/login")
+	def login():
+		return Document(title="Log in") [
+			t.nav() [t.a(href="/") ["Home"]],
+			t.h1() ["Log in"],
+			t.script() ["window.ran = (window.ran || 0) + 1;"],
+		]
+
+	@app.route("/plain")
+	def plain():
+		return Response("<p>Not a Domino page</p>", mimetype="text/html")
+
+	server = make_server("127.0.0.1", 0, app, threaded=True)
+	threading.Thread(target=server.serve_forever, daemon=True).start()
+	yield f"http://127.0.0.1:{server.server_port}/"
+	server.shutdown()
+
+
+def test_redirects_within_the_site_end_at_the_final_url(site, page):
+
+	documents = watch_loads(page)
+	page.goto(site)
+	mark(page)
+
+	page.get_by_role("link", name="Private").click()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Log in'")
+
+	assert page.url == site + "login?next=%2Fprivate"
+	assert page.title() == "Log in"
+	assert kept(page)
+	assert documents == [site]
+	# The new page's own script ran, once; Domino's didn't run again
+	assert page.evaluate("window.ran") == 1
+	assert page.evaluate("window.Domino === window.__domino")
+
+	page.go_back()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Home'")
+	assert page.url == site
+	assert page.errors == []
+
+
+def test_other_links_load_as_usual(site, page):
+
+	documents = watch_loads(page)
+	page.goto(site)
+	mark(page)
+
+	# A link to a place on the page only scrolls
+	page.get_by_role("link", name="Bottom").click()
+	page.wait_for_url("**/#bottom")
+	assert page.evaluate("window.scrollY") > 1000
+	assert kept(page)
+
+	# Opening in a new tab, with a modifier key or target=_blank, leaves this page alone
+	with page.context.expect_page() as opened:
+		page.get_by_role("link", name="Private").click(modifiers=["Control"])
+	opened.value.close()
+	with page.context.expect_page() as opened:
+		page.get_by_role("link", name="New tab").click()
+	opened.value.close()
+	assert page.url == site + "#bottom"
+	assert kept(page)
+
+	# Not a Domino page: loaded from scratch
+	page.get_by_role("link", name="Plain").click()
+	page.wait_for_function("document.body.textContent.includes('Not a Domino page')")
+	assert page.evaluate("window.__marker") is None
+	assert documents[-1] == site + "plain"
+
+	# Opted out
+	page.goto(site)
+	mark(page)
+	page.get_by_role("link", name="Reload").click()
+	page.wait_for_function("document.querySelector('h1') && document.querySelector('h1').textContent.trim() === 'Log in'")
+	assert page.evaluate("window.__marker") is None
+	assert documents[-1] == site + "login"
+	assert page.errors == []
+
+
+def test_navigation_setting_off_loads_pages_as_usual(serve, page):
+
+	def off(module):
+		module.app.config["DOMINO_NAVIGATION"] = False
+
+	documents = watch_loads(page)
+	url = serve("functional", off)
+	page.goto(url)
+	mark(page)
+
+	page.get_by_role("link", name="About").click()
+	page.wait_for_url("**/about")
+	page.wait_for_load_state()
+
+	assert page.locator("h1").inner_text() == "About"
+	assert page.evaluate("window.__marker") is None
+	assert documents == [url, url + "about"]
+	assert page.errors == []
+
+
+def test_a_newer_navigation_cancels_the_one_in_flight(serve, page):
+
+	documents = watch_loads(page)
+	url = serve("functional")
+	page.goto(url)
+	page.evaluate("Domino.enableLatencySim(600)")
+
+	page.get_by_role("link", name="About").click()
+	page.wait_for_selector("html[data-domino-loading]")
+	assert page.locator("nav a[aria-busy=true]").inner_text() == "About"
+	page.get_by_role("link", name="Contact").click()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Contact'", timeout=5000)
+	page.wait_for_timeout(700)
+
+	assert page.url == url + "contact"
+	assert page.locator("h1").inner_text() == "Contact"
+	assert page.locator("[aria-busy]").count() == 0
+	assert page.evaluate("document.documentElement.hasAttribute('data-domino-loading')") is False
+	# Only Contact was added to the history
+	page.go_back()
+	page.wait_for_function("document.querySelector('h1').textContent.trim() === 'Welcome to My Website'", timeout=5000)
+	page.evaluate("Domino.disableLatencySim()")
+	assert documents == [url]
 	assert page.errors == []

@@ -15,7 +15,7 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | Example | Shows |
 |---|---|
 | `hello_world/` | A page built from tag classes, with an app-wide stylesheet served at `/style.css` and a component's own `css` |
-| `functional/` | Several pages in `pages/`, a shared `layout.py` with the navigation, a page with a URL parameter (`hello/[name].py`) and a `404.py` |
+| `functional/` | Several pages in `pages/`, a shared `layout.py` with the navigation, a page with a URL parameter (`hello/[name].py`), a `Page` class with `State` (`counter.py`) and a `404.py`. Links swap pages in without reloading (the navigation stays put and the counter works at once); the About page has a link that opts out with `data_domino_reload` |
 | `counter/` | A component with `State`, re-rendered by `on_click=` |
 | `random_number/` | `after(ms, ...)` updating a component on a timer |
 | `clock/` | `refresh()` pushing a component to the browser from a background thread |
