@@ -334,7 +334,11 @@ def test_submit_marks_the_form_and_its_submit_button(serve, page):
 
 def test_latency_simulator_delays_round_trips(serve, page):
 
-	page.goto(serve("counter"))
+	# Without predictions, so the click shows only once the server answers
+	def no_predictions(module):
+		module.CounterComponent.optimistic = False
+
+	page.goto(serve("counter", no_predictions))
 	page.evaluate("Domino.enableLatencySim(600)")
 
 	page.get_by_text("Increment").click()
@@ -346,5 +350,43 @@ def test_latency_simulator_delays_round_trips(serve, page):
 	# Kept for the tab, so it survives a reload
 	page.reload()
 	assert page.evaluate("sessionStorage.getItem('domino-latency')") == "600"
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_optimistic_update_shows_before_the_server_answers(serve, page):
+
+	page.goto(serve("counter"))
+	page.evaluate("Domino.enableLatencySim(1500)")
+
+	page.get_by_text("Increment").click()
+	# Well before the 1.5 s round trip: shown from the server's prediction
+	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 1')", timeout=700)
+	assert page.evaluate("document.querySelector('.CounterComponent').hasAttribute('data-predicted')")
+
+	page.wait_for_function("!document.querySelector('.CounterComponent').hasAttribute('data-predicted')", timeout=4000)
+	assert "Current Count: 1" in page.locator("p").inner_text()
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+def test_wrong_prediction_is_corrected_by_the_server(serve, page):
+
+	import sys
+
+	page.goto(serve("counter"))
+	module = sys.modules["example_counter"]
+	(page_state,) = module.app.page_store.pages.values()
+	(counter,) = page_state.components
+
+	# A change the browser hasn't heard about (no push), so its prediction is out of date
+	type(counter).count._of(counter)._value = 41
+
+	page.evaluate("Domino.enableLatencySim(600)")
+	page.get_by_text("Increment").click()
+	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 1')", timeout=500)
+
+	page.wait_for_function("document.querySelector('p').textContent.includes('Current Count: 42')", timeout=4000)
+	assert not page.evaluate("document.querySelector('.CounterComponent').hasAttribute('data-predicted')")
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []

@@ -190,6 +190,10 @@ Settings work as a dict or with attributes: `app.settings.mongo.url`, `app.setti
 
 See `examples/settings/`.
 
+### Instant updates
+
+Handlers that only change their component's own `State` with plain expressions — `self.count += 1`, `self.open = not self.open`, `if len(self.items) < 3: ...` — feel instant even on a slow connection, with nothing to configure. When the server renders such a component it also renders how it will look after each of those handlers and ships that inside the component (inert JSON); the browser shows it the moment the user clicks, and the server's real answer then confirms it or puts it right. Domino decides which handlers qualify by reading their code: anything that calls functions (like `messages.insert(...)`), uses the event's value, or touches anything but the component's `State` is never run ahead of time. While a prediction is showing, the component has a `data-predicted` attribute. Set `optimistic = False` on a component class to turn it off (each prediction costs a render).
+
 ### Simulating a slow connection
 
 Locally every click feels instant. To feel the app the way users on a slow connection will, run `Domino.enableLatencySim(300)` in the browser console: each round trip to the server then takes 300 ms (pushes are delayed too), for that tab, until `Domino.disableLatencySim()`. Or set it for the whole app while debugging with `{"domino": {"latency": 300}}` in `settings.json`; it's ignored when the app isn't in debug mode.

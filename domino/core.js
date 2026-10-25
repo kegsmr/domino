@@ -369,7 +369,32 @@ window.Domino = (() => {
         }
     }
 
+    // The server renders how a component will look after handlers that only change its own
+    // state (domino/optimistic.py) and ships it as inert JSON inside the component. Show it the
+    // moment the event fires; the server's answer then confirms it or puts things right.
+    function predict(el, eventId) {
+        for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
+            const script = node.querySelector(':scope > script[data-domino-predict]');
+            if (!script) continue;
+
+            let predictions = {};
+            try { predictions = JSON.parse(script.textContent); } catch (err) { return; }
+            if (!predictions[eventId]) return;
+
+            const template = document.createElement('template');
+            template.innerHTML = predictions[eventId];
+            const replacement = template.content.firstElementChild;
+            if (!replacement || replacement.id !== node.id) return;
+
+            morph(node, replacement, null);
+            // Until the server answers (its HTML doesn't have this), for styling if wanted
+            node.setAttribute('data-predicted', '');
+            return;
+        }
+    }
+
     function fire(el, eventId) {
+        predict(el, eventId);
         const submit = el.tagName === 'FORM' && eventId.endsWith('-submit');
         triggerEvent(eventId, eventData(el), { root: el, submit }, el);
     }

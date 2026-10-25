@@ -16,7 +16,8 @@ from markupsafe import Markup, escape
 
 from .settings import Settings, load_settings
 from .util import *
-from . import reactive
+from . import optimistic, reactive
+from .settings import script_json
 
 
 VOID_TAGS = [
@@ -709,6 +710,55 @@ class Element:
 		return self
 
 
+	def _predict(self, page, indent):
+		"""Render this component as it would look after each of its predictable handlers
+		(see domino.optimistic), without changing its state. Done before the real render,
+		so the real render is what the component's children end up as."""
+
+		if getattr(type(self), "optimistic", True) is False:
+			return {}
+		names = optimistic.predictable_methods(type(self))
+		if not names:
+			return {}
+
+		# Predicting renders bind events too; the real render binds them again
+		events = dict(page.events)
+		predictions = {}
+		try:
+			for name in sorted(names)[:optimistic.MAX_PREDICTIONS]:
+				with reactive.predicting():
+					method = getattr(self, name)
+					try:
+						if accepts_argument(method):
+							method(None)
+						else:
+							method()
+						# Same formatting as the real render, so the browser patches the
+						# component in place instead of rebuilding it
+						predictions[name] = self._render(indent=indent)
+					except Exception:
+						# A prediction is only a preview; the real handler still runs on click
+						continue
+		finally:
+			page.events.clear()
+			page.events.update(events)
+
+		return predictions
+
+
+	def _predictions_by_event(self, page, predictions):
+
+		if not predictions:
+			return {}
+
+		by_event = {}
+		for event_id, (_, callback) in page.subtree_events(self).items():
+			if getattr(callback, "__self__", None) is self and callback.__name__ in predictions:
+				by_event[event_id] = predictions[callback.__name__]
+
+		return by_event
+
+
 	def is_live(self):
 		"""Whether pages showing this component need a stream for refresh()."""
 
@@ -758,6 +808,10 @@ class Element:
 						self.__pages__ = weakref.WeakSet()
 					self.__pages__.add(page)
 
+			predictions = {}
+			if page is not DEFAULT_PAGE and not reactive.is_predicting():
+				predictions = self._predict(page, indent)
+
 			# Subscriptions are rebuilt by whatever this render reads
 			reactive.forget(self)
 			render_stack().append([self, 0])
@@ -775,6 +829,10 @@ class Element:
 			if page is not DEFAULT_PAGE and self.is_live():
 				page.live = True
 				page.components.add(self)
+
+			predictions = self._predictions_by_event(page, predictions)
+		else:
+			predictions = {}
 
 		# Handle the case where indent is an integer
 		if isinstance(indent, int):
@@ -821,6 +879,7 @@ class Element:
 		# `live = True` is a framework setting, not an HTML attribute; mark live
 		# components so the browser knows to open a stream
 		attributes.pop("live", None)
+		attributes.pop("optimistic", None)
 		if self.is_live():
 			attributes["data_live"] = True
 
@@ -894,6 +953,11 @@ class Element:
 				inner += f"{indentation}{indent}{text(child)}{end}"
 			else:
 				raise ValueError(f"Invalid child: {child!r}")
+
+		# How this component would look after each predictable handler, keyed by event id,
+		# for core.js to show instantly; inert JSON, so it costs the page nothing else
+		if predictions:
+			inner += f"{indentation}{indent}<script type=\"application/json\" data-domino-predict>{script_json(predictions)}</script>{end}"
 
 		if inner:
 			html += f"{inner}"

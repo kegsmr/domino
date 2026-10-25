@@ -187,6 +187,23 @@ def schedule(component):
 	component.refresh()
 
 
+@contextmanager
+def predicting():
+	"""Within the block, State changes are kept aside (and dropped after), so a handler can be
+	run to see what it would change without changing anything."""
+
+	_state.overlay = {}
+	try:
+		yield
+	finally:
+		_state.overlay = None
+
+
+def is_predicting():
+
+	return getattr(_state, "overlay", None) is not None
+
+
 class State:
 	"""A reactive value. Read it with .value (or get()), change it with .value = x (or set()).
 
@@ -239,10 +256,20 @@ class State:
 
 		self._dependency.depend()
 
+		overlay = getattr(_state, "overlay", None)
+		if overlay is not None and self in overlay:
+			return overlay[self]
+
 		return self._value
 
 
 	def set(self, value):
+
+		# While predicting a handler's outcome, changes go to the overlay and change nothing real
+		overlay = getattr(_state, "overlay", None)
+		if overlay is not None:
+			overlay[self] = value
+			return
 
 		# Lists, dicts and sets may have been changed in place, so always count as changed
 		if value == self._value and not isinstance(value, (list, dict, set)):
