@@ -1905,9 +1905,10 @@ def test_chat_appends_reach_other_windows(serve_app, browser):
 			try:
 				reader.wait_for_function(f"document.querySelectorAll('li').length === {200 + number}", timeout=15000)
 			except playwright.TimeoutError:
-				texts = reader.evaluate("Array.from(document.querySelectorAll('li')).slice(-6).map((li) => li.textContent)")
-				raise AssertionError(f"Hello {number} didn't arrive; the reader's last items: {texts}, the writer's: "
-					f"{writer.evaluate('Array.from(document.querySelectorAll(\'li\')).slice(-6).map((li) => li.textContent)')}") from None
+				last = "Array.from(document.querySelectorAll('li')).slice(-6).map((li) => li.textContent)"
+				raise AssertionError(
+					f"Hello {number} didn't arrive; the reader's last items: {reader.evaluate(last)}, the writer's: {writer.evaluate(last)}"
+				) from None
 
 		reader.wait_for_function("document.querySelector('li:last-child').textContent.trim() === 'Hello 5'", timeout=15000)
 		assert reader.locator("li").first.inner_text() == "Message 0"
