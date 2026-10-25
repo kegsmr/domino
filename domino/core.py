@@ -698,6 +698,7 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_MAX_PENDING_UPLOADS_MB", 256)  # uploads waiting for their event, all pages together
 		self.config.setdefault("DOMINO_UPLOAD_TTL", 10 * 60)  # seconds an upload waits for its event
 		self.config.setdefault("DOMINO_MAX_EVENT_MB", 1)  # per event sent (its JSON), over HTTP or the WebSocket
+		self.config.setdefault("DOMINO_FRAME_OPTIONS", "SAMEORIGIN")  # X-Frame-Options; False lets other sites frame pages
 		self.config.setdefault("DOMINO_PATCHES", True)  # the WebSocket sends what changed in a component, not all of it
 		self.config.setdefault("DOMINO_WS_COMPRESSION", True)  # per-message deflate on the WebSocket (uvicorn's)
 		self.config.setdefault("DOMINO_HOT_RELOAD", True)  # debug mode updates pages in place on changes
@@ -1339,6 +1340,15 @@ class Domino(Flask):
 		if page is not None and request.headers.get("X-Domino-Navigate") and request.environ.get("domino.websocket"):
 			from .asgi import with_cookies
 			page.cookie = with_cookies(request.headers.get("Cookie", ""), response.headers.getlist("Set-Cookie"))
+
+		# Another site can't show the app's pages in a frame and trick visitors into clicking its
+		# buttons (clickjacking); {"domino": {"frame_options": false}} allows it. Responses keep
+		# their declared type, and links to other sites don't send the page's query (tokens)
+		frame_options = self.config.get("DOMINO_FRAME_OPTIONS", "SAMEORIGIN")
+		if frame_options:
+			response.headers.setdefault("X-Frame-Options", str(frame_options))
+		response.headers.setdefault("X-Content-Type-Options", "nosniff")
+		response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		return response
 

@@ -215,6 +215,26 @@ def test_client_components_render_names_and_scripts_the_same_way():
 	assert html == "<script>a = '<\\/Script><img src=x onerror=alert(1)>'</script>"
 
 
+def test_pages_cant_be_framed_by_other_sites():
+
+	import domino.tags as t
+	from domino.components import Document
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [t.button(on_click=lambda: None) ["Delete my account"]]
+
+	response = app.test_client().get("/")
+	assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+	assert response.headers["X-Content-Type-Options"] == "nosniff"
+	assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+	app.config["DOMINO_FRAME_OPTIONS"] = False
+	assert "X-Frame-Options" not in app.test_client().get("/").headers
+
+
 # Events --------------------------------------------------------------------------------------
 
 
