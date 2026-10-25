@@ -38,7 +38,7 @@ class Pill(t.span):
 		padding: 0.1rem 0.6rem;
 		border-radius: 999px;
 		background: var(--accent);
-		color: white;
+		color: var(--surface);
 		font-size: 0.8rem;
 	}
 	"""

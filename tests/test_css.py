@@ -332,8 +332,12 @@ def test_theme_sets_variables_with_a_dark_variant():
 
 	css = head(render(page))
 
-	assert ":root {--surface: #fff;--text-color: #111;}" in css
+	# With a dark variant, the browser draws its own controls dark too
+	assert ":root {--surface: #fff;--text-color: #111;color-scheme: light dark;}" in css
 	assert "@media (prefers-color-scheme: dark) {:root {--surface: #111;}}" in css
+
+	# Without one, the page stays light whatever the system prefers
+	assert "color-scheme" not in head(render(Document().theme(surface="#fff")))
 
 
 def test_values_cannot_close_the_style_element():

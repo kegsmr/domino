@@ -16,7 +16,9 @@ class Carousel(t.div):
 
 	css = {
 		"figure": {"margin": 0, "height": "9rem", "border_radius": "10px", "display": "flex", "align_items": "flex-end", "padding": "0.75rem",
-			"color": "white", "font_weight": 600, "text_shadow": "0 1px 3px rgba(0, 0, 0, 0.5)"},
+			"font_weight": 600},
+		# A dark backing, so the caption reads on any slide, pale or bright
+		"figcaption": {"color": "white", "background": "rgba(15, 23, 42, 0.6)", "padding": "0.2rem 0.65rem", "border_radius": "999px"},
 		"nav": {"display": "flex", "align_items": "center", "gap": "0.5rem", "margin_top": "0.5rem"},
 		"nav > button": {"cursor": "pointer"},
 		".dot": {"width": "0.75rem", "height": "0.75rem", "padding": 0, "border_radius": "50%", "border": "1px solid var(--muted)", "background": "none"},
@@ -31,7 +33,9 @@ class Carousel(t.div):
 
 		return [
 			t.figure(style={"background": background}) [
-				f"{name} ({self.index + 1}/{count})"
+				t.figcaption() [
+					f"{name} ({self.index + 1}/{count})"
+				]
 			],
 			t.nav()([
 				# Each render works out where previous and next go, so they're plain values

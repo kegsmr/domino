@@ -1570,6 +1570,9 @@ class Style:
 		self.style(":root", {css.variable_name(name): value for name, value in variables.items()})
 
 		if dark:
+			# Tells the browser the page has a dark look too, so its own controls (buttons,
+			# inputs, scrollbars) are drawn dark then, instead of light under light text
+			self.style(":root", color_scheme="light dark")
 			self.style("@media (prefers-color-scheme: dark)", {
 				":root": {css.variable_name(name): value for name, value in dark.items()}
 			})
