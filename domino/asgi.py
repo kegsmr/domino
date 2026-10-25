@@ -270,6 +270,10 @@ class Connection:
 					tasks.append(asyncio.ensure_future(self.resend(data.get("id"))))
 		finally:
 			self.closed = True
+			# The page stays until it expires or a new socket takes it (whose hello resumes it);
+			# paused meanwhile, so changes to what it shows aren't rendered for nobody
+			if self.subscription is not None:
+				self.subscription.page.pause_for(self.subscription.stream)
 			for task in tasks:
 				task.cancel()
 			if self.listening is not None:
@@ -301,12 +305,14 @@ class Connection:
 		# Patches start from what this socket sent for the page; the browser forgets the rest too
 		self.patcher = Patcher() if patch and self.app.config["DOMINO_PATCHES"] else None
 
-		# A socket that went while the tab was hidden left it paused
+		self.page_id = page.id
+		self.subscription = Subscription(self.app, page)
+
+		# A socket that went (or whose tab was hidden) left it paused. Resumed once this socket's
+		# stream is the page's, so the old socket can't pause it again after this
 		if page.paused:
 			await asyncio.get_running_loop().run_in_executor(self.asgi.executor, page.resume)
 
-		self.page_id = page.id
-		self.subscription = Subscription(self.app, page)
 		self.listening = asyncio.ensure_future(self.listen(self.subscription))
 
 

@@ -300,6 +300,15 @@ class Page:
 			self.paused = True
 
 
+	def pause_for(self, stream):
+		"""pause(), if `stream` still receives this page's pushes: its socket went (the tab closed
+		or lost its connection) and no other has taken the page over."""
+
+		with self.updates_ready:
+			if self.stream is stream:
+				self.pause()
+
+
 	def defer(self, component):
 		"""Whether this page is paused, in which case `component` is rendered for it on resume()."""
 

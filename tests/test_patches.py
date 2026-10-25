@@ -640,6 +640,49 @@ def test_a_new_socket_for_a_paused_page_catches_it_up(asgi_server):
 	assert "Message number 100" in update["html"]
 
 
+def test_a_closed_tab_pauses_its_page_until_a_socket_takes_it_again(asgi_server):
+
+	app = make_app()
+	server = asgi_server(app)
+	page_id, _ = load(server)
+	tab = Tab(server, page_id)
+	tab.close()
+
+	# Kept until it expires, but changes to what it shows aren't rendered for nobody
+	deadline = time.monotonic() + 5
+	while not app.page_store.pages[page_id].paused:
+		assert time.monotonic() < deadline
+		time.sleep(0.01)
+	app.renders.clear()
+	for number in range(100, 105):
+		say(number)
+	assert app.renders == []
+
+	# The tab comes back (a dropped connection): caught up with one render
+	tab = Tab(server, page_id)
+	update = tab.receive()
+	tab.close()
+
+	assert len(app.renders) == 1
+	assert all(f"Message number {number}" in update["html"] for number in range(100, 105))
+
+
+def test_a_replaced_socket_going_leaves_the_page_running(asgi_server):
+
+	app = make_app()
+	server = asgi_server(app)
+	page_id, _ = load(server)
+	old = Tab(server, page_id)
+	new = Tab(server, page_id)
+	old.close()
+	time.sleep(0.2)
+
+	assert not app.page_store.pages[page_id].paused
+	say(100)
+	assert "Message number 100" in new.receive()["html"]
+	new.close()
+
+
 def test_pause_and_resume_on_the_page():
 
 	app = make_app()
