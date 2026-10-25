@@ -14,7 +14,7 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 
 | Example | Shows |
 |---|---|
-| `hello_world/` | A page built from tag classes, with an app-wide stylesheet served at `/style.css` |
+| `hello_world/` | A page built from tag classes, with an app-wide stylesheet served at `/style.css` and a component's own `css` |
 | `functional/` | Several pages in `pages/`, a shared `layout.py` with the navigation, a page with a URL parameter (`hello/[name].py`) and a `404.py` |
 | `counter/` | A component with `State`, re-rendered by `on_click=` |
 | `random_number/` | `after(ms, ...)` updating a component on a timer |
@@ -24,8 +24,9 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `search/` | Search as you type: `on_input=..., debounce=250`, with the input keeping focus and caret while results update |
 | `chat/` | Meteor-style reactivity: a shared `Collection` in `data.py`; every open window re-renders live when a message is inserted |
 | `accounts/` | Sign-up, login and logout with `domino.accounts`: a `UserMenu` that updates when you log in or out, and a `login_required` page with notes only their owner sees. Needs MongoDB (started for you in debug mode) |
+| `styles/` | Component `css` (nested selectors, `:hover`, `::before`, `@media`, plain CSS strings, inheritance), written once per page; a theme with a dark variant; CSS arriving with the event response that first shows a component |
 | `loading/` | Styling a slow event's loading state with `[data-loading]`, and the debug error overlay when a callback raises |
 | `attributes/` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
 | `bootstrap/` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
 | `settings/` | `app.settings` from `settings.json`, the `domino` block, and `public` settings read in the browser as `Domino.settings`. Copy `settings.local.json.example` to `settings.local.json` to override locally |
-| `showcase/` | A full landing page using the imperative style (`t.h1(parent, "text")`), written as a `Page` class, and a contact form event |
+| `showcase/` | A full landing page using the imperative style (`t.h1(parent, "text")`), written as a `Page` class, styled with each component's `css`, and a contact form event |

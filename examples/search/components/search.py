@@ -16,6 +16,16 @@ class Search(t.div):
 	query = State("")
 	requests = State(0)
 
+	# Scoped to this component (.Search input) and added to the page's <head> once
+	css = {
+		"input": {"font": "inherit", "padding": "0.5rem", "width": "100%", "box_sizing": "border-box"},
+	}
+
+	# Scoped to this component (.Search input) and added to the page's <head> once
+	css = {
+		"input": {"font": "inherit", "padding": "0.5rem", "width": "100%", "box_sizing": "border-box"},
+	}
+
 
 	def render(self):
 

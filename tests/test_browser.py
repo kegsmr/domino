@@ -453,3 +453,58 @@ def test_file_routed_pages_share_a_layout(serve, page):
 	assert response.status == 404
 	assert page.locator("h1").inner_text() == "Page not found"
 	assert page.locator("nav a").count() == 3
+
+
+def test_component_css_from_an_event_response_is_added_once(page):
+
+	import domino.tags as t
+	from domino import Domino, State
+	from domino.components import Document
+
+	class Badge(t.span):
+
+		css = {"color": "rgb(200, 0, 0)", "::after": {"content": "'!'"}}
+
+	class Badges(t.div):
+
+		shown = State(0)
+		optimistic = False  # so Badge first shows up in an event response
+
+
+		def render(self):
+
+			return [t.button(on_click=self.more) ["More"]] + [Badge() [str(i)] for i in range(self.shown)]
+
+
+		def more(self):
+
+			self.shown += 1
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+
+		document = Document() [Badges()]
+		document.style("span", font_weight="bold")
+		return document
+
+	server = make_server("127.0.0.1", 0, app, threaded=True)
+	threading.Thread(target=server.serve_forever, daemon=True).start()
+	try:
+		page.goto(f"http://127.0.0.1:{server.server_port}/")
+		assert page.locator("style[data-domino-css]").count() == 0
+
+		for count in (1, 2, 3):
+			page.get_by_text("More").click()
+			page.wait_for_function(f"document.querySelectorAll('.Badge').length === {count}")
+
+		assert page.locator("style[data-domino-css~=Badge]").count() == 1
+		# Before the page's own stylesheet, so the page's rules still win
+		following = page.evaluate("document.querySelector('style[data-domino-css]').nextElementSibling.textContent")
+		assert following.strip().startswith("span")
+		assert page.evaluate("getComputedStyle(document.querySelector('.Badge')).color") == "rgb(200, 0, 0)"
+		assert page.evaluate("getComputedStyle(document.querySelector('.Badge'), '::after').content") == '"!"'
+		assert page.errors == []
+	finally:
+		server.shutdown()

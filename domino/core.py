@@ -7,6 +7,7 @@ import traceback
 import uuid
 import weakref
 from collections import OrderedDict
+from contextlib import contextmanager
 from pathlib import Path
 
 import flask
@@ -18,7 +19,7 @@ from markupsafe import Markup, escape
 
 from .settings import Settings, load_settings
 from .util import *
-from . import optimistic, reactive
+from . import css, optimistic, reactive
 from .settings import script_json
 
 
@@ -49,6 +50,117 @@ def render_stack():
 	return _render_state.stack
 
 
+# CSS of each component class (its own `css`, scoped to its class name), made once
+_component_css = {}
+
+
+def component_css(cls):
+
+	cached = _component_css.get(cls)
+	if cached is None:
+		cached = css.render(cls.__dict__["css"] or {}, f".{css_class_name(cls)}")
+		_component_css[cls] = cached
+
+	return cached
+
+
+class PageStyles:
+	"""The styles one render needs: the CSS of each component class shown, written once,
+	and stylesheets computed only when the render is done, so rules added while rendering
+	still count. The outermost render (a page, an event response, a push) collects them."""
+
+
+	def __init__(self):
+
+		self.classes = {}  # CSS class name -> its CSS, in the order first shown
+		self.marker = f"<!--domino-styles-{uuid.uuid4().hex}-"
+		self.slots = []  # (placeholder, function rendering what replaces it)
+		self.placed = False  # whether the component CSS has a place (in the <head>)
+
+
+	def add(self, cls):
+
+		text = component_css(cls)
+		if text:
+			self.classes.setdefault(css_class_name(cls), text)
+
+
+	def slot(self, render):
+
+		placeholder = f"{self.marker}{len(self.slots)}-->"
+		self.slots.append((placeholder, render))
+
+		return placeholder
+
+
+	def place(self, level, indent):
+		"""Mark where the component CSS goes (once), and return the mark."""
+
+		if self.placed:
+			return ""
+		self.placed = True
+
+		return self.slot(lambda: self.component_style(level, indent))
+
+
+	def component_style(self, level, indent):
+
+		if not self.classes:
+			return ""
+
+		return Element(
+			"style",
+			inner="\n".join(self.classes.values()),
+			data_domino_css=" ".join(self.classes)
+		)._render(level, indent)
+
+
+	def finish(self, html, fallback=True):
+		"""Put the styles in their places. Without a <head>, the component CSS goes first
+		(unless `fallback` is False: event responses send it separately)."""
+
+		for placeholder, render in self.slots:
+			html = html.replace(placeholder, render(), 1)
+
+		if not self.placed and fallback:
+			html = self.component_style(0, "") + html
+
+		return html
+
+
+	def new_for(self, page):
+		"""[name, css] for the component classes `page` hasn't been sent yet, now marked sent."""
+
+		new = [[name, text] for name, text in self.classes.items() if name not in page.css]
+
+		# Pages that aren't kept (events bound outside a request) get everything every time
+		if page is not DEFAULT_PAGE:
+			page.css.update(name for name, _ in new)
+
+		return new
+
+
+def current_styles():
+
+	return getattr(_render_state, "styles", None)
+
+
+@contextmanager
+def collect_styles():
+	"""Collect the styles of everything rendered inside, for PageStyles.finish()."""
+
+	styles = current_styles()
+	if styles is not None:
+		yield styles
+		return
+
+	styles = _render_state.styles = PageStyles()
+	try:
+		yield styles
+	finally:
+		_render_state.styles = None
+
+
 class Page:
 	"""Event registry for one rendered page (one page load in one browser tab)."""
 
@@ -67,6 +179,7 @@ class Page:
 		# Who's signed in on this page, from the session when it was made. Pages outlive their
 		# request, so events and pushes read this instead of the cookie; reading it subscribes
 		self.user_id = reactive.State(None)
+		self.css = set()  # components whose CSS the browser has (see PageStyles)
 		self.touch()
 
 
@@ -102,7 +215,7 @@ class Page:
 			del self.events[event_id]
 
 
-	def push(self, element_id, html):
+	def push(self, element_id, html, css=None):
 		"""Queue a re-rendered component for this page's stream. Call with self.lock held."""
 
 		self.version += 1
@@ -110,8 +223,15 @@ class Page:
 		with self.updates_ready:
 			# A newer render replaces one the browser hasn't received yet; moving
 			# it to the end keeps it after any parent re-rendered in between
-			self.updates.pop(element_id, None)
-			self.updates[element_id] = {"id": element_id, "html": html, "version": self.version}
+			previous = self.updates.pop(element_id, None)
+			update = {"id": element_id, "html": html, "version": self.version}
+			# Component CSS counts as sent once queued, so keep what the replaced update carried
+			css = list(css or [])
+			if previous and previous.get("css"):
+				css = previous["css"] + css
+			if css:
+				update["css"] = css
+			self.updates[element_id] = update
 			self.updates_ready.notify_all()
 
 
@@ -484,7 +604,8 @@ class Domino(Flask):
 					events = dict(page.events)
 					page.unregister_subtree(result)
 					try:
-						html = result._render()
+						with collect_styles() as styles:
+							html = result._render()
 					except Exception:
 						page.events.clear()
 						page.events.update(events)
@@ -497,11 +618,18 @@ class Domino(Flask):
 				# The response carries this render, so it isn't pushed to this page again
 				changes.skip(page, result)
 
-				return jsonify(self._event_response({
+				response = {
 					"id": result.id(),
-					"html": html,
+					"html": styles.finish(html, fallback=False),
 					"version": page.version
-				}))
+				}
+
+				# CSS of components this page hasn't shown before; core.js adds it to the head
+				css = styles.new_for(page)
+				if css:
+					response["css"] = css
+
+				return jsonify(self._event_response(response))
 
 		self.add_url_rule(route, route, event_handler, methods=["POST"])
 
@@ -649,7 +777,11 @@ class Domino(Flask):
 			# Only while debugging, so the latency setting can't slow down production
 			if self.debug and self.config.get("DOMINO_LATENCY"):
 				result.configure(data_domino_latency=int(self.config["DOMINO_LATENCY"]))
-			html = result._render()
+			with collect_styles() as styles:
+				html = result._render()
+			html = styles.finish(html)
+			# The page's <head> has their CSS, so event responses needn't send it
+			page.css.update(styles.classes)
 		else:
 			html = result
 
@@ -904,22 +1036,32 @@ class Element:
 			_render_state.page = first
 			try:
 				first.unregister_subtree(self)
-				html = self._render()
+				with collect_styles() as styles:
+					html = self._render()
 			finally:
 				_render_state.page = previous
+			html = styles.finish(html, fallback=False)
 			events = first.subtree_events(self)
-			first.push(self.id(), html)
+			first.push(self.id(), html, styles.new_for(first))
 
 		for page in pages[1:]:
 			with page.lock:
 				page.unregister_subtree(self)
 				page.events.update(events)
-				page.push(self.id(), html)
+				page.push(self.id(), html, styles.new_for(page))
 
 		return self
 
 
 	def _render(self, level=0, indent=4) -> str:
+
+		# The outermost render collects the styles of everything in it and puts them in
+		# place at the end. Element._render, not self._render: subclasses call this from theirs
+		styles = current_styles()
+		if styles is None:
+			with collect_styles() as styles:
+				html = Element._render(self, level, indent)
+			return styles.finish(html)
 
 		if hasattr(self, 'render'):
 			# Remember where this component is shown so refresh() can update it there
@@ -976,26 +1118,34 @@ class Element:
 		def element_style(style_level):
 			if not self.__styles__:
 				return ""
-			css = Style.css({Style.id_selector(self.id()): self.__styles__})
-			return Element("style", inner=css)._render(style_level, indent)
+			rules = Style.css({Style.id_selector(self.id()): self.__styles__})
+			return Element("style", inner=rules)._render(style_level, indent)
 
 		html = f"{indentation}<{tag}"
 
 		# Handle class names: every class in the hierarchy except the tag itself,
 		# so mixins and parent components (e.g. col_6 -> col-6) are kept
 		class_names = []
+		styled = []
 		for base in self.__class__.__mro__:
 			if base in (object, Element) or base.__name__ == tag or base.__module__ == "domino.tags":
 				continue
 			name = css_class_name(base)
 			if name not in class_names:
 				class_names.append(name)
+			if "css" in base.__dict__:
+				styled.append(base)
 		is_component = len(class_names) > 0
+
+		# Class-level `css`, written once per page; base classes first so subclasses override
+		for base in reversed(styled):
+			styles.add(base)
 
 		# Add attributes
 		attributes = get_class_attributes(self)
 		if "class" in attributes:
 			attributes.pop("class")
+		attributes.pop("css", None)
 		attributes.update(self.__attributes__)
 
 		# `live = True` is a framework setting, not an HTML attribute; mark live
@@ -1061,6 +1211,9 @@ class Element:
 
 		inner = element_style(level + 1) + (inner or "")
 
+		# Component CSS goes in the head, before its first stylesheet, so the page's own rules win
+		head = tag == "head"
+
 		for child in self.__children__:
 
 			if not isinstance(child, Element) and callable(child):
@@ -1070,11 +1223,16 @@ class Element:
 				child = child()
 	
 			if isinstance(child, Element):
+				if head and child.__tag__ in ("style", "link"):
+					inner += styles.place(level + 1, indent)
 				inner += child._render(level + 1, indent)
 			elif isinstance(child, str):
 				inner += f"{indentation}{indent}{text(child)}{end}"
 			else:
 				raise ValueError(f"Invalid child: {child!r}")
+
+		if head:
+			inner += styles.place(level + 1, indent)
 
 		# How this component would look after each predictable handler, keyed by event id,
 		# for core.js to show instantly; inert JSON, so it costs the page nothing else
@@ -1107,8 +1265,13 @@ class Style:
 			parent.add_url_rule(href, href, style)
 			
 
-	def style(self, target, **kwargs):
-		
+	def style(self, target, rules=None, /, **kwargs):
+		"""Add rules for `target` (a selector, a class or one element), as keywords
+		(font_size="2rem") and/or a dict that can nest (see domino.css):
+		style(".card", {":hover": {...}, "h3": {...}, "@media (max-width: 600px)": {...}})."""
+
+		rules = dict(rules or {}, **kwargs)
+
 		if isinstance(target, str):
 			selector = target
 		elif isinstance(target, type):
@@ -1116,21 +1279,34 @@ class Style:
 		elif isinstance(target, Element):
 			# Rules for one element travel with that element instead of piling
 			# up in this (possibly app-wide) stylesheet
-			target.__styles__.update(kwargs)
-			return
+			css.merge(target.__styles__, rules)
+			return self
 		else:
 			raise ValueError(f"Invalid target: {target!r}")
 
-		self.styles.setdefault(selector, {})
+		css.merge(self.styles.setdefault(selector, {}), rules)
 
-		for key, value in kwargs.items():
-			self.styles[selector][key] = value
+		return self
+
+
+	def theme(self, dark=None, **variables):
+		"""CSS variables on :root (primary="#06c" -> --primary, used as var(--primary)),
+		with the values in `dark` for visitors whose system prefers a dark color scheme."""
+
+		self.style(":root", {css.variable_name(name): value for name, value in variables.items()})
+
+		if dark:
+			self.style("@media (prefers-color-scheme: dark)", {
+				":root": {css.variable_name(name): value for name, value in dark.items()}
+			})
+
+		return self
 
 
 	def compute(self, head=None):
 
-		# Return the CSS as a <style> element
-		return Element("style", head, Style.css(self.styles))
+		# A <style> whose CSS is computed when the page is done rendering
+		return StyleBlock(self, head)
 
 
 	@staticmethod
@@ -1147,39 +1323,54 @@ class Style:
 	@staticmethod
 	def css(styles):
 
-		css = []
+		return css.render(styles)
 
-		for name, properties in styles.items():
-		
-			base_styles = []
-			hover_styles = {}
 
-			# Separate normal and hover styles
-			for key, value in properties.items():
-				if isinstance(value, dict) and key == "hover":
-					hover_styles = value  # Store hover styles
-				else:
-					base_styles.append(f"\t{key.replace('_', '-')}: {value};")
-
-			# Add base styles to the CSS block
-			css.append(f"{name} " + "{")
-			css.extend(base_styles)
-			css.append("}")
-
-			# Add hover styles to the CSS block
-			if hover_styles:
-				css.append(f"{name}:hover " + "{")
-				for hover_key, hover_value in hover_styles.items():
-					css.append(f"\t{hover_key.replace('_', '-')}: {hover_value};")
-				css.append("}")
-
-		# Join all parts with newlines for readability
-		return "\n".join(css)
-			
-	
 	def link(self, head=None, href=""):
 
 		if not href:
 			href = self.href
 
 		return Element("link", head, rel="stylesheet", href=href)
+
+
+class StyleBlock(Element):
+	"""A <style> holding a Style's rules. Its CSS is computed when the page has finished
+	rendering, so rules added while rendering (in render(), say) still apply."""
+
+
+	def __init__(self, stylesheet, parent=None):
+
+		self.stylesheet = stylesheet
+
+		super().__init__("style", parent)
+
+
+	def inner(self, inner=None):
+
+		if inner is None:
+			return Style.css(self.stylesheet.styles)
+
+		return super().inner(inner)
+
+
+	def _render(self, level=0, indent=4):
+
+		if isinstance(indent, int):
+			indent = " " * indent
+
+		styles = current_styles()
+		if styles is None:
+			return self._render_now(level, indent)
+
+		# Component CSS goes before the page's own, so the page's rules win
+		return styles.place(level, indent) + styles.slot(lambda: self._render_now(level, indent))
+
+
+	def _render_now(self, level, indent):
+
+		rules = self.inner()
+		if not rules:
+			return ""
+
+		return Element("style", inner=rules)._render(level, indent)

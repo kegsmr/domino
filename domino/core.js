@@ -166,7 +166,34 @@ window.Domino = (() => {
         }
     }
 
+    // The server sends each component class's CSS ([name, css] pairs) once per page, the
+    // first time a response shows one. Add what the page doesn't have yet.
+    function addStyles(styles) {
+        if (!styles || !styles.length) return;
+        const blocks = Array.from(document.querySelectorAll('style[data-domino-css]'));
+        const present = new Set(blocks.flatMap((block) => block.dataset.dominoCss.split(' ')));
+        const missing = styles.filter(([name]) => !present.has(name));
+        if (!missing.length) return;
+
+        const style = document.createElement('style');
+        style.dataset.dominoCss = missing.map(([name]) => name).join(' ');
+        style.textContent = missing.map(([, css]) => css).join('\n');
+
+        // With the other component CSS, before the page's own stylesheets, so those still win
+        const last = blocks[blocks.length - 1];
+        const firstSheet = document.head.querySelector('style, link[rel=stylesheet]');
+        if (last) {
+            last.after(style);
+        } else if (firstSheet) {
+            firstSheet.before(style);
+        } else {
+            document.head.appendChild(style);
+        }
+    }
+
     function apply(data, reset) {
+        // Even for a stale update: the server counts its CSS as sent
+        addStyles(data.css);
         if (!data.id || !data.html) return;
         if (latest.get(data.id) >= data.version) {
             // A newer update (e.g. pushed by the server) got here first, so the page already

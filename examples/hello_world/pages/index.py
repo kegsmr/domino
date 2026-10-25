@@ -3,22 +3,18 @@ from flask import current_app
 import domino.tags as t
 
 
-# Define a container class for styling
+# A component's own styles, scoped to its class (.container) and added to the page once
 class container(t.div):
 
-	def init(self):
-
-		# Apply styles to the container
-		current_app.stylesheet.style(
-			self,
-			font_family="Arial, sans-serif",
-			max_width="800px",
-			margin="0 auto",
-			padding="20px",
-			background_color="#f9f9f9",
-			border_radius="10px",
-			box_shadow="0 4px 6px rgba(0, 0, 0, 0.1)",
-		)
+	css = {
+		"font_family": "Arial, sans-serif",
+		"max_width": "800px",
+		"margin": "0 auto",
+		"padding": "20px",
+		"background_color": "#f9f9f9",
+		"border_radius": "10px",
+		"box_shadow": "0 4px 6px rgba(0, 0, 0, 0.1)",
+	}
 
 
 # Define the HTML page; a whole <html> page is used as it is, without layouts

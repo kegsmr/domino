@@ -80,11 +80,18 @@ class Document(t.html):
 		return "<!DOCTYPE html>\n" + super()._render(level, indent)
 
 
-	def style(self, target=None, **kwargs):
+	def style(self, target=None, rules=None, /, **kwargs):
 
 		if target is None:
 			target = self.__class__
 
-		self.stylesheet.style(target, **kwargs)
+		self.stylesheet.style(target, rules, **kwargs)
+
+		return self
+
+
+	def theme(self, dark=None, **variables):
+
+		self.stylesheet.theme(dark, **variables)
 
 		return self

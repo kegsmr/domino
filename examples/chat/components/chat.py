@@ -13,6 +13,15 @@ class Chat(t.div):
 	# Remembered per window, so the form keeps the name after sending
 	name = State("")
 
+	# Scoped to this component (.Chat form, ...) and added to the page's <head> once
+	css = {
+		".messages": {"list_style": "none", "min_height": "12rem", "border": "1px solid #ddd", "border_radius": "8px", "padding": "0.5rem 1rem"},
+		"form": {"display": "flex", "gap": "0.5rem"},
+		"input": {"font": "inherit", "padding": "0.4rem", "min_width": "0"},
+		"input[name=name]": {"width": "7rem"},
+		"input[name=text]": {"flex": "1"},
+	}
+
 
 	def render(self):
 

@@ -15,6 +15,5 @@ def page():
 	]
 
 	page.style("body", font_family="system-ui, sans-serif", max_width="28rem", margin="2rem auto")
-	page.style("input", font="inherit", padding="0.5rem", width="100%", box_sizing="border-box")
 
 	return page

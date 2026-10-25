@@ -22,6 +22,13 @@ class SeatCount(t.output):
 
 class SignupForm(t.div):
 
+	# Scoped to this component (.SignupForm label, ...) and added to the page's <head> once
+	css = {
+		"label": {"display": "block", "margin": "0.75rem 0"},
+		"fieldset": {"border": "1px solid #ddd", "border_radius": "8px", "padding": "1rem 1.5rem"},
+		"dt": {"font_weight": "600"},
+	}
+
 	submitted = State(None)
 
 
