@@ -1,5 +1,6 @@
 """End-to-end tests of core.js in a real browser. Skipped when Playwright isn't installed."""
 
+import sys
 import threading
 import time
 
@@ -508,3 +509,43 @@ def test_component_css_from_an_event_response_is_added_once(page):
 		assert page.errors == []
 	finally:
 		server.shutdown()
+
+
+def test_counter_paired_with_a_jinja_template_in_a_jinja_page(serve, page):
+
+	page.goto(serve("templating"))
+	page.evaluate("Domino.enableLatencySim(1000)")
+	counter = page.locator(".Counter")
+
+	counter.get_by_text("+1").click()
+	# Predicted from the paired template, before the server answers
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '1'", timeout=500)
+	counter.get_by_text("+1").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '2'", timeout=5000)
+	page.wait_for_function("!document.querySelector('.Counter').hasAttribute('data-predicted')", timeout=5000)
+
+	counter.get_by_text("Reset").click()
+	page.wait_for_function("document.querySelector('.Counter strong').textContent === '0'", timeout=5000)
+	assert counter.get_by_text("Reset").is_disabled()
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.errors == []
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="template strings need Python 3.14")
+def test_template_string_todo(serve, page):
+
+	page.goto(serve("templating"))
+	todo = page.locator(".Todo")
+
+	for number, text in enumerate(["one", "two"], 1):
+		todo.locator("input[name=text]").fill(text)
+		todo.locator("input[name=text]").press("Enter")
+		page.wait_for_function(f"document.querySelectorAll('.Todo li').length === {number}")
+
+	assert todo.locator("p").inner_text() == "2 item(s)"
+	todo.locator("li input[type=checkbox]").first.click()
+	page.wait_for_function("document.querySelectorAll('.Todo li').length === 1")
+
+	assert [text.strip() for text in todo.locator("li").all_inner_texts()] == ["two"]
+	assert todo.locator("input[name=text]").input_value() == ""
+	assert page.errors == []

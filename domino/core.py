@@ -15,6 +15,7 @@ from flask import *
 from flask.cli import load_dotenv as load_env_files
 from flask.helpers import get_debug_flag, get_load_dotenv
 from flask.sessions import SecureCookieSessionInterface
+from jinja2 import ChoiceLoader
 from markupsafe import Markup, escape
 
 from .settings import Settings, load_settings
@@ -33,6 +34,9 @@ RAW_TEXT_TAGS = ["script", "style"]
 
 
 _render_state = threading.local()
+
+# Component class -> its paired Jinja template's path, or None (see domino.templates)
+_paired_templates = {}
 
 # Guards Element.__pages__, which request threads add to while refresh() reads it
 _pages_lock = threading.Lock()
@@ -203,6 +207,8 @@ class Page:
 			if isinstance(element, Element) and id(element) not in elements:
 				elements.add(id(element))
 				stack.extend(element.__children__)
+				# Components a Jinja template rendered inline (see domino.templates)
+				stack.extend(getattr(element, "__embedded__", ()))
 
 		return {event_id: event for event_id, event in self.events.items() if id(event[0]) in elements}
 
@@ -448,6 +454,10 @@ class Domino(Flask):
 
 		self.page_store = page_store or MemoryPageStore()
 
+		# .html templates anywhere in the app's folder, found by file name (see domino.templates)
+		from .templates import TemplateFinder
+		self.template_finder = TemplateFinder(self.root_path, self.template_folder)
+
 		with open(Path(__file__).parent / 'core.js', encoding='utf-8') as js_file:
 			CORE_JS = js_file.read()
 
@@ -487,6 +497,21 @@ class Domino(Flask):
 			raise PagesError(f'Two handlers for "{rule}": {page} and the route "{name}"')
 
 		return super().add_url_rule(rule, endpoint, view_func, **options)
+
+
+	def create_global_jinja_loader(self):
+
+		return ChoiceLoader([super().create_global_jinja_loader(), self.template_finder])
+
+
+	def create_jinja_environment(self):
+
+		from .templates import component, on
+
+		environment = super().create_jinja_environment()
+		environment.globals.update(component=component, on=on)
+
+		return environment
 
 
 	def _apply_settings(self):
@@ -710,6 +735,7 @@ class Domino(Flask):
 
 		page = Page()
 		page.user_id.set(session.get(SESSION_USER_KEY))
+		page.app = self  # for rendering Jinja templates outside a request, e.g. in refresh()
 
 		self.page_store.save(page)
 		self._prune_pages()
@@ -854,6 +880,17 @@ class Element:
 
 
 	def __str__(self):
+		return self._render()
+
+
+	def __html__(self):
+
+		# Jinja calls this for {{ element }}; inside a component's render, remember the
+		# element so the component's re-render replaces its events too
+		stack = render_stack()
+		if stack:
+			stack[-1][0].__embedded__.append(self)
+
 		return self._render()
 	
 
@@ -1053,6 +1090,22 @@ class Element:
 		return self
 
 
+	def _paired_render(self):
+
+		cls = type(self)
+		path = _paired_templates.get(cls, False)
+		if path is False:
+			from .templates import paired_template
+			path = paired_template(cls)
+			_paired_templates[cls] = path
+		if path is None:
+			return None
+
+		from .templates import render_paired
+
+		return lambda: render_paired(self, path)
+
+
 	def _render(self, level=0, indent=4) -> str:
 
 		# The outermost render collects the styles of everything in it and puts them in
@@ -1063,7 +1116,12 @@ class Element:
 				html = Element._render(self, level, indent)
 			return styles.finish(html)
 
-		if hasattr(self, 'render'):
+		# A component without render() may have a paired Jinja template instead
+		render = getattr(self, "render", None)
+		if render is None:
+			render = self._paired_render()
+
+		if render is not None:
 			# Remember where this component is shown so refresh() can update it there
 			page = Page.current()
 			if page is not DEFAULT_PAGE:
@@ -1078,9 +1136,10 @@ class Element:
 
 			# Subscriptions are rebuilt by whatever this render reads
 			reactive.forget(self)
+			self.__embedded__ = []
 			render_stack().append([self, 0])
 			try:
-				children = self.render()
+				children = render()
 			finally:
 				render_stack().pop()
 

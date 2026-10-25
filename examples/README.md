@@ -29,4 +29,5 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `attributes/` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
 | `bootstrap/` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
 | `settings/` | `app.settings` from `settings.json`, the `domino` block, and `public` settings read in the browser as `Domino.settings`. Copy `settings.local.json.example` to `settings.local.json` to override locally |
+| `templating/` | A Jinja page (`home.html`, found by name, returned from `pages/index.py`) with live components inside: a counter paired with its template (`components/counter.py` + `components/counter.html`) and, on Python 3.14, a todo list written with a template string (`html(t"...")`) |
 | `showcase/` | A full landing page using the imperative style (`t.h1(parent, "text")`), written as a `Page` class, styled with each component's `css`, and a contact form event |

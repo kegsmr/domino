@@ -18,6 +18,7 @@ from pathlib import Path
 from . import tags as t
 from .components import Document
 from .core import Element
+from .templates import JinjaTemplate
 
 
 # [id], [int:id] and [...rest]
@@ -186,8 +187,9 @@ def page_view(module, relative, rule, layouts):
 
 		result = make(**params)
 
-		# A whole document (Document or any <html>) and Flask responses are already complete
-		if isinstance(result, t.html) or not isinstance(result, (Element, str)):
+		# A whole document (Document or any <html>), a Jinja template(...) and Flask
+		# responses are already complete
+		if isinstance(result, (t.html, JinjaTemplate)) or not isinstance(result, (Element, str)):
 			return result
 
 		# The innermost layout wraps the page first, the pages folder's own layout last

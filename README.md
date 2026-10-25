@@ -218,6 +218,92 @@ class Counter(t.div):
 - `init(self)` runs once when the component is created, for setup that isn't state.
 - The older style, `self([...])` with `element.bind("click", callback)` and `return self`, still works.
 
+## Templates
+
+Besides tag classes, components can be written as HTML, in two ways. See `examples/templating/`.
+
+### Template strings (Python 3.14)
+
+`html()` turns a [template string](https://peps.python.org/pep-0750/) (`t"..."`) into the same Domino elements tag classes make, so events, `State`, escaping, instant updates and in-place patching all work as before:
+
+```python
+from domino import State, html
+import domino.tags as t
+
+
+class Counter(t.div):
+
+	count = State(0)
+	items = State(["a", "b"])
+
+
+	def render(self):
+
+		return html(t"""
+			<p>Count: {self.count}</p>
+			<button on_click={self.increment}>+</button>
+			<ul>{[html(t"<li>{item}</li>") for item in self.items]}</ul>
+		""")
+
+
+	def increment(self):
+
+		self.count += 1
+```
+
+- As text, `{value}` is escaped; an element, or a list of elements and text, becomes children; `None` and `False` render nothing; `Markup` is inserted as it is. Inside `<script>` values are inserted as JSON.
+- As an attribute value (`name={value}`, quoted or not), the value is passed like a keyword argument: `on_click={self.increment}` binds the event (`debounce=250` applies), `class={["a", "b"]}`, `style={styles}` with a dict, and `True`/`False`/`None` follow the usual attribute rules. Attribute names are the keyword names with hyphens allowed: `aria-label`, `data-id`, `for`, `class`.
+- `<div {attributes}>` spreads a dict of attributes.
+- `<{Card} title="x">children</{Card}>` or `<{Card} />` creates a component, with the attributes as keyword arguments.
+- Tags are the classes in `domino.tags` (`<div>` is `t.div`); other names, like `<my-widget>`, make a plain element with that tag.
+- One root element returns that element; otherwise `html()` returns a list, which works as `render()`'s result and as children.
+- Each template is parsed once (cached by its static text), so rendering one only fills in the values. Invalid HTML, such as an unclosed or mismatched tag, raises `TemplateError` with the line number.
+- Use `{{` and `}}` for literal braces, as in f-strings. Lambdas need parentheses: `on_change={(lambda: self.remove(index))}`.
+
+Template strings need Python 3.14; on older versions `html()` raises an error saying so (the rest of Domino works from 3.9).
+
+### Jinja templates
+
+Flask's Jinja templates suit layouts and mostly static pages. Domino finds `.html` templates by file name anywhere in the app's folder, like Meteor: `templates/` as in Flask, or next to the code that uses them. Hidden folders, `.domino/`, `static/`, `node_modules/`, `__pycache__/` and virtualenvs are skipped. Since names are looked up without folders, two templates with the same name stop the app at startup with both paths. While debugging, edited and new templates are picked up without a restart.
+
+`template(name, **context)` renders one as an element; return it from a page's `page()` (or a route) to make it the whole page (Domino adds its script, its page id and the CSS of the components inside), or use it as a child. Inside, `{{ component(Counter) }}` (or `{{ component(Counter, title="x") }}`) and `{{ element }}` render live Domino components, whose events and re-renders work as usual; the Jinja part around them is static.
+
+```python
+# pages/index.py
+def page():
+
+	return template("home.html", title="Home", Counter=Counter)
+```
+
+```html
+<body>
+	<h1>{{ title }}</h1>
+	{{ component(Counter) }}
+</body>
+```
+
+A component without a `render()` whose module has a template next to it named after the class (`TodoList` → `todo_list.html`) or after the module (`counter.py` → `counter.html`) renders that template. Its `State` values and methods are available by name, and the component itself as `this` (Jinja keeps `self` for its blocks). `on(click=handler)` binds events, like `on_click=`; it takes several events and `debounce=`. Reading `State` subscribes the component and its handlers are predicted for instant updates, as with `render()`. A `render()` method, when there is one, wins over the template.
+
+```python
+# components/counter.py
+class Counter(t.div):
+
+	count = State(0)
+
+
+	def increment(self):
+
+		self.count += 1
+```
+
+```html
+<!-- components/counter.html -->
+<p>Count: {{ count }}</p>
+<button {{ on(click=increment) }}>+1</button>
+```
+
+Use template strings for interactive components written in Python, Jinja for pages, layouts and markup-heavy parts, with components dropped in where they need to be live.
+
 ## Events
 
 `element.bind("click", callback)` (or `on_click=callback`) runs `callback` on the server. A callback that takes an argument receives an `Event`:

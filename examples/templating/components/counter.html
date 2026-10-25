@@ -1,0 +1,3 @@
+<p>Count: <strong>{{ count }}</strong></p>
+<button {{ on(click=increment) }}>+1</button>
+<button {{ on(click=reset) }} {% if count == 0 %}disabled{% endif %}>Reset</button>
