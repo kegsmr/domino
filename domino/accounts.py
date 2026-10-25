@@ -49,7 +49,8 @@ MIN_PASSWORD_LENGTH = 8
 # Hashing a huge "password" is slow, so longer ones are refused before hashing
 MAX_PASSWORD_LENGTH = 1024
 
-EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# No characters that separate or quote addresses in a To: header ("a,b@c.d" is two addresses)
+EMAIL_PATTERN = re.compile(r"^[^@\s,;:<>()\[\]\\\"]+@[^@\s,;:<>()\[\]\\\"]+\.[^@\s,;:<>()\[\]\\\"]+\Z")
 
 WRONG_LOGIN = "Wrong email or password"
 TOO_MANY_EMAILS = "Too many emails sent. Try again in a few minutes."
@@ -566,19 +567,18 @@ def _load_token(salt, token, max_age):
 
 
 def _password_stamp(user):
-	"""Changes whenever the user's password does. In a reset token it makes the token single-use:
-	once the password is reset (or changed) the token no longer matches."""
+	"""Changes whenever the user's password (or email) does. In a reset token it makes the token
+	single-use: once the password is reset (or changed) the token no longer matches. A link sent
+	to an address the account has since stopped using stops working too."""
 
 	key = _secret_key()
 	if isinstance(key, str):
 		key = key.encode("utf-8")
 
 	stored = str(user.get("password_hash") or "").encode("utf-8")
+	email = str(user.get("email") or "").encode("utf-8")
 
-	return hmac.new(key, b"password:" + stored, hashlib.sha256).hexdigest()[:32]
-
-
-_warned_public_url = []
+	return hmac.new(key, b"password:" + stored + b"\0" + email, hashlib.sha256).hexdigest()[:32]
 
 
 def absolute_url(path):
@@ -595,11 +595,13 @@ def absolute_url(path):
 	if not has_request_context():
 		raise AccountsConfigError("Set the public_url setting (e.g. \"https://example.com\") to put links in emails sent outside a request")
 
-	if not app.debug and not _warned_public_url:
-		_warned_public_url.append(True)
-		log.warning(
-			"No public_url setting: links in emails use the host the request was sent to. Set "
-			"public_url (e.g. \"https://example.com\") so a forged Host header can't change them."
+	# The host comes from the request's Host header, which the sender chooses: a reset link for
+	# someone else's account, asked for with a forged one, would point to the sender's site and
+	# hand them its token when clicked. So emails that really go out need public_url
+	if not app.debug and mail.backend_name() == "smtp":
+		raise AccountsConfigError(
+			"Set the public_url setting (e.g. \"https://example.com\", or DOMINO_PUBLIC_URL) for links in "
+			"emails: without it they'd use the Host header of the request, which the sender can forge."
 		)
 
 	return request.url_root.rstrip("/") + path
@@ -832,7 +834,11 @@ def oauth_view(provider, action):
 		# The secret key was only just made up (debug); the next request has a session
 		return flask.redirect(request.full_path)
 
+	# On public_url when it's set, rather than on the request's (forgeable) Host header
 	callback = flask.url_for("domino_oauth", provider=provider, action="callback", _external=True)
+	base = (_app().settings.get("public_url") or "") if _app() is not None else ""
+	if base:
+		callback = str(base).rstrip("/") + flask.url_for("domino_oauth", provider=provider, action="callback")
 
 	if action == "login":
 		state = secrets.token_urlsafe(32)
