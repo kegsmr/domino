@@ -10,6 +10,7 @@ from pathlib import Path
 from flask import *
 from markupsafe import Markup, escape
 
+from .settings import load_settings
 from .util import *
 from . import reactive
 
@@ -256,13 +257,17 @@ class Event:
 class Domino(Flask):
 
 
-	def __init__(self, *args, page_store: PageStore = None, **kwargs):
+	def __init__(self, *args, page_store: PageStore = None, settings: str = None, **kwargs):
 
 		super().__init__(*args, **kwargs)
 
 		self.config.setdefault("DOMINO_PAGE_TTL", 30 * 60)  # seconds of inactivity
 		self.config.setdefault("DOMINO_MAX_PAGES", 1000)
 		self.config.setdefault("DOMINO_KEEPALIVE", 15)  # seconds between stream keepalives
+
+		# settings.json < settings.local.json < DOMINO_* environment variables
+		self.settings = load_settings(self.root_path, settings)
+		self._apply_settings()
 
 		self.page_store = page_store or MemoryPageStore()
 
@@ -272,6 +277,16 @@ class Domino(Flask):
 		self._add_static_route('/_domino/core', CORE_JS)
 		self._add_event_handler('/_domino/events')
 		self._add_stream('/_domino/stream')
+
+
+	def _apply_settings(self):
+
+		# {"domino": {"page_ttl": 600}} -> DOMINO_PAGE_TTL; changes made in code later still win
+		for key, value in (self.settings.get("domino") or {}).items():
+			self.config[f"DOMINO_{key.upper()}"] = value
+
+		if self.settings.get("secret_key"):
+			self.secret_key = self.settings["secret_key"]
 
 
 	def _add_event_handler(self, route):

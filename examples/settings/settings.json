@@ -1,0 +1,10 @@
+{
+    "site_name": "Settings example",
+    "domino": {
+        "page_ttl": 600
+    },
+    "public": {
+        "greeting": "Hello from settings.json",
+        "theme_color": "#2a6fdb"
+    }
+}

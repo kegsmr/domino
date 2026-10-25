@@ -19,4 +19,5 @@ python examples/counter.py
 | `chat.py` | Meteor-style reactivity: a shared `Collection`; every open window re-renders live when a message is inserted |
 | `attributes.py` | `class_` for extra CSS classes, `for_` for Python keywords, `aria_*`/`data_*` attributes and `style` dicts |
 | `bootstrap.py` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
+| `settings/app.py` | `app.settings` from `settings.json`, the `domino` block, and `public` settings read in the browser as `Domino.settings`. Run with `python examples/settings/app.py`; copy `settings.local.json.example` to `settings.local.json` to override locally |
 | `showcase.py` | A full landing page using the imperative style (`t.h1(parent, "text")`) and a contact form event |

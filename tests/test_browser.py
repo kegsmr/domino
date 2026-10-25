@@ -1,6 +1,7 @@
 """End-to-end tests of core.js in a real browser. Skipped when Playwright isn't installed."""
 
 import importlib.util
+import sys
 import threading
 import time
 from pathlib import Path
@@ -30,8 +31,14 @@ def serve():
 	servers = []
 
 	def start(name, patch=None):
-		spec = importlib.util.spec_from_file_location(f"example_{name}", EXAMPLES / f"{name}.py")
+		# Examples with their own folder keep their app in <name>/app.py
+		path = EXAMPLES / f"{name}.py"
+		if not path.exists():
+			path = EXAMPLES / name / "app.py"
+		spec = importlib.util.spec_from_file_location(f"example_{name}", path)
 		module = importlib.util.module_from_spec(spec)
+		# Flask finds the app's folder (for settings.json) through sys.modules
+		sys.modules[spec.name] = module
 		spec.loader.exec_module(module)
 		if patch:
 			patch(module)
@@ -163,4 +170,15 @@ def test_reactive_chat_updates_other_windows_and_keeps_their_typing(serve, brows
 
 	for window in windows:
 		window.close()
+
+
+def test_public_settings_reach_the_browser(serve, page):
+
+	page.goto(serve("settings"))
+
+	settings = page.evaluate("() => window.Domino.settings")
+	assert settings == {"greeting": "Hello from settings.json", "theme_color": "#2a6fdb"}
+	assert page.locator("#greeting").inner_text() == "Hello from settings.json"
+	assert page.locator("h1").inner_text() == "Settings example"
+	assert page.errors == []
 

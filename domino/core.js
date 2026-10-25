@@ -13,6 +13,10 @@ window.Domino = (() => {
     // them, so a response that arrives late can't overwrite a newer one.
     const latest = new Map();
 
+    // The app's "public" settings. The server puts them in the page before this script.
+    const settingsTag = document.getElementById('domino-settings');
+    const settings = settingsTag ? JSON.parse(settingsTag.textContent) : {};
+
     function pageId() {
         const root = document.querySelector('[data-domino-page]');
         return root ? root.dataset.dominoPage : null;
@@ -260,5 +264,5 @@ window.Domino = (() => {
         openStream();
     });
 
-    return { listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen };
+    return { settings, listen, scheduleAfterEvents, triggerEvent, morph, bindEvents: listen };
 })();

@@ -1,0 +1,6 @@
+{
+    "secret_key": "change-me",
+    "public": {
+        "greeting": "Hello from settings.local.json"
+    }
+}
