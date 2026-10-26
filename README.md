@@ -1,6 +1,6 @@
 # Domino
 
-A Python web framework for live web apps, built on Flask. Write components with their logic in Python and their markup in HTML. Data updates every open page as it changes, and clicks show their result at once. There's no JavaScript to write.
+An experimental Python web framework for live web apps, built on Flask. Write components with their logic in Python and their markup in HTML. Data updates every open page as it changes, and clicks show their result at once. There's no JavaScript to write.
 
 **This project is a work-in-progress! Not all features are functional yet.**
 
