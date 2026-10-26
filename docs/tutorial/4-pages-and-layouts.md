@@ -26,4 +26,4 @@ And a second page, `pages/about.py`, is the page at `/about`:
 
 Click between Tasks and About: the page doesn't reload. Domino fetches the next page, swaps it in, keeping what stays the same (the navigation), and adds it to the history so back and forward work. There's nothing to set up and no client-side router; this docs site works the same way.
 
-More page files work the same: `pages/users/[id].py` is `/users/<id>`, its `page(id)` gets the id, and `pages/404.py` is shown for URLs no page serves. See [Pages & navigation](/guide/pages).
+More page files work the same: `pages/users/[id].py` is `/users/<id>`, its `page(id)` gets the id, and `pages/404.py` is shown for URLs no page serves. See [Pages & navigation](../guide/pages.md).

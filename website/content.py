@@ -1,6 +1,6 @@
-"""What the docs site holds, read once when the app starts: the guide, made from README.md's
-sections (the single source of the reference documentation), the tutorial's steps, the
-navigation and the search index."""
+"""What the docs site holds, read once when the app starts: the guide, made from the Markdown
+pages in guide/ (the reference documentation, readable on GitHub too), the tutorial's steps,
+the navigation and the search index."""
 
 import importlib
 import re
@@ -11,15 +11,18 @@ from pathlib import Path
 import markup
 
 
-DOCS = Path(__file__).resolve().parent
-ROOT = DOCS.parent
-README = ROOT / "README.md"
+SITE = Path(__file__).resolve().parent
+ROOT = SITE.parent
+DOCS = ROOT / "docs"
+GUIDE_FOLDER = DOCS / "guide"
+# The tutorial's text (docs/tutorial/<n>-<name>.md), and each step's complete app (tutorial/<n>-<name>/)
 TUTORIAL = DOCS / "tutorial"
+STEP_APPS = SITE / "tutorial"
 
-# A README section: "## Styles" or "### Server push", with its own text (not its subsections')
+# A section of a guide page: "## Styles" or "### Server push", with its own text (not its subsections')
 Section = namedtuple("Section", "title level slug text")
 
-# A guide page: its README sections, in order, and a sentence that introduces them
+# A guide page, guide/<slug>.md: "# Title", a sentence that introduces it, then its sections
 Topic = namedtuple("Topic", "slug title group lead sections")
 
 # A tutorial step, from tutorial/<slug>.md
@@ -29,37 +32,38 @@ Step = namedtuple("Step", "slug number title lead text")
 Entry = namedtuple("Entry", "title url context")
 
 
-GUIDE = [
-	Topic("installation", "Installation", "Start", "Install Domino and run the examples.", ["Install", "Run an example"]),
+# The guide's pages, in the order of the navigation, and the group each is in
+GUIDE_PAGES = [
+	("installation", "Start"),
 
-	Topic("components", "Components", "Guide", "Classes that render HTML, keep state and handle events.", ["Components", "Attributes"]),
-	Topic("state", "State", "Guide", "Values that re-render what shows them when they change.", ["State"]),
-	Topic("events", "Events", "Guide", "Clicks, typing and submits, handled in Python on the server.", ["Events", "Loading and errors"]),
-	Topic("devtools", "Developer tools", "Guide", "Error pages, the component inspector and the event log, while debugging.", ["Developer tools"]),
-	Topic("styles", "Styles", "Guide", "CSS on the component class, scoped to it and written once per page.", ["Styles"]),
-	Topic("tailwind", "Tailwind CSS", "Guide", "Tailwind classes anywhere, with nothing to install or build.", ["Tailwind CSS", "Your own theme", "Tailwind in production", "Caveats"]),
-	Topic("templates", "Templates", "Guide", "Markup in HTML, logic in Python: Domino templates, Jinja and template strings.", ["Templates", "Jinja or Domino?", "Template strings (Python 3.14)", "Jinja templates"]),
-	Topic("forms", "Forms", "Guide", "Fields declared once, checked in the browser and on the server.", ["Forms"]),
-	Topic("pages", "Pages & navigation", "Guide", "File-based routing, layouts, and page switches without reloading.", ["Pages", "Moving between pages"]),
-	Topic("reactive-data", "Reactive data & MongoDB", "Guide", "Collections that re-render every open page when they change.", ["Reactive data", "MongoDB"]),
-	Topic("server-push", "Server push", "Guide", "Update open pages from anywhere, without waiting for an event.", ["Server push"]),
-	Topic("instant-ui", "Instant UI", "Guide", "Clicks that show at once, even on a slow connection.", ["Instant updates", "Simulating a slow connection"]),
-	Topic("client-components", "Client components", "Guide", "Experimental: components that run in the browser, in Python.", ["Experimental: client components"]),
-	Topic("accounts", "Accounts", "Guide", "Sign-up, login, password reset and email verification, with GitHub and Google.", ["Accounts", "Password reset, email verification and changing the password", "GitHub and Google"]),
-	Topic("email", "Email", "Guide", "Sending email, printed while debugging and captured in tests.", ["Email"]),
-	Topic("uploads", "File uploads", "Guide", "File inputs whose files arrive in your handler.", ["File uploads"]),
+	("components", "Guide"),
+	("state", "Guide"),
+	("events", "Guide"),
+	("devtools", "Guide"),
+	("styles", "Guide"),
+	("tailwind", "Guide"),
+	("templates", "Guide"),
+	("forms", "Guide"),
+	("pages", "Guide"),
+	("reactive-data", "Guide"),
+	("server-push", "Guide"),
+	("instant-ui", "Guide"),
+	("client-components", "Guide"),
+	("accounts", "Guide"),
+	("email", "Guide"),
+	("uploads", "Guide"),
 
-	Topic("settings", "Settings", "Reference", "settings.json, local overrides and environment variables.", ["Settings"]),
-	Topic("testing", "Testing", "Reference", "Tests next to their page, in a simulated browser.", ["Testing your app", "MongoDB in tests"]),
-	Topic("deployment", "Deployment", "Reference", "Deploy with one command, and serve on every CPU core.", ["Deploying", "Serving in production"]),
-	Topic("cli", "Command line", "Reference", "domino create, run, serve, build and deploy.", ["Command line", "Hot reloading", "Development MongoDB"]),
-	Topic("how-it-works", "How it works", "Reference", "One WebSocket per tab, and the HTTP fallback.", ["How the browser talks to the server"]),
-	Topic("contributing", "Contributing", "Reference", "Run Domino's own tests, publish a release, and the license.", ["Tests", "Releasing", "License"]),
+	("settings", "Reference"),
+	("testing", "Reference"),
+	("deployment", "Reference"),
+	("cli", "Reference"),
+	("how-it-works", "Reference"),
+	("contributing", "Reference"),
 ]
 
 
 def read_sections(text):
-	"""README.md's "##" and "###" sections, in order, each with its own text."""
+	"""A page's "##" and "###" sections, in order, each with its own text."""
 
 	sections = []
 	title = level = None
@@ -85,29 +89,57 @@ def read_sections(text):
 	return sections
 
 
-SECTIONS = {section.title: section for section in read_sections(README.read_text(encoding="utf-8"))}
+def read_topic(slug, group):
+	"""guide/<slug>.md as a Topic, and its sections. The text before its first "##" is the
+	section named like the page."""
+
+	text = (GUIDE_FOLDER / f"{slug}.md").read_text(encoding="utf-8")
+	match = re.match(r"# (.+)\n+(.+?)\n\n", text)
+	if match is None:
+		raise ValueError(f"guide/{slug}.md starts with \"# Title\", then a sentence that introduces the page")
+	title, lead = match.group(1).strip(), match.group(2).strip()
+	sections = read_sections(f"## {title}\n\n{text[match.end():]}")
+
+	return Topic(slug, title, group, lead, [section.title for section in sections]), sections
+
+
+GUIDE = []
+SECTIONS = {}
+for _slug, _group in GUIDE_PAGES:
+	_topic, _sections = read_topic(_slug, _group)
+	GUIDE.append(_topic)
+	for _section in _sections:
+		if _section.title in SECTIONS:
+			raise ValueError(f"Two guide sections are called {_section.title!r}; their links would clash")
+		SECTIONS[_section.title] = _section
 TOPICS = {topic.slug: topic for topic in GUIDE}
 
-# Each README anchor's guide page, so README links (#testing-your-app) lead to it
+# Each section's guide page, so links to a section (#testing-your-app) lead to it
 ANCHORS = {SECTIONS[title].slug: topic.slug for topic in GUIDE for title in topic.sections}
 
 
 def guide_link(href):
-	"""A link in README.md, as it should be in the docs."""
+	"""A link in a guide page, as it should be on the site: another page's section
+	(testing.md#mongodb-in-tests), a section (#testing-your-app), or a file of the repository
+	(../../examples/counter/), shown on GitHub."""
+
+	page = re.match(r"^([a-z0-9-]+)\.md(#.*)?$", href)
+	if page and page.group(1) in TOPICS:
+		return f"/guide/{page.group(1)}{page.group(2) or ''}"
 
 	if href.startswith("#"):
 		topic = ANCHORS.get(href[1:])
 		return f"/guide/{topic}{href}" if topic else href
 
-	# A file of the repository (examples/counter/...), shown on GitHub
 	if not re.match(r"^[a-z]+:|^/", href):
-		return markup.repository_link(href)
+		path = href[len("../../"):] if href.startswith("../../") else f"docs/guide/{href}"
+		return markup.repository_link(path)
 
 	return href
 
 
 def topic_parts(topic):
-	"""A guide page's content, its README sections rendered: ("html", Markup) and ("code",
+	"""A guide page's content, its sections rendered: ("html", Markup) and ("code",
 	language, source) parts. Each section is headed by its title, but for the one named like
 	the page, whose title is the page's."""
 
@@ -144,6 +176,19 @@ STEPS = [read_step(path) for path in sorted(TUTORIAL.glob("*.md"), key=lambda pa
 STEP_SLUGS = {step.slug: step for step in STEPS}
 
 
+def step_link(href):
+	"""A link in a tutorial step, as it should be on the site: a guide page
+	(../guide/testing.md#mongodb-in-tests) or the guide's index (../README.md)."""
+
+	if href == "../README.md":
+		return "/guide"
+
+	if href.startswith("../guide/"):
+		return guide_link(href[len("../guide/"):])
+
+	return href
+
+
 def step_parts(step):
 	"""A step's content: ("html", Markup), ("code", language, source), ("file", path) and
 	("demo", folder) parts, in order."""
@@ -151,7 +196,7 @@ def step_parts(step):
 	parts = []
 	pieces = DIRECTIVE.split(step.text)
 	for index in range(0, len(pieces), 3):
-		parts.extend(markup.render(pieces[index]))
+		parts.extend(markup.render(pieces[index], step_link))
 		if index + 2 < len(pieces):
 			parts.append((pieces[index + 1], pieces[index + 2]))
 
@@ -181,7 +226,7 @@ def step_component(folder, name="components.tasks", cls="Tasks"):
 		return module.split(".")[0] in STEP_MODULES
 
 	saved = {module: sys.modules.pop(module) for module in list(sys.modules) if ours(module)}
-	path = str(TUTORIAL / folder)
+	path = str(STEP_APPS / folder)
 	sys.path.insert(0, path)
 	try:
 		importlib.invalidate_caches()

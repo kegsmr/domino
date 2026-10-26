@@ -10,7 +10,7 @@ Add a `css` attribute to `Tasks`. It's written like CSS, as a dict: property nam
 
 Domino scopes these rules to the component's class name. `"li"` becomes `.Tasks li`, `"input[name=text]"` becomes `.Tasks input[name=text]`, and plain properties at the top (`max_width`) style the component itself. The CSS goes into the page's `<head>` once, however many `Tasks` the page shows, and when a component first appears in an event's response its CSS comes along with it.
 
-Keys starting with `:` attach to the selector around them (`":hover"`), `&` stands for it (`"& + &"`), and `@media` blocks hold the same kind of rules. The [Styles](/guide/styles) guide has the details.
+Keys starting with `:` attach to the selector around them (`":hover"`), `&` stands for it (`"& + &"`), and `@media` blocks hold the same kind of rules. The [Styles](../guide/styles.md) guide has the details.
 
 ## A theme
 

@@ -1,11 +1,17 @@
+import re
+
 from setuptools import setup
+
+
+# The README, its links to the repository's files made absolute so they work on PyPI too
+README = re.sub(r"\]\((?!https?:|#)([^)]+)\)", r"](https://github.com/kegsmr/domino/blob/main/\1)", open("README.md", encoding="utf-8").read())
 
 
 setup(
 	name="domino-web",
 	version="0.3.0",
 	description="An experimental Python web framework built on Flask",
-	long_description=open("README.md", encoding="utf-8").read(),
+	long_description=README,
 	long_description_content_type="text/markdown",
 	author="kegsmr",
 	url="https://github.com/kegsmr/domino",
