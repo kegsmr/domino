@@ -1,6 +1,6 @@
 # Domino
 
-An experimental Python web framework built on Flask. It currently resembles a glorified HTML/CSS generator, but more features are planned.
+A Python web framework for live web apps, built on Flask: components with their logic in Python and their markup in HTML, data that updates every open page as it changes (from MongoDB, like Meteor), and clicks that show their result at once, with no JavaScript to write.
 
 **This project is a work-in-progress! Not all features are functional yet.**
 
@@ -8,10 +8,29 @@ An experimental Python web framework built on Flask. It currently resembles a gl
 
 ## Install
 
-The distribution is named `domino-web`; the import name is `domino`.
+The distribution is named `domino-web`; the import name is `domino`. It needs Python 3.9 or newer, on Linux, macOS or Windows.
 
 ```
-pip install -e .
+pip install domino-web
+```
+
+Then make an app and run it:
+
+```
+domino create myapp
+cd myapp
+domino run
+```
+
+Open http://127.0.0.1:5000. The first run downloads a MongoDB for development (see [Development MongoDB](#development-mongodb)); later runs start at once.
+
+- If `domino` isn't found after installing (common with the Microsoft Store's Python on Windows), use `python -m domino` instead: `python -m domino run`.
+- To work on Domino itself, install it from a clone instead: `pip install -e .[test]`.
+
+**`CERTIFICATE_VERIFY_FAILED` on macOS.** Python from python.org can't verify HTTPS sites (such as the MongoDB download) until its certificates are installed. Run this once per Python version, then try again:
+
+```
+open "/Applications/Python 3.9/Install Certificates.command"
 ```
 
 ## Run an example
@@ -210,6 +229,7 @@ Like `meteor run`, running an app in debug mode starts a local MongoDB for it, u
 - The URL, `mongodb://127.0.0.1:5001/<app folder name>?replicaSet=rs0&directConnection=true`, is put in `app.settings.mongo.url` and the `DOMINO_MONGO__URL` environment variable before the server starts, so the reloader's process uses the same database.
 - `mongod` stops when the app does (Ctrl+C, or the process being terminated). On Linux it also stops if the app is killed. A second `domino run` of the same app reuses the running `mongod`, and a lock left by one that crashed is cleared.
 - To turn it off, pass `--no-mongo`, set `DOMINO_NO_MONGO=1`, or set `{"mongo": {"auto": false}}` in `settings.json`.
+- If the download fails (offline, or a proxy blocks mongodb.org), point `mongo.url` at a MongoDB you run instead, or turn it off. For a certificate error on macOS, see [Install](#install).
 
 In production, point the app at your database with the `mongo.url` setting, usually from the environment: `DOMINO_MONGO__URL=mongodb://...`. Without debug mode nothing is downloaded or started.
 
