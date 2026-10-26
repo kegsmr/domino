@@ -1,36 +1,52 @@
-# Domino's documentation site
+# Documentation
 
-The docs are a Domino app: a home page with a live demo, a tutorial whose steps are real apps running on the page, and a guide made from the repository's [README.md](../README.md).
+Domino's documentation, as markdown. The same pages make up the documentation website (`python website/app.py`).
 
-## Run it
+## Tutorial
 
-From the repository root, with Domino's dependencies installed (`pip install -e .`) and the two the docs add:
+Build an app step by step:
 
-```
-pip install -r docs/requirements.txt
-python docs/app.py
-```
+1. [Your first page](tutorial/1-first-page.md)
+2. [Events and forms](tutorial/2-events-and-forms.md)
+3. [Styles](tutorial/3-styles.md)
+4. [Pages and layouts](tutorial/4-pages-and-layouts.md)
+5. [Reactive data](tutorial/5-reactive-data.md)
+6. [Accounts](tutorial/6-accounts.md)
+7. [Testing](tutorial/7-testing.md)
+8. [Deploying](tutorial/8-deploying.md)
 
-Then open http://127.0.0.1:5000. It runs in debug mode and restarts when you change a file. To serve it in production, on every CPU core:
+## Start
 
-```
-domino serve docs --host 0.0.0.0 --port 8000
-```
+- [Installation](guide/installation.md): Install Domino and run the examples.
 
-The docs need no MongoDB (`settings.json` turns the development one off).
+## Guide
 
-## How it's made
+- [Components](guide/components.md): Classes that render HTML, keep state and handle events.
+- [State](guide/state.md): Values that re-render what shows them when they change.
+- [Events](guide/events.md): Clicks, typing and submits, handled in Python on the server.
+- [Developer tools](guide/devtools.md): Error pages, the component inspector and the event log, while debugging.
+- [Styles](guide/styles.md): CSS on the component class, scoped to it and written once per page.
+- [Tailwind CSS](guide/tailwind.md): Tailwind classes anywhere, with nothing to install or build.
+- [Templates](guide/templates.md): Markup in HTML, logic in Python: Domino templates, Jinja and template strings.
+- [Forms](guide/forms.md): Fields declared once, checked in the browser and on the server.
+- [Pages & navigation](guide/pages.md): File-based routing, layouts, and page switches without reloading.
+- [Reactive data & MongoDB](guide/reactive-data.md): Collections that re-render every open page when they change.
+- [Server push](guide/server-push.md): Update open pages from anywhere, without waiting for an event.
+- [Instant UI](guide/instant-ui.md): Clicks that show at once, even on a slow connection.
+- [Client components](guide/client-components.md): Experimental: components that run in the browser, in Python.
+- [Accounts](guide/accounts.md): Sign-up, login, password reset and email verification, with GitHub and Google.
+- [Email](guide/email.md): Sending email, printed while debugging and captured in tests.
+- [File uploads](guide/uploads.md): File inputs whose files arrive in your handler.
 
-- `pages/` holds the pages (`pages/guide/[topic].py` is `/guide/<topic>`, `pages/tutorial/[step].py` is `/tutorial/<step>`), `pages/layout.py` the top bar, sidebar, theme and the small script for the copy buttons, the theme button and the `/` shortcut. The components (`components/`) style themselves with class-level `css`.
-- **The guide is README.md.** `content.py` splits README.md into its `##` and `###` sections when the app starts, and `GUIDE` lists which sections each guide page shows. README links (`#testing-your-app`) are pointed at the guide page that has the section, and links to files at GitHub. A test checks that every README section is on some page, so a new section needs a line in `GUIDE`. Change the docs by changing README.md.
-- **The tutorial** is `tutorial/<n>-<name>.md`, Markdown whose lines `{{ file: 3-styles/components/tasks.py }}` show that file and `{{ demo: 3-styles }}` run that step's `Tasks` component on the page. Each `tutorial/<n>-<name>/` folder is the complete app at that step; run one with `domino run --no-mongo docs/tutorial/3-styles`.
-- The search (`components/search.py`) looks through page titles and headings on the server as you type.
+## Reference
 
-## Tests
+- [Settings](guide/settings.md): settings.json, local overrides and environment variables.
+- [Testing](guide/testing.md): Tests next to their page, in a simulated browser.
+- [Deployment](guide/deployment.md): Deploy with one command, and serve on every CPU core.
+- [Command line](guide/cli.md): domino create, run, serve, build and deploy.
+- [How it works](guide/how-it-works.md): One WebSocket per tab, and the HTTP fallback.
+- [Contributing](guide/contributing.md): Run Domino's own tests, publish a release, and the license.
 
-They run with the rest of the suite (`python -m pytest` from the repository root), or on their own with `python -m pytest docs`:
+## Research
 
-- `pages/*_test.py`, next to each page, drive it in Domino's simulated browser: every page renders and is marked in the sidebar, the search finds things, the demos work, dark mode and the menu button.
-- `tutorial/tutorial_test.py` runs every step's app, checks that every file of those apps is shown in the tutorial (or unchanged from an earlier step) and that the commands it shows are ones `domino` accepts. `tutorial/7-testing/pages/index_test.py` is the tutorial's own test file, run like any page test.
-
-Without Markdown and Pygments installed, the docs' tests are skipped (see `conftest.py`).
+- [Python in the browser](research/client-python.md): what client components can do, measured.

@@ -31,8 +31,8 @@ def page(step):
 		kind, path = part
 		if kind == "file":
 			_, _, name = path.partition("/")
-			source = (content.TUTORIAL / path).read_text(encoding="utf-8").rstrip("\n")
-			language = LANGUAGES.get((content.TUTORIAL / path).suffix, "")
+			source = (content.STEP_APPS / path).read_text(encoding="utf-8").rstrip("\n")
+			language = LANGUAGES.get((content.STEP_APPS / path).suffix, "")
 			return Code(source, language, caption=name)
 
 		component = content.step_component(path)

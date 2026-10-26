@@ -12,8 +12,9 @@ from domino.cli import build_parser
 from domino.pytest_plugin import load_app
 
 
+# Each step's complete app is here; its text is docs/tutorial/<n>-<name>.md
 TUTORIAL = Path(__file__).resolve().parent
-STEPS = sorted(TUTORIAL.glob("*.md"), key=lambda path: int(path.stem.split("-")[0]))
+STEPS = sorted((TUTORIAL.parents[1] / "docs" / "tutorial").glob("*.md"), key=lambda path: int(path.stem.split("-")[0]))
 DIRECTIVE = re.compile(r"^\{\{\s*(file|demo):\s*(\S+)\s*\}\}\s*$", re.M)
 FENCE = re.compile(r"^```(\w*)\n(.*?)^```", re.M | re.S)
 

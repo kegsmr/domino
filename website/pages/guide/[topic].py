@@ -8,7 +8,7 @@ from components.prose import blocks
 from components.shell import Toc
 
 
-# /guide/<topic>: a page of the guide, made from README.md's sections when the app starts
+# /guide/<topic>: a page of the guide, made from docs/guide/<topic>.md when the app starts
 def page(topic):
 
 	topic = content.TOPICS.get(topic)
@@ -16,7 +16,7 @@ def page(topic):
 		abort(404)
 
 	headings = [(title, markup.slug(title)) for title in content.topic_headings(topic)]
-	source = f"{markup.REPOSITORY}/blob/main/README.md#{content.SECTIONS[topic.sections[0]].slug}"
+	source = f"{markup.REPOSITORY}/blob/main/docs/guide/{topic.slug}.md"
 
 	return t.div(class_="doc") [
 		t.article()([
@@ -32,7 +32,7 @@ def page(topic):
 		] + blocks(content.topic_parts(topic)) + [
 			t.p(class_="source") [
 				t.a(href=source) [
-					"This page is made from README.md: edit it on GitHub"
+					"Edit this page on GitHub (docs/guide/" + topic.slug + ".md)"
 				]
 			]
 		]),

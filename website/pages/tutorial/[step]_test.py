@@ -22,13 +22,24 @@ def test_every_step_renders(open_page):
 		assert [link.text for link in page.find_all(".Toc a")] == content.step_headings(step)
 
 
+def test_links_to_the_guide_go_to_its_pages(open_page):
+
+	# The step's markdown links to ../guide/instant-ui.md, so it works on GitHub too
+	page = open_page(step="2-events-and-forms")
+	assert page.find("a", text="Instant UI").attrs["href"] == "/guide/instant-ui"
+
+	page = open_page(step="8-deploying")
+	assert page.find("a", text="guide").attrs["href"] == "/guide"
+	assert page.find("a", text="Components").attrs["href"] == "/guide/components"
+
+
 def test_steps_show_the_files_of_their_app(open_page):
 
 	page = open_page(step="1-first-page")
 	shown = {inside(code, "figcaption").text: inside(code, "pre").text for code in page.find_all(".Code") if inside(code, "figcaption")}
 
 	for name in ("pages/index.py", "components/tasks.py"):
-		source = (content.TUTORIAL / "1-first-page" / name).read_text(encoding="utf-8")
+		source = (content.STEP_APPS / "1-first-page" / name).read_text(encoding="utf-8")
 		assert shown[f"{name} Copy"] == " ".join(source.split())
 
 

@@ -13,7 +13,7 @@ def test_home_page(page):
 
 def test_the_example_is_the_component_running_next_to_it(page):
 
-	source = (content.DOCS / "components" / "counter.py").read_text(encoding="utf-8")
+	source = (content.SITE / "components" / "counter.py").read_text(encoding="utf-8")
 
 	assert page.find(".Example .Code figcaption").text.startswith("components/counter.py")
 	assert page.text(".Example .Code pre") == " ".join(source.split())
