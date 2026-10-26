@@ -22,6 +22,7 @@ from pathlib import Path
 from flask import Response, abort, current_app, has_app_context, request, send_file
 
 from .devmongo import copy_with_progress, die_with_parent, domino_home, file_lock, log
+from .util import download_problem, urlopen
 
 
 DEFAULT_VERSION = "4.3.3"
@@ -186,7 +187,7 @@ def download(version, path):
 		path.parent.mkdir(parents=True, exist_ok=True)
 		handle, temp = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".part")
 		try:
-			with os.fdopen(handle, "wb") as out, urllib.request.urlopen(url, timeout=60) as response:
+			with os.fdopen(handle, "wb") as out, urlopen(url, timeout=60) as response:
 				digest = copy_with_progress(response, out, int(response.headers.get("Content-Length") or 0), "sha256", "Tailwind CSS")
 
 			if digest != expected:
@@ -203,7 +204,7 @@ def download(version, path):
 			raise TailwindError(f"No Tailwind CSS {version} release with {asset} at {RELEASES_URL} (HTTP 404); check the setting tailwind.version") from None
 		raise TailwindError(offline(version, asset, path, f"HTTP {error.code}")) from None
 	except (urllib.error.URLError, OSError) as error:
-		raise TailwindError(offline(version, asset, path, getattr(error, "reason", None) or error)) from None
+		raise TailwindError(offline(version, asset, path, download_problem(error))) from None
 
 
 def offline(version, asset, path, reason):
@@ -216,7 +217,7 @@ def offline(version, asset, path, reason):
 
 def fetch(url):
 
-	with urllib.request.urlopen(url, timeout=60) as response:
+	with urlopen(url, timeout=60) as response:
 		return response.read()
 
 

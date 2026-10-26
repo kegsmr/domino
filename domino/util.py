@@ -1,4 +1,7 @@
 import inspect
+import ssl
+import urllib.error
+import urllib.request
 from urllib.parse import urlsplit
 
 
@@ -62,3 +65,35 @@ def is_local_url(url):
 	parts = urlsplit(url)
 
 	return not parts.scheme and not parts.netloc
+
+
+def urlopen(url, timeout=60):
+	"""urllib.request.urlopen for Domino's downloads (MongoDB, Tailwind CSS, ...), which also trusts
+	certifi's certificates when the system's don't verify the site: Python from python.org on
+	macOS has none until its "Install Certificates" script is run, and Windows may lack one."""
+
+	try:
+		return urllib.request.urlopen(url, timeout=timeout)
+	except urllib.error.URLError as error:
+		if not isinstance(error.reason, ssl.SSLCertVerificationError):
+			raise
+		try:
+			import certifi
+		except ImportError:
+			raise error from None
+		context = ssl.create_default_context(cafile=certifi.where())
+		return urllib.request.urlopen(url, timeout=timeout, context=context)
+
+
+def download_problem(error):
+	"""Why a download failed, in words, with what to do about a certificate problem."""
+
+	reason = getattr(error, "reason", None) or error
+	if isinstance(reason, ssl.SSLCertVerificationError):
+		return (
+			f"{reason}. Python can't check the site's certificate: with Python from python.org on macOS, "
+			"run \"Install Certificates.command\" in its Applications folder (or pip install --upgrade certifi)"
+		)
+
+	return str(reason)
+
