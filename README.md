@@ -75,9 +75,9 @@ import domino.tags as t
 
 def page(id):
 
-	return t.h1() [
-		f"User {id}"
-	]
+    return t.h1() [
+        f"User {id}"
+    ]
 ```
 
 A page can also be a component class named `Page`. Each visit gets a new one, and the URL's parameters are passed to its `init(self, ...)`:
@@ -90,21 +90,21 @@ import domino.tags as t
 
 class Page(t.div):
 
-	count = State(0)
+    count = State(0)
 
 
-	def render(self):
+    def render(self):
 
-		return [
-			t.button(on_click=self.increment) [
-				f"Clicked {self.count} times"
-			]
-		]
+        return [
+            t.button(on_click=self.increment) [
+                f"Clicked {self.count} times"
+            ]
+        ]
 
 
-	def increment(self):
+    def increment(self):
 
-		self.count += 1
+        self.count += 1
 ```
 
 A layout is the document and navigation pages share. It's a file of its own, by convention in `layouts/`: `<layout name="Main">` around a whole `<html>` document, with `<slot />` where the page goes. A page names its layout, and its other attributes are the layout's values:
@@ -112,26 +112,26 @@ A layout is the document and navigation pages share. It's a file of its own, by 
 ```html
 <!-- layouts/main.html -->
 <layout name="Main">
-	<html lang="en">
-		<head>
-			<title>{{ title }} · My site</title>
-		</head>
-		<body>
-			<nav>
-				<a href="/">Home</a>
-				<a href="/about">About</a>
-			</nav>
-			<main><slot /></main>
-		</body>
-	</html>
+    <html lang="en">
+        <head>
+            <title>{{ title }} · My site</title>
+        </head>
+        <body>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/about">About</a>
+            </nav>
+            <main><slot /></main>
+        </body>
+    </html>
 </layout>
 ```
 
 ```html
 <!-- pages/about.html -->
 <page layout="Main" title="About">
-	<h1>About</h1>
-	<p>...</p>
+    <h1>About</h1>
+    <p>...</p>
 </page>
 ```
 
@@ -152,13 +152,13 @@ from domino.components import Document
 
 def layout(content):
 
-	return Document(title="My site") [
-		t.nav() [
-			t.a(href="/") ["Home"],
-			t.a(href="/about") ["About"]
-		],
-		content
-	]
+    return Document(title="My site") [
+        t.nav() [
+            t.a(href="/") ["Home"],
+            t.a(href="/about") ["About"]
+        ],
+        content
+    ]
 ```
 
 - A page that returns a whole document (a `Document`, or any `t.html`) or a Flask response is used as it is, without layouts.
@@ -250,14 +250,14 @@ A component declares its styles on the class, with `css`. They are scoped to its
 ```python
 class Card(t.div):
 
-	css = {
-		"padding": "1rem",                              # .Card
-		"background": "var(--surface)",
-		"h3": {"margin": 0},                            # .Card h3
-		":hover": {"box_shadow": "0 2px 8px #0002"},    # .Card:hover
-		"& + &": {"margin_top": "1rem"},                # .Card + .Card
-		"@media (max-width: 600px)": {"padding": ".5rem"},
-	}
+    css = {
+        "padding": "1rem",                              # .Card
+        "background": "var(--surface)",
+        "h3": {"margin": 0},                            # .Card h3
+        ":hover": {"box_shadow": "0 2px 8px #0002"},    # .Card:hover
+        "& + &": {"margin_top": "1rem"},                # .Card + .Card
+        "@media (max-width: 600px)": {"padding": ".5rem"},
+    }
 ```
 
 - Property names are written with underscores (`font_size`); `__accent` (or `"--accent"`) is the CSS variable `--accent`. Values are written as given (no units are added), and `None` leaves a property out.
@@ -291,7 +291,7 @@ Turn it on with one setting, and write [Tailwind](https://tailwindcss.com) class
 
 ```python
 t.div(class_="rounded-xl bg-white p-6 shadow-sm dark:bg-slate-900") [
-	t.h2(class_="text-lg font-semibold") ["Hello"]
+    t.h2(class_="text-lg font-semibold") ["Hello"]
 ]
 ```
 
@@ -310,8 +310,8 @@ Tailwind v4 is configured in CSS. Without a `tailwind.css`, Domino makes one in 
 @source not ".domino";      /* unless .gitignore lists .domino/ */
 
 @theme {
-	--color-brand: #ff6a00;
-	--font-display: "Inter", sans-serif;
+    --color-brand: #ff6a00;
+    --font-display: "Inter", sans-serif;
 }
 ```
 
@@ -346,19 +346,19 @@ import domino.tags as t
 
 class Counter(t.div):
 
-	count = State(0)  # per component, like React's useState
+    count = State(0)  # per component, like React's useState
 
 
-	def increment(self):
+    def increment(self):
 
-		self.count += 1
+        self.count += 1
 ```
 
 ```html
 <!-- components/counter.html -->
 <Counter>
-	<p>Count: {{ count }}</p>
-	<button on-click="increment">+</button>
+    <p>Count: {{ count }}</p>
+    <button on-click="increment">+</button>
 </Counter>
 ```
 
@@ -367,15 +367,15 @@ Changing state re-renders the component, and only what changed is updated in the
 ```python
 class Tasks(t.div):
 
-	items = State([])
+    items = State([])
 
 
-	def render(self):
+    def render(self):
 
-		if not self.items:
-			return [TaskForm(on_add=self.add), EmptyState()]
+        if not self.items:
+            return [TaskForm(on_add=self.add), EmptyState()]
 
-		return [TaskForm(on_add=self.add), TaskList(items=self.items)]
+        return [TaskForm(on_add=self.add), TaskList(items=self.items)]
 ```
 
 See [Templates](#templates) for the template syntax. Components can also be written entirely in Python, with tag classes, which suits small pieces and generated markup:
@@ -387,20 +387,20 @@ import domino.tags as t
 
 class Counter(t.div):
 
-	count = State(0)  # per component, like React's useState
+    count = State(0)  # per component, like React's useState
 
 
-	def render(self):
+    def render(self):
 
-		return [
-			t.p() [f"Count: {self.count}"],
-			t.button(on_click=self.increment) ["+"],
-		]
+        return [
+            t.p() [f"Count: {self.count}"],
+            t.button(on_click=self.increment) ["+"],
+        ]
 
 
-	def increment(self):
+    def increment(self):
 
-		self.count += 1
+        self.count += 1
 ```
 
 - `on_<event>=handler` (`on_click`, `on_submit`, `on_input`, `on_change`, ...) runs `handler` on the server. Add `debounce=ms` to wait until the user pauses.
@@ -425,23 +425,23 @@ Domino templates are plain HTML with three additions: components are capitalized
 ```html
 <!-- components/todos.html -->
 <component name="TodoList" class="todos">
-	<ul>
-		{{ for index, item in enumerate(items) }}
-		<li class="{{ item_class(item) }}">
-			<input type="checkbox" checked="{{ item.done }}" on-change="toggle(index)">
-			{{ item.text }}
-			<button on-click="remove(index)" aria-label="Remove">×</button>
-		</li>
-		{{ else }}
-		<li>Nothing to do!</li>
-		{{ /for }}
-	</ul>
-	{{ if remaining }}
-	<p>{{ remaining }} left</p>
-	{{ else }}
-	<p>All done.</p>
-	{{ /if }}
-	<Card heading="Tips"><p>Click an item to finish it.</p></Card>
+    <ul>
+        {{ for index, item in enumerate(items) }}
+        <li class="{{ item_class(item) }}">
+            <input type="checkbox" checked="{{ item.done }}" on-change="toggle(index)">
+            {{ item.text }}
+            <button on-click="remove(index)" aria-label="Remove">×</button>
+        </li>
+        {{ else }}
+        <li>Nothing to do!</li>
+        {{ /for }}
+    </ul>
+    {{ if remaining }}
+    <p>{{ remaining }} left</p>
+    {{ else }}
+    <p>All done.</p>
+    {{ /if }}
+    <Card heading="Tips"><p>Click an item to finish it.</p></Card>
 </component>
 ```
 
@@ -449,27 +449,27 @@ Domino templates are plain HTML with three additions: components are capitalized
 # components/todos.py
 class TodoList(t.div):
 
-	items = State([])
+    items = State([])
 
 
-	def remaining(self):                     # a helper: {{ remaining }} calls it
+    def remaining(self):                     # a helper: {{ remaining }} calls it
 
-		return sum(1 for item in self.items if not item["done"])
-
-
-	def item_class(self, item):              # in class, a string, a list or {class: bool}
-
-		return {"done": item["done"]}
+        return sum(1 for item in self.items if not item["done"])
 
 
-	def toggle(self, index):
+    def item_class(self, item):              # in class, a string, a list or {class: bool}
 
-		...
+        return {"done": item["done"]}
 
 
-	def remove(self, index):
+    def toggle(self, index):
 
-		self.items = self.items[:index] + self.items[index + 1:]
+        ...
+
+
+    def remove(self, index):
+
+        self.items = self.items[:index] + self.items[index + 1:]
 ```
 
 **Defining a component.** `<component name="TodoList">...</component>` holds the markup of the component of that class (the class still makes the outer element, here a `<div>`). Every file says what it holds: `<component>` definitions, a `<layout>` or a `<page>`; lowercase tags define, capitalized tags use. Attributes on `<component>` go on the component's element, after what the Python side sets (`class` adds up, other attributes the Python side set win); `as="aside"` makes the element an `<aside>` instead (a class that sets its own `tag` must agree). A file can define several components, Meteor-style, and holds nothing but definitions.
@@ -514,22 +514,22 @@ import domino.tags as t
 
 class Counter(t.div):
 
-	count = State(0)
-	items = State(["a", "b"])
+    count = State(0)
+    items = State(["a", "b"])
 
 
-	def render(self):
+    def render(self):
 
-		return html(t"""
-			<p>Count: {self.count}</p>
-			<button on_click={self.increment}>+</button>
-			<ul>{[html(t"<li>{item}</li>") for item in self.items]}</ul>
-		""")
+        return html(t"""
+            <p>Count: {self.count}</p>
+            <button on_click={self.increment}>+</button>
+            <ul>{[html(t"<li>{item}</li>") for item in self.items]}</ul>
+        """)
 
 
-	def increment(self):
+    def increment(self):
 
-		self.count += 1
+        self.count += 1
 ```
 
 - As text, `{value}` is escaped; an element, or a list of elements and text, becomes children; `None` and `False` render nothing; `Markup` is inserted as it is. Inside `<script>` values are inserted as JSON.
@@ -553,13 +553,13 @@ Flask's Jinja templates suit layouts and mostly static pages. Domino finds `.htm
 # pages/index.py
 def page():
 
-	return template("home.html", title="Home", Counter=Counter)
+    return template("home.html", title="Home", Counter=Counter)
 ```
 
 ```html
 <body>
-	<h1>{{ title }}</h1>
-	{{ component(Counter) }}
+    <h1>{{ title }}</h1>
+    {{ component(Counter) }}
 </body>
 ```
 
@@ -569,12 +569,12 @@ Components can have Jinja templates too, the older way: a component without a `r
 # components/counter.py
 class Counter(t.div):
 
-	count = State(0)
+    count = State(0)
 
 
-	def increment(self):
+    def increment(self):
 
-		self.count += 1
+        self.count += 1
 ```
 
 ```html
@@ -639,25 +639,25 @@ A file input works like any other field: its files arrive in the handler as `eve
 ```python
 class Avatar(t.div):
 
-	def render(self):
-		return [
-			t.form(on_submit=self.save) [
-				t.input(type="file", name="photo", accept="image/*"),
-				t.input(type="file", name="extras", multiple=True),
-				t.button() ["Upload"],
-			],
-			t.input(type="file", name="quick", on_change=self.quick),  # uploads as soon as a file is picked
-		]
+    def render(self):
+        return [
+            t.form(on_submit=self.save) [
+                t.input(type="file", name="photo", accept="image/*"),
+                t.input(type="file", name="extras", multiple=True),
+                t.button() ["Upload"],
+            ],
+            t.input(type="file", name="quick", on_change=self.quick),  # uploads as soon as a file is picked
+        ]
 
-	def save(self, event):
-		photo = event.files["photo"]                 # or event.files.get("photo"), None if none was picked
-		photo.filename, photo.content_type, photo.size
-		photo.save(path)                             # or photo.read(), photo.stream
-		for file in event.files.getlist("extras"):   # a multiple input
-			...
+    def save(self, event):
+        photo = event.files["photo"]                 # or event.files.get("photo"), None if none was picked
+        photo.filename, photo.content_type, photo.size
+        photo.save(path)                             # or photo.read(), photo.stream
+        for file in event.files.getlist("extras"):   # a multiple input
+            ...
 
-	def quick(self, event):
-		file = event.files["quick"]
+    def quick(self, event):
+        file = event.files["quick"]
 ```
 
 - A form's submit sends the files of every file input in it; a file input's own event (`on_change=`) sends its files. Other events (a click inside the form) send none. A file input without a `name` sends its own files as `"file"`.
@@ -671,11 +671,11 @@ While its files go up, the element that fired (and its form) has `data-uploading
 
 ```python
 css = {
-	"form[data-uploading]::after": {
-		"content": "''", "display": "block", "height": "6px", "background": "#2a7",
-		"width": "calc(var(--domino-upload-progress) * 100%)",
-	},
-	"form[data-uploading]::before": {"content": "'Uploading ' attr(data-uploading) '%'"},
+    "form[data-uploading]::after": {
+        "content": "''", "display": "block", "height": "6px", "background": "#2a7",
+        "width": "calc(var(--domino-upload-progress) * 100%)",
+    },
+    "form[data-uploading]::before": {"content": "'Uploading ' attr(data-uploading) '%'"},
 }
 ```
 
@@ -697,11 +697,11 @@ online = State(0)
 
 class Chat(t.ul):
 
-	def render(self):
-		return [t.li() [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)]
+    def render(self):
+        return [t.li() [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)]
 
-	def send(self, event):
-		messages.insert({"text": event.form["text"], "sent": time.time()})  # every Chat updates
+    def send(self, event):
+        messages.insert({"text": event.form["text"], "sent": time.time()})  # every Chat updates
 ```
 
 - `State(value)`: `.value` reads (and subscribes), `.value = x` changes it.
@@ -726,26 +726,26 @@ from domino import forms
 
 class Signup(forms.Form):
 
-	name = forms.Text("Name", required=True, max_length=50)
-	email = forms.Email("Email", required=True, live=True)
-	age = forms.Integer("Age", min=13, max=120)
-	plan = forms.Choice(["Hobby", "Pro", "Team"], default="Hobby")
-	newsletter = forms.Checkbox("Send me news")
-	password = forms.Password(required=True, min_length=8)
-	confirm = forms.Password("Confirm password", required=True)
+    name = forms.Text("Name", required=True, max_length=50)
+    email = forms.Email("Email", required=True, live=True)
+    age = forms.Integer("Age", min=13, max=120)
+    plan = forms.Choice(["Hobby", "Pro", "Team"], default="Hobby")
+    newsletter = forms.Checkbox("Send me news")
+    password = forms.Password(required=True, min_length=8)
+    confirm = forms.Password("Confirm password", required=True)
 
-	submit_text = "Create account"
+    submit_text = "Create account"
 
-	def validate_email(self, email):                 # one field, on the server
-		if users.find_one({"email": email}):
-			return "That email is already registered."
+    def validate_email(self, email):                 # one field, on the server
+        if users.find_one({"email": email}):
+            return "That email is already registered."
 
-	def validate(self, data):                        # across fields, once each is valid
-		if data.password != data.confirm:
-			raise forms.ValidationError("The passwords don't match.", field="confirm")
+    def validate(self, data):                        # across fields, once each is valid
+        if data.password != data.confirm:
+            raise forms.ValidationError("The passwords don't match.", field="confirm")
 
-	def submitted(self, data):                       # only valid, typed data: data.age is an int or None
-		users.insert({"name": data.name, "email": data.email, "age": data.age})
+    def submitted(self, data):                       # only valid, typed data: data.age is an int or None
+        users.insert({"name": data.name, "email": data.email, "age": data.age})
 ```
 
 `Signup()` is a component that renders a `<form>`: a labelled input per field, in order, with its native constraints (`required`, `min`, `max`, `minlength`, `maxlength`, `pattern`, `type=email`), so the browser stops an invalid form without a round trip, and a submit button (busy while the submit is in flight, see [Loading and errors](#loading-and-errors)).
@@ -769,18 +769,18 @@ from domino import accounts
 
 @app.route("/")
 def index():
-	return Document() [accounts.UserMenu()]        # "Signed in as …" + Log out, or Log in / Sign up links
+    return Document() [accounts.UserMenu()]        # "Signed in as …" + Log out, or Log in / Sign up links
 
 @app.route("/login")
 def login():
-	return Document() [accounts.LoginForm()]       # also SignupForm(), LogoutButton(), OAuthButton("github"),
-	                                               # ForgotPasswordForm(), ChangePasswordForm(), ... (below)
+    return Document() [accounts.LoginForm()]       # also SignupForm(), LogoutButton(), OAuthButton("github"),
+                                                   # ForgotPasswordForm(), ChangePasswordForm(), ... (below)
 
 @app.route("/private")
 @accounts.login_required                           # under @app.route, or on a page's page()
 def private():
-	user = accounts.current_user()
-	return Document() [t.p() [f"Hello {user['email']}"]]
+    user = accounts.current_user()
+    return Document() [t.p() [f"Hello {user['email']}"]]
 ```
 
 - `accounts.current_user()` is the signed-in user's document (without its password hash), or None; `accounts.user_id()` is just the id. Both are reactive: a component that reads them in `render()` re-renders when the user logs in or out on that page.
@@ -797,29 +797,29 @@ These send email, so set up [Email](#email) first (in debug mode emails are prin
 ```python
 # pages/forgot-password.py
 def page():
-	return accounts.ForgotPasswordForm()          # email -> "If an account exists for that email, we've emailed a link ..."
+    return accounts.ForgotPasswordForm()          # email -> "If an account exists for that email, we've emailed a link ..."
 
 # pages/reset-password.py                        # the emailed link: /reset-password?token=...
 def page():
-	return accounts.ResetPasswordForm()           # new password + confirmation
+    return accounts.ResetPasswordForm()           # new password + confirmation
 
 # pages/verify-email.py                          # the link emailed after signing up
 def page():
-	return accounts.VerifyEmail()
+    return accounts.VerifyEmail()
 
 # pages/check-email.py                           # "check your email", with a button to send the link again
 def page():
-	return accounts.CheckEmail()
+    return accounts.CheckEmail()
 
 # pages/members.py
 @accounts.login_required(verified=True)          # unverified users go to /check-email?next=...
 def page():
-	...
+    ...
 
 # pages/settings.py
 @accounts.login_required
 def page():
-	return accounts.ChangePasswordForm()          # current password + new password + confirmation
+    return accounts.ChangePasswordForm()          # current password + new password + confirmation
 ```
 
 - **Forgot your password?** `ForgotPasswordForm` gives the same answer whether or not an account has that email, so it can't be used to find out who has one (emails go out in the background, so it doesn't take longer either). The email links to the `accounts.reset_url` page (default `/reset-password`) with a token that expires after `accounts.reset_link_seconds` (default 3600) and works once: it's bound to the user's current password hash, so it stops working as soon as the password is reset or changed. Resetting also marks the email verified (the link proved it's theirs) and ends a login lockout. With the `accounts.forgot_url` setting (e.g. `/forgot-password`), `LoginForm` shows a "Forgot your password?" link to it.
@@ -866,10 +866,10 @@ See `examples/accounts/`.
 from domino import accounts
 
 def test_reset_email(page, mail_outbox):
-	accounts.create_user("ada@example.com", "correct horse")
-	page.fill("input[name=email]", "ada@example.com")
-	page.click("button", text="Email me a link")
-	assert mail_outbox[0].subject == "Reset your password"
+    accounts.create_user("ada@example.com", "correct horse")
+    page.fill("input[name=email]", "ada@example.com")
+    page.click("button", text="Email me a link")
+    assert mail_outbox[0].subject == "Reset your password"
 ```
 
 - Outside debug mode and tests, sending without a backend raises `domino.mail.MailConfigError`.
@@ -913,16 +913,16 @@ A component whose states could go on forever (a counter) gets the states one cli
 ```python
 class Tabs(t.div):
 
-	active = State(0)
+    active = State(0)
 
-	def render(self):
-		return [
-			t.button(on_click=lambda event, index=index: self.select(index)) [name]
-			for index, name in enumerate(["Overview", "How", "Truth"])
-		] + [t.p() [f"Tab {self.active}"]]
+    def render(self):
+        return [
+            t.button(on_click=lambda event, index=index: self.select(index)) [name]
+            for index, name in enumerate(["Overview", "How", "Truth"])
+        ] + [t.p() [f"Tab {self.active}"]]
 
-	def select(self, index):
-		self.active = index
+    def select(self, index):
+        self.active = index
 ```
 
 ### Experimental: client components
@@ -932,14 +932,14 @@ A component with `client = True` runs in the browser, in Python: the server rend
 ```python
 class Counter(t.div):
 
-	client = True
-	count = State(0)
+    client = True
+    count = State(0)
 
-	def render(self):
-		return [t.button(on_click=self.increment) [f"Clicked {self.count} times"]]
+    def render(self):
+        return [t.button(on_click=self.increment) [f"Clicked {self.count} times"]]
 
-	def increment(self):
-		self.count += 1
+    def increment(self):
+        self.count += 1
 ```
 
 **The component's whole module is sent to the browser and is public**: it may only import `domino.tags`, `State` and `math`, `random`, `time`, `json` (anything else, like a `Collection` or your server modules, stops the app at startup), and must never hold server-only code or secrets. The runtime comes from jsDelivr, or while debugging from a copy downloaded once into `~/.domino/client-runtime` (`{"domino": {"client_runtime": "local" | "cdn" | "<url>/", "client_python": "micropython" | "pyodide"}}`). It's a prototype: see [docs/research/client-python.md](docs/research/client-python.md) for what works, measurements, limitations and open problems, and `examples/client/`.
@@ -955,14 +955,14 @@ Tests live next to the page they test: `pages/about_test.py` tests `pages/about.
 ```python
 # pages/index_test.py
 def test_increment(page):
-	page.click("button", text="Increment")
-	assert page.text("p") == "Current Count: 1"
+    page.click("button", text="Increment")
+    assert page.text("p") == "Current Count: 1"
 
 def test_add_a_task(page):
-	page.fill("input[name=text]", "Buy milk")
-	page.click("button", text="Add")      # a submit button submits its form
-	assert page.text("ul") == "Buy milk"
-	assert page.value("input[name=text]") == ""
+    page.fill("input[name=text]", "Buy milk")
+    page.click("button", text="Add")      # a submit button submits its form
+    assert page.text("ul") == "Buy milk"
+    assert page.value("input[name=text]") == ""
 ```
 
 There's no real browser and no server running, but clicks, typing and form submits go through the same code as in a browser: handlers, `State`, collections and pushed updates all run for real, in about a millisecond each. For a page with URL parameters, use `open_page`: in `pages/users/[id]_test.py`, `open_page(id=3)` opens `/users/3`. `open_page("/about")` opens any path of the app, and each call is a new browser tab. Files ending in `_test.py` are never served as pages. (pytest won't take a path with `[...]` on the command line; run the folder, or pick tests with `-k`.)
