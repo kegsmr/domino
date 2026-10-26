@@ -15,7 +15,7 @@ cd myapp
 domino run
 ```
 
-Open http://127.0.0.1:5000. If `domino` isn't found, use `python -m domino run`. See [Installation](docs/guide/installation.md) for more, including a fix for `CERTIFICATE_VERIFY_FAILED` on macOS.
+Open http://127.0.0.1:5000. If `domino` isn't found, use `python -m domino run`. See [Installation](docs/guide/installation.md) for more.
 
 ## A taste
 
