@@ -1,6 +1,6 @@
 # Domino
 
-A Python web framework for live web apps, built on Flask: components with their logic in Python and their markup in HTML, data that updates every open page as it changes (from MongoDB, like Meteor), and clicks that show their result at once, with no JavaScript to write.
+A Python web framework for live web apps, built on Flask. Write components with their logic in Python and their markup in HTML. Data updates every open page as it changes, and clicks show their result at once. There's no JavaScript to write.
 
 **This project is a work-in-progress! Not all features are functional yet.**
 
@@ -180,7 +180,7 @@ Clicking a link to another page of the app swaps that page in without reloading,
 
 ## Command line
 
-Installing the package adds a `domino` command, modeled on `meteor`:
+Installing the package adds a `domino` command:
 
 ```
 domino create myapp
@@ -194,7 +194,7 @@ domino run
 
 `domino serve [folder or app.py] [--workers N] [--port 8000] [--host 127.0.0.1]` serves the app in production, on every CPU core; see [Serving in production](#serving-in-production).
 
-`domino build [folder] [--force]` writes a `Dockerfile` for the app, and `domino deploy fly|render|docker [folder] [--name NAME] [--mongo-url URL] [--force]` deploys it, like `meteor deploy`; see [Deploying](#deploying).
+`domino build [folder] [--force]` writes a `Dockerfile` for the app, and `domino deploy fly|render|docker [folder] [--name NAME] [--mongo-url URL] [--force]` deploys it; see [Deploying](#deploying).
 
 `domino tailwind build [folder or app.py]` builds an app's minified Tailwind CSS before deploying, and `domino create myapp --tailwind` makes an app styled with Tailwind; see [Tailwind CSS](#tailwind-css).
 
@@ -202,7 +202,7 @@ domino run
 
 ### Hot reloading
 
-While you work on an app with `domino run` or `app.run(debug=True)`, saving a file updates the open tabs in place, usually within about 100 ms, like React's Fast Refresh: components keep their `State` (the counter's count, which tab is open), and the page keeps what's typed in its fields, focus and scroll position. The server logs a line for each change:
+While you work on an app with `domino run` or `app.run(debug=True)`, saving a file updates the open tabs in place, usually within about 100 ms: components keep their `State` (the counter's count, which tab is open), and the page keeps what's typed in its fields, focus and scroll position. The server logs a line for each change:
 
 ```
 domino: hot reloaded components/counter.py (2 pages) in 12 ms
@@ -221,7 +221,7 @@ Some changes can't be swapped in safely, so the server restarts instead (`domino
 
 ### Development MongoDB
 
-Like `meteor run`, running an app in debug mode starts a local MongoDB for it, unless its settings already have `mongo.url`. This happens with `domino run`, and also with `app.run(debug=True)` (or `FLASK_DEBUG=1`, or `app.debug = True`). Importing the app, `flask run` and production servers never start one. Page tests get one of their own (see [MongoDB in tests](#mongodb-in-tests)).
+Running an app in debug mode starts a local MongoDB for it, unless its settings already have `mongo.url`. This happens with `domino run`, and also with `app.run(debug=True)` (or `FLASK_DEBUG=1`, or `app.debug = True`). Importing the app, `flask run` and production servers never start one. Page tests get one of their own (see [MongoDB in tests](#mongodb-in-tests)).
 
 - The first time, the newest MongoDB 7.0 release built for your OS and CPU is downloaded from mongodb.org (about 100MB), checked against its published SHA-256, and only `mongod` is kept, in `~/.domino/mongodb/<version>/`. Set `DOMINO_HOME` to keep it somewhere else. Later runs use the cached binary and work offline. `--mongo-version` (or the setting `mongo.version`) picks another release series, such as `8.0`.
 - `mongod` listens on 127.0.0.1, on the app's port + 1 (5001 for 5000), or on any free port if that one is busy. Its data goes in `.domino/db` in the app's folder and its log in `.domino/mongod.log`. Add `.domino/` to your app's `.gitignore` (`domino create` does).
@@ -346,7 +346,7 @@ import domino.tags as t
 
 class Counter(t.div):
 
-    count = State(0)  # per component, like React's useState
+    count = State(0)  # each component has its own
 
 
     def increment(self):
@@ -387,7 +387,7 @@ import domino.tags as t
 
 class Counter(t.div):
 
-    count = State(0)  # per component, like React's useState
+    count = State(0)  # each component has its own
 
 
     def render(self):
@@ -412,7 +412,7 @@ class Counter(t.div):
 
 `State(value)` holds a value the page shows. Reading it in `render()` subscribes the component, and changing it re-renders every component that read it:
 
-- As a class attribute (`count = State(0)`), each component instance has its own value, like React's `useState`; read and assign it as `self.count`.
+- As a class attribute (`count = State(0)`), each component instance has its own value; read and assign it as `self.count`.
 - At module level (`online = State(0)`), one value is shared by everyone: `online.value` reads it and `online.value = 3` changes it, re-rendering the components that show it on every open page (see [Reactive data](#reactive-data)).
 - Lists and dicts: assign a new value (`self.items = self.items + [x]`) or set them again after changing them in place, since changes inside them can't be seen.
 - Each page load, including a page swapped in by a link, makes its components afresh, so their state starts again. Keep what should last, or be shared, in a `Collection`.
@@ -472,7 +472,7 @@ class TodoList(t.div):
         self.items = self.items[:index] + self.items[index + 1:]
 ```
 
-**Defining a component.** `<component name="TodoList">...</component>` holds the markup of the component of that class (the class still makes the outer element, here a `<div>`). Every file says what it holds: `<component>` definitions, a `<layout>` or a `<page>`; lowercase tags define, capitalized tags use. Attributes on `<component>` go on the component's element, after what the Python side sets (`class` adds up, other attributes the Python side set win); `as="aside"` makes the element an `<aside>` instead (a class that sets its own `tag` must agree). A file can define several components, Meteor-style, and holds nothing but definitions.
+**Defining a component.** `<component name="TodoList">...</component>` holds the markup of the component of that class (the class still makes the outer element, here a `<div>`). Every file says what it holds: `<component>` definitions, a `<layout>` or a `<page>`; lowercase tags define, capitalized tags use. Attributes on `<component>` go on the component's element, after what the Python side sets (`class` adds up, other attributes the Python side set win); `as="aside"` makes the element an `<aside>` instead (a class that sets its own `tag` must agree). A file can define several components, and holds nothing but definitions.
 
 **Where they go.** Put them anywhere in the app; by convention next to the module, with the same name (`todos.py` and `todos.html`). Domino reads every `.html` file of the app's folder at startup (skipping hidden folders, `node_modules`, `site-packages` and `static/`, and pages and Jinja templates) and finds each component's definition by its name. Two definitions of one name stop the app at startup, naming both files, unless two classes of that name in different modules each have theirs next to their module, which then wins. A definition no class is named after is a warning. A class with a `render()` uses that instead.
 
@@ -489,13 +489,13 @@ class TodoList(t.div):
 
 **Lists and conditions** are blocks, in Python's words and closed like HTML: `{{ for item in items }}` ... `{{ /for }}` repeats what's inside (`{{ for key, value in prices.items }}` unpacks, `enumerate(items)` numbers), and `{{ if done }}` ... `{{ elif loading }}` ... `{{ else }}` ... `{{ /if }}` shows one part (`{{ if not items }}` too). `{{ else }}` inside a `for` shows when the list is empty. A block wraps whole elements: one that starts inside an element ends inside it, so `{{ if x }}<div>{{ /if }}` is an error at startup, with the file and line. A block on a line of its own takes the line with it.
 
-**Attributes** are written as they are, with any `{{ }}` values in them filled in and escaped. An attribute that is just one value works like Blaze's: `disabled="{{ at_zero }}"` writes `disabled` when the value is true and leaves it out when it's false or None, and on a component, `items="{{ items }}"` passes the list itself. In `class`, a list or a dict `{class: bool}` gives the names that are on (`class="task {{ row_class(task) }}"`); in `style`, a dict gives declarations (`{"font_weight": "bold"}`).
+**Attributes** are written as they are, with any `{{ }}` values in them filled in and escaped. An attribute that is just one value can switch it on and off: `disabled="{{ at_zero }}"` writes `disabled` when the value is true and leaves it out when it's false or None, and on a component, `items="{{ items }}"` passes the list itself. In `class`, a list or a dict `{class: bool}` gives the names that are on (`class="task {{ row_class(task) }}"`); in `style`, a dict gives declarations (`{"font_weight": "bold"}`).
 
 **Events**: `on-click="increment"` binds a method; `on-click="remove(index)"` binds it with values, so each item of a list gets its own. `on-input="search(event)"` passes the `Event`; `debounce="250"` waits until the user pauses. Handlers that only change the component's own `State` are [instant](#instant-updates), with values too.
 
 **Whitespace** is kept as written: nothing is added around inline elements (`<a>Domino</a>.` has no space before the dot), and a block's own lines leave nothing behind, so each item is on a line of its own and a hidden element leaves no empty line.
 
-**Pages and layouts.** An `.html` file in `pages/` without a `.py` of the same name is a page: `pages/about.html` is `/about`, with the URL's parameters as its values (`pages/users/[name].html` reads `{{ name }}`). Its markup is inside `<page>...</page>`, and `<page layout="Main" title="About">` puts it in a layout (see [Pages](#pages)). A page with `<html>`, or `<head>` and `<body>` without `<html>` (like Meteor's `index.html`), is a whole document itself, used without layouts. Domino adds the doctype, its script and the components' CSS to documents. `template("home.html", title="Home")` renders any template from Python.
+**Pages and layouts.** An `.html` file in `pages/` without a `.py` of the same name is a page: `pages/about.html` is `/about`, with the URL's parameters as its values (`pages/users/[name].html` reads `{{ name }}`). Its markup is inside `<page>...</page>`, and `<page layout="Main" title="About">` puts it in a layout (see [Pages](#pages)). A page with `<html>`, or `<head>` and `<body>` without `<html>`, is a whole document itself, used without layouts. Domino adds the doctype, its script and the components' CSS to documents. `template("home.html", title="Home")` renders any template from Python.
 
 **Compiled once.** Each file is parsed once into static HTML strings and the few dynamic parts, so rendering a template does little more than join strings (about as fast as Jinja, faster than tag classes); while debugging, a file that changed is parsed again, and hot reloading updates open pages.
 
@@ -545,7 +545,7 @@ Template strings need Python 3.14; on older versions `html()` raises an error sa
 
 ### Jinja templates
 
-Flask's Jinja templates suit layouts and mostly static pages. Domino finds `.html` templates by file name anywhere in the app's folder, like Meteor: `templates/` as in Flask, or next to the code that uses them. Hidden folders, `.domino/`, `static/`, `node_modules/`, `__pycache__/` and virtualenvs are skipped. Since names are looked up without folders, two templates with the same name stop the app at startup with both paths. While debugging, edited and new templates are picked up without a restart.
+Flask's Jinja templates suit layouts and mostly static pages. Domino finds `.html` templates by file name anywhere in the app's folder: `templates/` as in Flask, or next to the code that uses them. Hidden folders, `.domino/`, `static/`, `node_modules/`, `__pycache__/` and virtualenvs are skipped. Since names are looked up without folders, two templates with the same name stop the app at startup with both paths. While debugging, edited and new templates are picked up without a restart.
 
 `template(name, **context)` renders one as an element; return it from a page's `page()` (or a route) to make it the whole page (Domino adds its script, its page id and the CSS of the components inside), or use it as a child. Inside, `{{ component(Counter) }}` (or `{{ component(Counter, title="x") }}`) and `{{ element }}` render live Domino components, whose events and re-renders work as usual; the Jinja part around them is static.
 
@@ -687,7 +687,7 @@ The latency simulator delays uploads too (a round trip of their own before the e
 
 ### Reactive data
 
-Like Meteor, Domino components re-render themselves when the data they show changes. Reading a `State` or querying a `Collection` inside `render()` subscribes the component; changing it re-renders every subscribed component on every open page and pushes the result (no `live = True` needed):
+Domino components re-render themselves when the data they show changes. Reading a `State` or querying a `Collection` inside `render()` subscribes the component; changing it re-renders every subscribed component on every open page and pushes the result (no `live = True` needed):
 
 ```python
 from domino import Collection, State
@@ -706,14 +706,14 @@ class Chat(t.ul):
 
 - `State(value)`: `.value` reads (and subscribes), `.value = x` changes it.
 - `Collection(name)`: `insert(doc)` (returns the `_id`), `find(query, sort=..., limit=...)` (a cursor you iterate or `.fetch()`), `find_one`, `count`, `update(query, {"$set": ...}, multi=False)` and `remove(query)`, with MongoDB-style queries (`$gt`, `$in`, `$or`, dotted paths, ...). Documents come back as copies.
-- `raw_collection()` and `raw_database()` (named collections only, like Meteor's `rawCollection()`): the pymongo collection and database, for what `Collection` doesn't do, such as indexes and aggregation (`tasks.raw_collection().create_index("created")`). Writes made through them still update open pages, through MongoDB's change stream.
+- `raw_collection()` and `raw_database()` (named collections only): the pymongo collection and database, for what `Collection` doesn't do, such as indexes and aggregation (`tasks.raw_collection().create_index("created")`). Writes made through them still update open pages, through MongoDB's change stream.
 - Changes made while handling an event re-render each subscriber once, in the background, so the user who made the change gets their response straight away. Use `with batch():` to group changes made elsewhere, and `domino.wait()` in tests to let background updates finish.
 
 See `examples/chat/`.
 
 ### MongoDB
 
-Like Meteor, named collections live in MongoDB: `Collection("messages")` is the `messages` collection of the app's database, and `Collection()` without a name is an in-memory collection for this process only. Queries and updates use MongoDB's own syntax (all of it, not just the subset the in-memory collection supports). Documents get a string `_id` unless they have one.
+Named collections live in MongoDB: `Collection("messages")` is the `messages` collection of the app's database, and `Collection()` without a name is an in-memory collection for this process only. Queries and updates use MongoDB's own syntax (all of it, not just the subset the in-memory collection supports). Documents get a string `_id` unless they have one.
 
 The database comes from the `mongo.url` setting (e.g. `DOMINO_MONGO__URL=mongodb://db:27017/myapp?replicaSet=rs0`), with the database name taken from the URL (default `domino`); `MONGO_URL` works too, and `domino.mongo.connect(url)` sets it in code. When MongoDB runs as a replica set, a change stream per collection re-renders subscribers when *any* process changes the collection — another server process, a script, or `mongosh` — so it also works with several server processes. Without a replica set only this process's own writes update pages live.
 
@@ -762,7 +762,7 @@ Field names can't be names a form already uses (`errors`, `fields`, `error`, `re
 
 ## Accounts
 
-`domino.accounts` adds sign-up, login and logout, like Meteor's accounts packages. Users are documents in the `users` collection (MongoDB):
+`domino.accounts` adds sign-up, login and logout. Users are documents in the `users` collection (MongoDB):
 
 ```python
 from domino import accounts
@@ -882,7 +882,7 @@ def test_reset_email(page, mail_outbox):
 2. `settings.local.json` next to it, for local overrides; it's in `.gitignore`
 3. `DOMINO_*` environment variables
 
-Every source is optional. Nested objects merge key by key, so a local file can override one nested value without repeating the rest; lists and other values replace. `Domino(__name__, settings="config/app.json")` reads a different file (and `config/app.local.json`), and the `DOMINO_SETTINGS` environment variable points at another settings file, like `meteor --settings`.
+Every source is optional. Nested objects merge key by key, so a local file can override one nested value without repeating the rest; lists and other values replace. `Domino(__name__, settings="config/app.json")` reads a different file (and `config/app.local.json`), and the `DOMINO_SETTINGS` environment variable points at another settings file.
 
 An environment variable `DOMINO_<KEY>` sets the top-level key `<key>` (lowercased), and a double underscore nests: `DOMINO_MONGO__URL=mongodb://db` sets `settings["mongo"]["url"]`. Values are parsed as JSON when they parse (`8080`, `true`, `null`, `[1, 2]`, `{"a": 1}`) and kept as strings otherwise.
 
@@ -898,7 +898,7 @@ Settings work as a dict or with attributes: `app.settings.mongo.url`, `app.setti
 
 - `domino` sets Domino's Flask config: `page_ttl` becomes `app.config["DOMINO_PAGE_TTL"]`, and so on. Changes to `app.config` made in code afterwards still win. From the environment, these are `DOMINO_DOMINO__PAGE_TTL=600` and so on.
 - `secret_key` sets `app.secret_key`.
-- `public` is sent to the browser, where it's available as `Domino.settings` (like `Meteor.settings.public`). `Document` adds it to the page head; pages built without `Document` can add `PublicSettings()` from `domino.components` to theirs. Nothing outside `public` is sent.
+- `public` is sent to the browser, where it's available as `Domino.settings`. `Document` adds it to the page head; pages built without `Document` can add `PublicSettings()` from `domino.components` to theirs. Nothing outside `public` is sent.
 
 See `examples/settings/`.
 
@@ -973,7 +973,7 @@ Outside `pages/`, `app.test_page(path)` gives the same simulated browser for any
 
 ### MongoDB in tests
 
-Like `meteor test`, pages with named Collections can be tested with nothing to set up. The first time a test that uses `page` or `open_page` connects to MongoDB, a `mongod` is started for the test session (the same cached download as `domino run`'s, on a free port, with its data in a temporary folder, so your development database in `.domino/` is never touched), and it's stopped when the session ends. Tests that don't use named Collections never start it.
+Pages with named Collections can be tested with nothing to set up. The first time a test that uses `page` or `open_page` connects to MongoDB, a `mongod` is started for the test session (the same cached download as `domino run`'s, on a free port, with its data in a temporary folder, so your development database in `.domino/` is never touched), and it's stopped when the session ends. Tests that don't use named Collections never start it.
 
 - Each test gets an empty database of its own (`domino_test_<session>_<n>`), dropped in the background after the test. Collections switch to it by themselves, and change streams follow, so changes from one test never reach the next. `sync()` waits for the change stream to announce this process's writes, so a second tab sees them straight away. The overhead is about a millisecond per test.
 - The `domino_db` fixture gives the same database (as a pymongo `Database`) to any test, including tests that use collections directly: `def test_import(domino_db): ...`.
@@ -998,7 +998,7 @@ Served through `app.asgi` (with uvicorn, which `app.run()` and `domino run` use)
 
 ## Deploying
 
-Like `meteor deploy`, one command gets an app online, but onto a platform you choose, from files you can read and keep:
+One command gets an app online, onto a platform you choose, from files you can read and keep:
 
 ```
 domino deploy fly        # Fly.io: does everything, with Fly's flyctl command
