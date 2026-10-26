@@ -8,6 +8,8 @@ import sys
 import textwrap
 import uuid
 
+import pytest
+
 import domino.tags as t
 from domino import Collection, Domino, State
 from domino.components import Document
@@ -452,7 +454,188 @@ def test_rendering_the_parent_again_keeps_the_childrens_html_so_patches_stay_sma
 	# Only the parent's own line changed: the rows kept their ids, and so their HTML
 	ops = diff(first, second)
 	assert ops is not None
-	assert sum(len(op) if isinstance(op, str) else COPY_COST for op in ops) < 100
+	sent = 0
+	for op in ops:
+		if isinstance(op, str):
+			sent += len(op)
+		else:
+			sent += COPY_COST
+	assert sent < 100
+
+
+total = State(0)
+
+
+class Cell(t.div):
+
+	def render(self):
+
+		return [t.p(class_="total") [f"total {total.value}"]]
+
+
+class Board(t.div):
+
+	def bump(self):
+
+		total.value += 1
+		return self
+
+
+	def render(self):
+
+		return [Cell(), t.button(class_="board", on_click=self.bump) ["bump"]]
+
+
+def test_an_update_due_for_a_replaced_child_goes_to_the_one_in_its_place():
+
+	total.value = 0
+	board = Board()
+	app = make_app(board)
+	first = app.test_page("/")
+	second = app.test_page("/")
+
+	# The Cell that read `total` is due to update when the board renders again and replaces it
+	first.click(".board")
+	second.sync()
+
+	assert first.text(".total") == second.text(".total") == "total 1"
+
+
+class Fails(t.div):
+
+	broken = False
+
+
+	def render(self):
+
+		if Fails.broken:
+			raise ValueError("broken")
+		return [t.p() ["fine"]]
+
+
+class Breaks(t.div):
+
+	other = State(0)
+
+
+	def bump(self):
+
+		self.other += 1
+
+
+	def render(self):
+
+		return [Fails(), Live(), t.button(class_="parent", on_click=self.bump) ["parent"]]
+
+
+def test_when_rendering_fails_the_children_still_shown_keep_updating():
+
+	page = make_app(Breaks).test_page("/")
+	Fails.broken = True
+	try:
+		page.click(".parent")
+	except Exception:
+		pass
+	finally:
+		Fails.broken = False
+
+	notes.insert({"text": "after the error"})
+	page.sync()
+
+	assert page.text(".live") == f"{len(notes.find().fetch())} notes, 0"
+
+
+def test_rows_that_are_gone_stop_updating():
+
+	component = KeyedList()
+	page = make_app(component).test_page("/")
+	set_names(page, component, ["a"])
+
+	state = only_page(page)
+	shown = [element for element in state.components if isinstance(element, Row)]
+	# Only the row still on screen is live (Row reads its own State)
+	assert [row.name for row in shown] == ["a"]
+
+
+class Doubles(t.div):
+
+	n = State(0)
+
+
+	def init(self):
+
+		self.doubled = self.n * 2
+
+
+	def add(self):
+
+		self.n += 1
+
+
+	def render(self):
+
+		return [t.button(class_="doubles", on_click=self.add) [f"n {self.n} doubled {self.doubled}"]]
+
+
+class HoldsDoubles(t.div):
+
+	other = State(0)
+
+
+	def bump(self):
+
+		self.other += 1
+
+
+	def render(self):
+
+		return [Doubles(), t.button(class_="parent", on_click=self.bump) ["parent"]]
+
+
+def test_init_sees_the_state_the_component_takes_over():
+
+	page = make_app(HoldsDoubles).test_page("/")
+	page.click(".doubles")
+	page.click(".parent")
+
+	assert page.text(".doubles") == "n 1 doubled 2"
+
+
+class Lazy(t.div):
+
+	other = State(0)
+	child = None
+
+
+	def bump(self):
+
+		self.other += 1
+
+
+	def render(self):
+
+		# Made once, then kept: shown again without being made again
+		if self.child is None:
+			self.child = Counter()
+		return [self.child, t.button(class_="parent", on_click=self.bump) ["parent"]]
+
+
+def test_a_child_kept_in_an_attribute_stays_live():
+
+	page = make_app(Lazy).test_page("/")
+	page.click(".r")
+	page.click(".parent")
+	page.click(".parent")
+	page.click(".r")
+
+	assert page.text(".real") == "real 2"
+	assert any(isinstance(element, Counter) for element in only_page(page).components)
+
+
+def test_a_key_must_be_hashable():
+
+	with pytest.raises(TypeError, match="needs a key like a string or a number"):
+		Row(key={"_id": 1})
 
 
 # Helpers

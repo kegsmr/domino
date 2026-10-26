@@ -235,3 +235,109 @@ def test_a_guess_that_would_show_a_changed_child_wrong_waits_for_the_server(pass
 	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=4000)
 	page.evaluate("Domino.disableLatencySim()")
 	assert page.errors == []
+
+
+class Inner(t.div):
+
+	count = State(0)
+
+
+	def add(self):
+
+		self.count += 1
+
+
+	def render(self):
+
+		return [t.button(class_="inner", on_click=self.add) [f"inner {self.count}"]]
+
+
+class Middle(t.div):
+
+	count = State(0)
+
+
+	def add(self):
+
+		self.count += 1
+
+
+	def render(self):
+
+		return [Inner(), t.button(class_="middle", on_click=self.add) [f"middle {self.count}"]]
+
+
+class Outer(t.div):
+
+	count = State(0)
+	open = State(True)
+
+
+	def add(self):
+
+		self.count += 1
+
+
+	def toggle(self):
+
+		self.open = not self.open
+
+
+	def render(self):
+
+		children = [t.button(class_="outer", on_click=self.add) [f"outer {self.count}"], t.button(class_="toggle", on_click=self.toggle) ["toggle"]]
+		if self.open:
+			children.append(Middle())
+		return children
+
+
+@pytest.fixture
+def nested_url():
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+
+		return Document(title="Nested") [Outer()]
+
+	server = make_server("127.0.0.1", 0, app, threaded=True)
+	threading.Thread(target=server.serve_forever, daemon=True).start()
+	yield f"http://127.0.0.1:{server.server_port}/"
+	server.shutdown()
+
+
+def test_instant_updates_with_a_changed_child_and_grandchild(nested_url, page):
+
+	page.goto(nested_url)
+	page.click(".inner")
+	wait_text(page, ".inner", "inner 1")
+	page.click(".middle")
+	wait_text(page, ".middle", "middle 1")
+
+	page.evaluate("Domino.enableLatencySim(1500)")
+	page.click(".outer")
+	wait_text(page, ".outer", "outer 1", timeout=700)
+	assert page.inner_text(".inner").strip() == "inner 1"
+	assert page.inner_text(".middle").strip() == "middle 1"
+
+	page.wait_for_function("!document.querySelector('[data-predicted]')", timeout=4000)
+	page.evaluate("Domino.disableLatencySim()")
+	assert page.inner_text(".inner").strip() == "inner 1"
+	assert page.errors == []
+
+
+def test_a_failed_event_puts_back_a_changed_child_its_guess_hid(nested_url, page):
+
+	page.goto(nested_url)
+	page.click(".inner")
+	wait_text(page, ".inner", "inner 1")
+
+	# The toggle's answer fails
+	page.route("**/_domino/events", lambda route: route.fulfill(status=500, body="{}", content_type="application/json"))
+	page.click(".toggle")
+	page.wait_for_timeout(1000)
+
+	# The server still shows the child, so the page does too, as it was
+	assert page.inner_text(".inner").strip() == "inner 1"
+	assert not page.evaluate("!!document.querySelector('[data-predicted]')")

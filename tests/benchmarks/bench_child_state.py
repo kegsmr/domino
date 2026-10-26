@@ -79,7 +79,9 @@ def main():
 			start = time.perf_counter()
 			page.click(".bump")
 			times.append(time.perf_counter() - start)
-		name = "keyed" if keyed else "no keys"
+		name = "no keys"
+		if keyed:
+			name = "keyed"
 		print(f"{options.rows} rows, {name}: median {statistics.median(times) * 1000:.1f} ms, best {min(times) * 1000:.1f} ms")
 
 

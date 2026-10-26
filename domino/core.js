@@ -965,13 +965,23 @@ window.Domino = (() => {
         const template = document.createElement('template');
         template.innerHTML = graph.states[0];
         const before = template.content.firstElementChild;
+        const kept = [];
         for (const id of graph.changed) {
             const selector = '#' + CSS.escape(id);
             const next = replacement.querySelector(selector);
-            if (!next) continue;
             const live = document.getElementById(id);
+            // A state without it couldn't bring it back as it is now (going back to state 0)
+            if (!next) {
+                if (live) return false;
+                continue;
+            }
             const then = before && before.querySelector(selector);
             if (!live || !then || markup(then) !== markup(next)) return false;
+            kept.push([next, live]);
+        }
+        // Compared first, then swapped: one inside another comes along with it
+        for (const [next, live] of kept) {
+            if (kept.some(([outer]) => outer !== next && outer.contains(next))) continue;
             next.replaceWith(live.cloneNode(true));
         }
         return true;
