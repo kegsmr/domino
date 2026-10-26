@@ -189,7 +189,7 @@ While you work on an app with `domino run` or `app.run(debug=True)`, saving a fi
 domino: hot reloaded components/counter.py (2 pages) in 12 ms
 ```
 
-- A changed module (a component, a page, a layout, `data.py`, ...) is run again in place, and so are the app's modules that import it. Components on open pages switch to the new classes and are rendered again with the state they had: a `State` attribute added since starts at its default, one removed is dropped. The components their `render()` makes are new, as whenever they're rendered.
+- A changed module (a component, a page, a layout, `data.py`, ...) is run again in place, and so are the app's modules that import it. Components on open pages switch to the new classes and are rendered again with the state they had: a `State` attribute added since starts at its default, one removed is dropped. The components their `render()` makes keep their `State` too, as whenever their parent renders again (see [State](#state)).
 - A changed page or layout makes the page again with its new code; components in the same places (the first `Counter`, and so on) take over the state of the old ones. Pages added or deleted get or lose their routes.
 - `State` and `Collection` objects at a module's top level are kept, with their values, when it's run again.
 - Templates (Domino and Jinja) and component CSS are updated in place too; a template page added to or deleted from `pages/` gets or loses its route. Stylesheets in the app's folder are fetched again; a changed `.js` file reloads the page.
@@ -395,6 +395,8 @@ class Counter(t.div):
 - As a class attribute (`count = State(0)`), each component instance has its own value, like React's `useState`; read and assign it as `self.count`.
 - At module level (`online = State(0)`), one value is shared by everyone: `online.value` reads it and `online.value = 3` changes it, re-rendering the components that show it on every open page (see [Reactive data](#reactive-data)).
 - Lists and dicts: assign a new value (`self.items = self.items + [x]`) or set them again after changing them in place, since changes inside them can't be seen.
+- State lasts as long as the component is on screen. When a parent renders again, each component its `render()` (or template) makes takes over the `State` of the one made in the same place before: the same class, made in the same order. Plain attributes the parent passes come from the new render; a `State` it passes is only its starting value. A component that's gone is dropped, and a new one starts from its defaults.
+- In a list that changes, give each component a `key=` (`Row(key=task["_id"], task=task)`, or `<Row key="{{ task._id }}" />` in a template), so its `State` stays with its item when rows are reordered, added or removed. Without keys they match by position, and debug mode warns when such a list changes length.
 - Each page load, including a page swapped in by a link, makes its components afresh, so their state starts again. Keep what should last, or be shared, in a `Collection`.
 - Handlers that only change their own component's `State` show at once in the browser, before the server answers (see [Instant updates](#instant-updates)).
 

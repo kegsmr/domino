@@ -187,6 +187,115 @@ class Callback:
 		return f"Callback({self.function!r})"
 
 
+class Matches:
+	"""The components one render() makes, each taking over the one made in the same place by the
+	render before (see take_over): the same class made in the same order, or with the same key=
+	among those of its class. So a child keeps its State as long as it's on screen, however often
+	its parent renders again. A child that's gone is dropped; a new one starts from its defaults."""
+
+
+	def __init__(self, previous):
+
+		self.made = []
+		self.counts = {}
+		self.classes = {}
+		self.previous = {}
+		for element in previous or ():
+			self.previous.setdefault(match_key(element), []).append(element)
+		self.replaced = []
+
+
+	def match(self, element):
+
+		self.made.append(element)
+		key = match_key(element)
+		index = self.counts.get(key, 0)
+		self.counts[key] = index + 1
+		self.classes[key] = type(element)
+
+		olds = self.previous.get(key)
+		if olds and index < len(olds):
+			take_over(olds[index], element)
+			self.replaced.append((olds[index], element))
+
+
+	def finish(self, component):
+		"""After the real (not predicted) render: the replaced components stop updating."""
+
+		for old, new in self.replaced:
+			retire(old, new)
+
+		# Without keys, a list that grows or shrinks matches by position, so a row's State can
+		# move to the row below; warn once per class while debugging
+		if not self.previous:
+			return
+		# Pushes from other users' changes render outside a request, so the page knows its app
+		app = getattr(Page.current(), "app", None)
+		if app is None and has_app_context():
+			app = current_app
+		if app is None or not app.debug:
+			return
+		for key, count in self.counts.items():
+			if key[3] is not None or key[:3] in _unkeyed_warned:
+				continue
+			before = len(self.previous.get(key, ()))
+			if before != count and max(before, count) > 1 and optimistic.state_names(self.classes[key]):
+				_unkeyed_warned.add(key[:3])
+				app.logger.warning(
+					f"{type(component).__name__} renders a list of {key[1]} that went from {before} to "
+					f"{count}, without key=. Each {key[1]} keeps the State of the one in the same position, "
+					f"so give them a key (key=item[\"_id\"]) to keep each one's State with its item."
+				)
+
+
+# Classes already warned about a list without keys
+_unkeyed_warned = set()
+
+
+def match_key(element):
+
+	cls = type(element)
+
+	return (cls.__module__, cls.__qualname__, element.__tag__, element.__key__)
+
+
+def take_over(old, new):
+	"""`new` replaces `old` in the same place: it keeps old's State, its id (so the browser updates
+	the same node and instant updates stay valid) and what its render made (for its own children)."""
+
+	for name in optimistic.state_names(type(new)):
+		state = old.__dict__.get(f"__state_{name}__")
+		if state is not None:
+			new.__dict__[f"__state_{name}__"] = state
+
+	if "id" not in new.__attributes__:
+		# Predicting the parent renders its children before the real ones are, so the real one's id
+		# is made now, for both to use
+		if old.__id__ is None:
+			old.__id__ = uuid.uuid4()
+		new.__id__ = old.__id__
+
+	new.__made__ = old.__made__
+
+
+def retire(old, new):
+	"""`old` no longer re-renders when what it read changes; `new` is updated on the pages that
+	showed it instead (one component can be on several pages), with the same id."""
+
+	reactive.forget(old)
+	with _pages_lock:
+		pages = old.__pages__ or ()
+		old.__pages__ = None
+		if pages:
+			if new.__pages__ is None:
+				new.__pages__ = weakref.WeakSet()
+			new.__pages__.update(pages)
+	for page in pages:
+		if old in page.components:
+			page.components.discard(old)
+			page.components.add(new)
+
+
 # CSS of each component class (its own `css`, scoped to its class name), made once
 _component_css = {}
 
@@ -1399,6 +1508,11 @@ class Element:
 		self.__id_used__ = False
 		self.__pages__ = None  # live pages this component was rendered on (components only)
 		self.__dependencies__ = set()  # reactive data its last render read
+		self.__made__ = None  # components its last render() made, for the next one to match (see Matches)
+		# key= tells apart components of a list, so each keeps its State when the list changes
+		self.__key__ = kwargs.get("key")
+		if "key" not in component_props(type(self)):
+			kwargs.pop("key", None)
 
 		self.tag(tag)
 		self.parent(parent)
@@ -1410,6 +1524,11 @@ class Element:
 
 		if hasattr(self, 'init'):
 			self.init()
+
+		# Made by a component's render(): take over the one made in the same place last time
+		stack = render_stack()
+		if stack and type(self).__module__ != "domino.tags":
+			stack[-1][3].match(self)
 
 
 	def __init_subclass__(cls, **kwargs):
@@ -1714,8 +1833,10 @@ class Element:
 			if not predicting:
 				reactive.forget(self)
 			self.__embedded__ = []
-			# [component, events numbered so far, (event id, callback) bound by its render]
-			frame = [self, 0, []]
+			# [component, events numbered so far, (event id, callback) bound by its render,
+			# the components it makes]
+			matches = Matches(self.__made__)
+			frame = [self, 0, [], matches]
 			render_stack().append(frame)
 			try:
 				children = render()
@@ -1725,6 +1846,11 @@ class Element:
 			finally:
 				render_stack().pop()
 			self.__bound__ = frame[2]
+
+			# A prediction's children are thrown away; the real render's replace the last ones
+			if not predicting:
+				self.__made__ = matches.made
+				matches.finish(self)
 
 			# render() may return its children instead of calling self([...])
 			if children is not None and children is not self:

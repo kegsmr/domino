@@ -257,6 +257,7 @@ window.Domino = (() => {
 
         const updated = document.getElementById(data.id);
         if (updated) {
+            changedWithin(updated);
             listen(updated);
             scheduleAfterEvents(updated);
             connect();
@@ -937,10 +938,52 @@ window.Domino = (() => {
         template.innerHTML = graph.states[key];
         const replacement = template.content.firstElementChild;
         if (!replacement || replacement.id !== node.id) return false;
+        if (!keepChanged(replacement, graph)) return false;
         morph(node, replacement, reset);
         listen(node);
         graph.key = key;
+        changedWithin(node);
         return true;
+    }
+
+    // A component inside another keeps its State when the outer one renders again, so once it
+    // changes on its own (its events, pushes), the outer one's states show it as it was. Note it.
+    function changedWithin(node) {
+        for (let outer = node.parentElement; outer; outer = outer.parentElement) {
+            const graph = outer.id && graphs.get(outer.id);
+            if (!graph) continue;
+            if (!graph.changed) graph.changed = new Set();
+            graph.changed.add(node.id);
+        }
+    }
+
+    // Before showing one of a component's states: the components inside it that changed since
+    // are shown as they are now, if the state leaves them as they were; if it changes them too,
+    // only the server knows how they look (returns false)
+    function keepChanged(replacement, graph) {
+        if (!graph.changed || !graph.changed.size) return true;
+        const template = document.createElement('template');
+        template.innerHTML = graph.states[0];
+        const before = template.content.firstElementChild;
+        for (const id of graph.changed) {
+            const selector = '#' + CSS.escape(id);
+            const next = replacement.querySelector(selector);
+            if (!next) continue;
+            const live = document.getElementById(id);
+            const then = before && before.querySelector(selector);
+            if (!live || !then || markup(then) !== markup(next)) return false;
+            next.replaceWith(live.cloneNode(true));
+        }
+        return true;
+    }
+
+    // An element's HTML to compare, whatever its indentation, without its predictions, and
+    // without data-live (states are rendered without subscribing, so they don't have it)
+    function markup(el) {
+        const copy = el.cloneNode(true);
+        for (const script of copy.querySelectorAll('script[data-domino-predict]')) script.remove();
+        for (const live of [copy, ...copy.querySelectorAll('[data-live]')]) live.removeAttribute('data-live');
+        return copy.outerHTML.replace(/\s+/g, ' ').replace(/> </g, '><').trim();
     }
 
     // Show where the event leads right away, from the component's states, following on from
