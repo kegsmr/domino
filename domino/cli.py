@@ -222,7 +222,7 @@ import domino.tags as t
 # Logic in Python, markup in index.html next to this file: <component name="Counter"> there
 class Counter(t.div):
 
-	# This component's own data, one per open tab. Changing it shows again at once
+	# This component's own data, one per open tab. Changing it re-renders this at once
 	count = State(0)
 
 
@@ -511,6 +511,10 @@ def tailwind_build(args):
 def create(name, with_tailwind=False, minimal=False):
 
 	folder = Path(name)
+
+	# As on the command line, where argparse refuses the two together
+	if with_tailwind and minimal:
+		raise CliError("--minimal and --tailwind can't be combined")
 
 	if folder.exists() and (not folder.is_dir() or any(folder.iterdir())):
 		raise CliError(f"{folder} already exists and isn't empty")

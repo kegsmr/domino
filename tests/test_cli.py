@@ -297,6 +297,10 @@ def test_create_minimal_and_tailwind_dont_mix(tmp_path, capsys):
 	assert "not allowed with" in capsys.readouterr().err
 	assert not (tmp_path / "both").exists()
 
+	with pytest.raises(cli.CliError, match="can't be combined"):
+		cli.create(str(tmp_path / "both"), with_tailwind=True, minimal=True)
+	assert not (tmp_path / "both").exists()
+
 
 def test_created_minimal_app_counts_without_mongo(tmp_path, monkeypatch, forget_modules):
 
@@ -315,7 +319,7 @@ def test_created_minimal_app_counts_without_mongo(tmp_path, monkeypatch, forget_
 		html = response.get_data(as_text=True)
 
 		assert response.status_code == 200
-		assert "<title>" in html and "tiny" in html
+		assert html.split("<title>")[1].split("</title>")[0].strip() == "tiny"
 		assert "<h1>0</h1>" in html
 
 		# The button's click event counts up
