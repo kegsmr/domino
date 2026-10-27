@@ -158,6 +158,21 @@ def sort_spec(sort):
 	return [(field, direction) for field, direction in sort]
 
 
+def changed_documents(change):
+	"""[(_id, the document now, or None if it's gone)] for a change stream event, or None when
+	it isn't about one document (a dropped collection), so every subscriber re-renders."""
+
+	if change.get("operationType") not in ("insert", "update", "replace", "delete"):
+		return None
+
+	key = change.get("documentKey") or {}
+	if "_id" not in key:
+		return None
+
+	# An update's document is looked up after the change, so None if it was deleted since
+	return [(key["_id"], change.get("fullDocument"))]
+
+
 class MongoStore:
 	"""A Collection's documents in a MongoDB collection of the same name."""
 
@@ -192,7 +207,8 @@ class MongoStore:
 		resume = None
 		while not self.stale:
 			try:
-				with self.collection.watch(resume_after=resume) as stream:
+				# Updates come with the document as it is now, to tell which pages they affect
+				with self.collection.watch(resume_after=resume, full_document="updateLookup") as stream:
 					self.watching = True
 					self._started.set()
 					while stream.alive:
@@ -207,7 +223,7 @@ class MongoStore:
 						changed = self._changed()
 						if changed is None:
 							return
-						changed()
+						changed(changed_documents(change))
 						with self._caught_up:
 							self._seen = change.get("clusterTime")
 							self._caught_up.notify_all()
@@ -288,7 +304,8 @@ class MongoStore:
 		return list(cursor)
 
 
-	def update(self, query, changes, multi):
+	def update(self, query, changes, multi, changed=None):
+		"""Returns the count. `changed` is left empty: the change stream says what changed."""
 
 		with self._session() as session:
 			if not any(key.startswith("$") for key in changes):
@@ -306,7 +323,7 @@ class MongoStore:
 		return result.matched_count
 
 
-	def remove(self, query):
+	def remove(self, query, changed=None):
 
 		with self._session() as session:
 			deleted = self.collection.delete_many(query, session=session).deleted_count

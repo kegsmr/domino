@@ -39,18 +39,21 @@ class Dependency:
 
 
 	def depend(self):
+		"""Subscribe the component rendering now, if any, and return it."""
 
 		# A prediction's reads don't subscribe anything; the real render's do
 		if getattr(_state, "overlay", None) is not None:
-			return
+			return None
 
 		component = current_component()
 		if component is None:
-			return
+			return None
 
 		with self.lock:
 			self.dependents.add(component)
 		component.__dependencies__.add(self)
+
+		return component
 
 
 	def forget(self, component):
@@ -66,6 +69,89 @@ class Dependency:
 
 		for component in dependents:
 			schedule(component)
+
+
+class QueryDependency(Dependency):
+	"""A collection's subscribers, with the queries each one's render read, so a change to some
+	documents re-renders only the components whose results it can change."""
+
+
+	def __init__(self):
+
+		super().__init__()
+		self.reads = weakref.WeakKeyDictionary()  # component -> [Read]
+
+
+	def depend(self, read):
+
+		component = super().depend()
+		if component is not None:
+			with self.lock:
+				self.reads.setdefault(component, []).append(read)
+
+
+	def forget(self, component):
+
+		with self.lock:
+			self.dependents.discard(component)
+			self.reads.pop(component, None)
+
+
+	def changed(self, changes=None):
+		"""`changes` is a list of (_id, the document now, or None if it's gone); None re-renders
+		every subscriber, for changes not known document by document (a dropped collection)."""
+
+		if changes is None:
+			super().changed()
+			return
+
+		with self.lock:
+			dependents = [component for component in self.dependents if any(read.affected_by(changes) for read in self.reads.get(component, ()))]
+
+		for component in dependents:
+			schedule(component)
+
+
+class Read:
+	"""A query a render read, and the _ids of what it found."""
+
+
+	def __init__(self, query, exact):
+
+		self.query = query
+		# Whether the store itself matches with matches(), so it decides exactly; MongoDB's own
+		# matching only agrees with it for simple values (see plainly_matched)
+		self.exact = exact
+		# None until the result is in, so any change meanwhile counts
+		self.ids = None
+
+
+	def found(self, documents):
+
+		try:
+			self.ids = {document["_id"] for document in documents}
+		except (KeyError, TypeError):
+			# An _id that can't go in a set (a dict) can't be looked up; every change counts
+			self.ids = None
+
+
+	def affected_by(self, changes):
+		"""Whether a change can change this read's result: the document is in it, or matches its
+		query now. That covers a limit too: a document matching the query may enter the top N."""
+
+		if self.ids is None:
+			return True
+
+		for key, document in changes:
+			try:
+				if key in self.ids:
+					return True
+			except TypeError:
+				return True
+			if document is not None and may_match(document, self.query, self.exact):
+				return True
+
+		return False
 
 
 def forget(component):
@@ -333,7 +419,7 @@ class Collection:
 		self.name = name
 		self._store = None
 		self._lock = threading.RLock()
-		self._dependency = Dependency()
+		self._dependency = QueryDependency()
 
 		# Query results reused until the collection changes, since many subscribers usually
 		# render the same query after each change. The version guards against caching a
@@ -359,18 +445,19 @@ class Collection:
 		return self._store
 
 
-	def changed(self):
-		"""Forget cached results and re-render subscribers. Called after writes, and by the
-		MongoDB store when another process changes the collection."""
+	def changed(self, changes=None):
+		"""Forget cached results and re-render the subscribers the change affects. Called after
+		writes, and by the MongoDB store when another process changes the collection. `changes`
+		is a list of (_id, the document now, or None if it's gone); None re-renders them all."""
 
 		with self._lock:
 			self._results.clear()
 			self._version += 1
 
-		self._dependency.changed()
+		self._dependency.changed(changes)
 
 
-	def _wrote(self):
+	def _wrote(self, changes=None):
 
 		# A MongoDB change stream reports our own writes too; let it announce them so each
 		# change re-renders subscribers once. Cached results are dropped right away, so the
@@ -381,7 +468,7 @@ class Collection:
 				self._version += 1
 			return
 
-		self.changed()
+		self.changed(changes)
 
 
 	def insert(self, document):
@@ -390,7 +477,7 @@ class Collection:
 		document.setdefault("_id", uuid.uuid4().hex)
 
 		self.store().insert(document)
-		self._wrote()
+		self._wrote([(document["_id"], document)])
 
 		return document["_id"]
 
@@ -417,18 +504,22 @@ class Collection:
 		"""Apply `changes` ($set, $unset, $inc, $push, $pull, or a whole replacement document)
 		to the first matching document, or every one with multi=True. Returns the count."""
 
-		updated = self.store().update(query or {}, changes, multi)
+		# The in-memory store lists the documents it changed; MongoDB's doesn't, so without a
+		# change stream every subscriber re-renders
+		changed = []
+		updated = self.store().update(query or {}, changes, multi, changed)
 		if updated:
-			self._wrote()
+			self._wrote(changed or None)
 
 		return updated
 
 
 	def remove(self, query=None):
 
-		removed = self.store().remove(query or {})
+		changed = []
+		removed = self.store().remove(query or {}, changed)
 		if removed:
-			self._wrote()
+			self._wrote(changed or None)
 
 		return removed
 
@@ -453,7 +544,8 @@ class Collection:
 	def _fetch(self, query, sort, limit):
 
 		store = self.store()
-		self._dependency.depend()
+		read = Read(query, isinstance(store, MemoryStore))
+		self._dependency.depend(read)
 
 		key = repr((query, sort, limit))
 		with self._lock:
@@ -465,6 +557,7 @@ class Collection:
 			with self._lock:
 				if self._version == version:
 					self._results[key] = documents
+		read.found(documents)
 
 		# Copies, so callers can't change the stored documents or the cached results
 		return [copy_document(document) for document in documents]
@@ -502,7 +595,8 @@ class MemoryStore:
 		return documents
 
 
-	def update(self, query, changes, multi):
+	def update(self, query, changes, multi, changed=None):
+		"""Returns the count; (_id, document) of each one updated is added to `changed`."""
 
 		check_query(query)
 		updated = 0
@@ -511,7 +605,9 @@ class MemoryStore:
 			for document in list(self.documents.values()):
 				if not matches(document, query):
 					continue
-				self.documents[document["_id"]] = apply_changes(document, changes)
+				document = self.documents[document["_id"]] = apply_changes(document, changes)
+				if changed is not None:
+					changed.append((document["_id"], document))
 				updated += 1
 				if not multi:
 					break
@@ -519,7 +615,8 @@ class MemoryStore:
 		return updated
 
 
-	def remove(self, query):
+	def remove(self, query, changed=None):
+		"""Returns the count; (_id, None) of each one removed is added to `changed`."""
 
 		check_query(query)
 
@@ -527,6 +624,9 @@ class MemoryStore:
 			removed = [key for key, document in self.documents.items() if matches(document, query)]
 			for key in removed:
 				del self.documents[key]
+
+		if changed is not None:
+			changed.extend((key, None) for key in removed)
 
 		return len(removed)
 
@@ -605,6 +705,68 @@ def matches(document, query):
 			return False
 
 	return True
+
+
+def may_match(document, query, exact=True):
+	"""Whether `document` may match `query`: True unless matches() can tell for sure it doesn't.
+	With exact=False the query runs in MongoDB, which agrees with matches() only on plain values."""
+
+	try:
+		check_query(query)
+		if not exact and not plainly_matched(document, query):
+			return True
+		return matches(document, query)
+	except (ValueError, TypeError, AttributeError):
+		# Not a query matches() reads, such as an operator it doesn't support
+		return True
+
+
+# Values MongoDB compares as Python does: other types (ObjectId, dates, Decimal128) may not
+PLAIN = (str, int, float, bool)
+
+
+def plainly_matched(document, query):
+	"""Whether matches() decides `query` on `document` as MongoDB would. MongoDB looks inside
+	lists ("tags.name" finds a name in a list of dicts; {"$gt": 5} matches [1, 10]), its null also
+	matches a missing field, and it compares other types (numbers of different BSON types,
+	dates) in ways Python may not. So: no lists on the fields read, and plain values to compare."""
+
+	for key, condition in (query or {}).items():
+		if key in ("$and", "$or"):
+			if not all(plainly_matched(document, part) for part in condition):
+				return False
+			continue
+
+		value = document
+		for part in key.split("."):
+			if isinstance(value, list):
+				return False
+			if not isinstance(value, dict) or part not in value:
+				value = MISSING
+				break
+			value = value[part]
+
+		if value is not MISSING and not isinstance(value, (dict,) + PLAIN):
+			return False
+		if not plain_condition(condition):
+			return False
+
+	return True
+
+
+def plain_condition(condition):
+
+	if isinstance(condition, dict) and condition and all(key.startswith("$") for key in condition):
+		for operator, operand in condition.items():
+			if operator in ("$in", "$nin"):
+				if not isinstance(operand, (list, tuple)) or not all(plain_condition(option) for option in operand):
+					return False
+			elif not plain_condition(operand):
+				return False
+		return True
+
+	# None and embedded documents and lists compare differently in MongoDB
+	return isinstance(condition, PLAIN)
 
 
 def matches_value(value, condition):
