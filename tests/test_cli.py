@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from markupsafe import escape
 
 # Imported by module path: `from domino import cli` finds flask.cli, which core's
 # `from flask import *` brings into the package namespace
@@ -269,6 +270,97 @@ def test_created_app_renders(tmp_path, monkeypatch, forget_modules):
 	finally:
 		# Its components/ and data.py would shadow the next app's
 		forget_modules(tmp_path / "rendered")
+
+
+def test_create_minimal_scaffolds_the_smallest_app(tmp_path, capsys):
+
+	folder = tmp_path / "tiny"
+
+	assert cli.main(["create", str(folder), "--minimal"]) == 0
+
+	files = sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file())
+	assert files == ["app.py", "pages/index.html", "pages/index.py", "settings.json"]
+	# Only State, so `domino run` needn't start a MongoDB
+	assert json.loads((folder / "settings.json").read_text()) == {"mongo": {"auto": False}}
+	assert 'Document(title="tiny")' in (folder / "pages/index.py").read_text()
+	output = capsys.readouterr().out
+	assert "domino run" in output
+	assert "To test it" not in output
+
+
+def test_create_minimal_and_tailwind_dont_mix(tmp_path, capsys):
+
+	with pytest.raises(SystemExit) as exit:
+		cli.main(["create", str(tmp_path / "both"), "--minimal", "--tailwind"])
+
+	assert exit.value.code == 2
+	assert "not allowed with" in capsys.readouterr().err
+	assert not (tmp_path / "both").exists()
+
+
+def test_created_minimal_app_counts_without_mongo(tmp_path, monkeypatch, forget_modules):
+
+	def no_mongo(*args, **kwargs):
+		raise AssertionError("the minimal app shouldn't need MongoDB")
+
+	monkeypatch.setattr(devmongo, "start", no_mongo)
+	cli.create(str(tmp_path / "tiny"), minimal=True)
+
+	try:
+		app = cli.find_app(cli.load_module(tmp_path / "tiny" / "app.py"))
+		assert devmongo.disabled_reason(app.settings) == "disabled"
+
+		client = app.test_client()
+		response = client.get("/")
+		html = response.get_data(as_text=True)
+
+		assert response.status_code == 200
+		assert "<title>" in html and "tiny" in html
+		assert "<h1>0</h1>" in html
+
+		# The button's click event counts up
+		page_id = html.split('data-domino-page="')[1].split('"')[0]
+		event_id = html.split('data-event-id="')[1].split('"')[0]
+		result = client.post("/_domino/events", json={"page_id": page_id, "event_id": event_id, "data": {}}).get_json()
+
+		assert "<h1>1</h1>" in result["html"]
+	finally:
+		forget_modules(tmp_path / "tiny")
+
+
+def test_created_minimal_app_quotes_its_title(tmp_path, forget_modules):
+
+	# The folder's name is written into pages/index.py as a Python string. Windows doesn't allow
+	# " in file names, so it's only tried elsewhere
+	name = "it's café"
+	if os.name != "nt":
+		name = 'it\'s "café"'
+	folder = tmp_path / name
+	cli.create(str(folder), minimal=True)
+
+	try:
+		app = cli.find_app(cli.load_module(folder / "app.py"))
+		html = app.test_client().get("/").get_data(as_text=True)
+
+		assert html.split("<title>")[1].split("</title>")[0].strip() == escape(name)
+	finally:
+		forget_modules(folder)
+
+
+def test_minimal_example_is_what_create_minimal_makes(tmp_path):
+
+	folder = tmp_path / "minimal"
+	cli.create(str(folder), minimal=True)
+	example = Path(__file__).parent.parent / "examples" / "minimal"
+
+	files = sorted(path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file())
+	for name in files:
+		made = (folder / name).read_text(encoding="utf-8")
+		shown = (example / name).read_text(encoding="utf-8")
+		# The example's app.py also finds the repository's domino package, like every example
+		if name == "app.py":
+			shown = shown[shown.index("from domino import Domino"):]
+		assert shown == made, name
 
 
 def test_create_refuses_a_non_empty_folder(tmp_path, capsys):

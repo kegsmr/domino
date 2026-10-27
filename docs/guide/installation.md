@@ -18,7 +18,7 @@ cd myapp
 domino run
 ```
 
-Open http://127.0.0.1:5000. The first run downloads a MongoDB for development (see [Development MongoDB](cli.md#development-mongodb)); later runs start at once.
+Open http://127.0.0.1:5000. The first run downloads a MongoDB for development (see [Development MongoDB](cli.md#development-mongodb)); later runs start at once. `domino create myapp --minimal` makes a one-page app that needs no MongoDB, so it starts at once the first time too.
 
 - If `domino` isn't found after installing (common with the Microsoft Store's Python on Windows), use `python -m domino` instead: `python -m domino run`.
 - To work on Domino itself, install it from a clone instead: `pip install -e .[test]`.

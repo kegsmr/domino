@@ -12,6 +12,8 @@ domino run
 
 `domino create <name>` makes a folder with a small reactive app: a tiny `app.py`, the page `pages/index.html` in the layout `layouts/main.html`, components in `components/` (their logic in `tasks.py`, their markup in `tasks.html`, see [Templates](templates.md#templates)), a `Collection` in `data.py`, a test for the page in `pages/index_test.py` (run it with `pytest`; see [Testing your app](testing.md#testing-your-app)), a `settings.json` with a `public` block, and a `.gitignore`. It won't write into a folder that isn't empty.
 
+`domino create <name> --minimal` makes the smallest app that runs instead: `app.py` and one page, `pages/index.py`, with a counter component (its markup in `pages/index.html`). It keeps its data in `State` only, so its `settings.json` turns the [development MongoDB](#development-mongodb) off and `domino run` starts at once, with nothing to download.
+
 `domino run [folder or app.py] [--port 5000] [--host 127.0.0.1] [--no-mongo] [--mongo-version 7.0]` runs the app (default: the current folder) in debug mode, with [hot reloading](#hot-reloading): saving a file in the app's folder updates the open pages in place. For a folder it runs its `app.py`; a folder with only `pages/` (and maybe `settings.json`) needs no `app.py` at all, as `domino run` makes the app itself. `--port 0` picks a free port. `domino --version` prints the version.
 
 `domino serve [folder or app.py] [--workers N] [--port 8000] [--host 127.0.0.1]` serves the app in production, on every CPU core; see [Serving in production](deployment.md#serving-in-production).
