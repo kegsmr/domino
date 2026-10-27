@@ -14,6 +14,8 @@ import domino.tags as t
 from domino import Collection, Domino
 from domino.components import Document
 
+from test_query_subscriptions import watched
+
 
 def make_app(tasks, renders):
 
@@ -66,12 +68,7 @@ def tasks(request):
 	if request.param == "memory":
 		return Collection()
 
-	import time
-	collection = Collection(f"test_{uuid.uuid4().hex[:8]}")
-	while not collection.store().watching:
-		time.sleep(0.02)
-
-	return collection
+	return watched(Collection(f"test_{uuid.uuid4().hex[:8]}"))
 
 
 def test_a_change_updates_the_tabs_it_affects_and_only_them(tasks, served):

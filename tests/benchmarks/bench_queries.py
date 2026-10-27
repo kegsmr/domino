@@ -27,9 +27,10 @@ TASKS = 200
 
 def main():
 
-	tabs = int(sys.argv[1]) if len(sys.argv) > 1 else 200
-	writes = int(sys.argv[2]) if len(sys.argv) > 2 else 200
-	url = sys.argv[3] if len(sys.argv) > 3 else None
+	arguments = sys.argv[1:] + [None] * 3
+	tabs = int(arguments[0] or 200)
+	writes = int(arguments[1] or 200)
+	url = arguments[2]
 
 	if url:
 		mongo.connect(url)
@@ -79,7 +80,9 @@ def main():
 
 	cpu = time.process_time() - cpu
 	took = time.perf_counter() - start
-	store = "MongoDB" if url else "memory"
+	store = "memory"
+	if url:
+		store = "MongoDB"
 	print(f"{store}: {tabs} tabs, {writes} writes: {renders[0]} renders, {cpu:.2f} s CPU ({cpu / writes * 1000:.2f} ms per write), {took:.2f} s")
 
 	if url:

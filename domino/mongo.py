@@ -184,6 +184,15 @@ class MongoStore:
 		self.generation = _generation
 		self.watching = False
 
+		# Changes are only judged by query (see domino.reactive.Read) when MongoDB compares
+		# strings as Python does: a default collation (case-insensitive, say) changes that
+		self.matching = "plain"
+		try:
+			if self.collection.options().get("collation"):
+				self.matching = None
+		except Exception:
+			self.matching = None
+
 		# Cluster times of this process's last write and of the last change the stream
 		# announced, for wait()
 		self._written = None
@@ -204,11 +213,15 @@ class MongoStore:
 
 		import pymongo.errors
 
+		# Updates come with the document as it is now, to tell which pages they affect. What
+		# changed in it isn't needed: leaving it out keeps an event with a large document under
+		# MongoDB's size limit (an event over it would end the stream)
+		pipeline = [{"$project": {"updateDescription": 0}}]
+
 		resume = None
 		while not self.stale:
 			try:
-				# Updates come with the document as it is now, to tell which pages they affect
-				with self.collection.watch(resume_after=resume, full_document="updateLookup") as stream:
+				with self.collection.watch(pipeline, resume_after=resume, full_document="updateLookup") as stream:
 					self.watching = True
 					self._started.set()
 					while stream.alive:

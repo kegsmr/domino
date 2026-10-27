@@ -277,6 +277,15 @@ def test_may_match_in_mongodb_decides_only_plain_values():
 	assert may_match({"a": {"b": 1}}, {"a": {"b": 1, "c": 2}}, exact=False) is True
 
 
+def test_may_match_in_mongodb_minds_booleans_and_nan():
+
+	assert may_match({"done": 1}, {"done": {"$ne": True}}, exact=False) is True
+	assert may_match({"done": True}, {"done": {"$nin": [1]}}, exact=False) is True
+	assert may_match({"score": float("nan")}, {"score": float("nan")}, exact=False) is True
+	assert may_match({"done": False}, {"done": {"$ne": False}}, exact=False) is False
+	assert may_match({"n": 2}, {"n": {"$exists": False}}, exact=False) is False
+
+
 def test_change_stream_events_name_their_document():
 
 	document = {"_id": "a", "done": True}
@@ -286,3 +295,285 @@ def test_change_stream_events_name_their_document():
 	assert changed_documents({"operationType": "delete", "documentKey": {"_id": "a"}}) == [("a", None)]
 	assert changed_documents({"operationType": "drop"}) is None
 	assert changed_documents({"operationType": "invalidate"}) is None
+
+
+@pytest.mark.mongo
+def test_a_number_written_where_a_boolean_was_expected_re_renders():
+
+	name = unique_name()
+	tasks = watched(Collection(name))
+	renders = show({"done": {"$ne": True}}, tasks)
+
+	# In MongoDB 1 isn't True, so this one is not done
+	mongo.database()[name].insert_one({"_id": "x", "text": "one", "done": 1, "n": 1})
+	settled()
+
+	assert renders[-1] == ["one"]
+
+
+@pytest.mark.mongo
+def test_nan_re_renders():
+
+	tasks = watched(Collection(unique_name()))
+	renders = show({"score": float("nan")}, tasks)
+
+	# MongoDB's queries find NaN with NaN
+	tasks.insert({"text": "nan", "score": float("nan"), "n": 1})
+	settled()
+
+	assert renders[-1] == ["nan"]
+
+
+@pytest.mark.mongo
+def test_a_collection_with_a_collation_re_renders_on_every_change():
+
+	from pymongo.collation import Collation
+
+	name = unique_name()
+	mongo.database().create_collection(name, collation=Collation("en", strength=2))
+	tasks = watched(Collection(name))
+	renders = show({"text": "ada"}, tasks)
+
+	# Case-insensitive: "Ada" is found by "ada"
+	tasks.insert({"text": "Ada", "n": 1})
+	settled()
+
+	assert renders[-1] == ["Ada"]
+
+
+@pytest.mark.mongo
+def test_a_shared_component_shown_on_other_pages_stays_up_to_date(monkeypatch):
+
+	import threading
+	from domino.testing import TestPage
+
+	tasks = watched(Collection(unique_name()))
+	tasks.insert({"text": "a", "done": False})
+	tasks.insert({"text": "b", "done": False})
+	settled()
+
+	class Board(t.ul):
+
+		def render(self):
+			return [t.li() [task["text"], t.button(on_click=self.finish_first) ["Done"]] for task in tasks.find({"done": False}, sort="text")]
+
+		def finish_first(self):
+			tasks.update({"done": False}, {"$set": {"done": True}})
+
+	# One instance on every page, like a board everyone sees
+	board = Board()
+	app = Domino(__name__)
+	apps.append(app)
+
+	@app.route("/")
+	def index():
+		return Document() [board]
+
+	first = TestPage(app)
+	second = TestPage(app)
+
+	# The change stream announces the change only after the click's response
+	gate = threading.Event()
+	announce = mongo.changed_documents
+
+	def later(change):
+		gate.wait(1)
+		return announce(change)
+
+	monkeypatch.setattr(mongo, "changed_documents", later)
+	first.click("button")
+	gate.set()
+	settled()
+
+	assert first.sync().text().count("Done") == 1
+	assert second.sync().text().count("Done") == 1
+
+
+@pytest.mark.mongo
+def test_a_large_document_keeps_the_change_stream_alive():
+
+	name = unique_name()
+	tasks = watched(Collection(name))
+	mongo.database()[name].insert_one({"_id": "big", "text": "big", "done": True, "n": 1, "a": "x" * (8 * 1024 * 1024)})
+	settled()
+	renders = show({"done": False}, tasks)
+
+	# The document after this is 15 MB: with what changed in it as well, the event would be
+	# over MongoDB's 16 MB limit
+	mongo.database()[name].update_one({"_id": "big"}, {"$set": {"done": False, "b": "y" * (7 * 1024 * 1024)}})
+	settled()
+	assert renders[-1] == ["big"]
+
+	mongo.database()[name].insert_one({"_id": "small", "text": "small", "done": False, "n": 2})
+	settled()
+	assert tasks.store().watching
+	assert renders[-1] == ["big", "small"]
+
+
+# Matching
+
+
+def test_may_match_in_memory_is_exact():
+
+	assert may_match({"done": True}, {"done": False}) is False
+	assert may_match({"done": False}, {"done": False}) is True
+	assert may_match({"tags": ["a", "b"]}, {"tags": "c"}) is False
+	assert may_match({"n": 5}, {"n": {"$gt": 3, "$lt": 10}}) is True
+	assert may_match({"n": 5}, {"$or": [{"n": 1}, {"n": 2}]}) is False
+
+
+def test_may_match_in_mongodb_decides_only_plain_values():
+
+	# Plain values, as MongoDB would
+	assert may_match({"done": True}, {"done": False}, exact=False) is False
+	assert may_match({"n": 5}, {"n": {"$gt": 6}}, exact=False) is False
+	assert may_match({"a": {"b": 1}}, {"a.b": 2}, exact=False) is False
+	assert may_match({"name": "x"}, {"name": {"$in": ["y", "z"]}}, exact=False) is False
+	assert may_match({}, {"owner": "me"}, exact=False) is False
+
+	# MongoDB looks inside lists, matches a missing field with null, and has more operators
+	assert may_match({"n": [1, 10]}, {"n": {"$gt": 5}}, exact=False) is True
+	assert may_match({"items": [{"name": "a"}]}, {"items.name": "a"}, exact=False) is True
+	assert may_match({"items": [{"name": "a"}]}, {"items.0.name": "b"}, exact=False) is True
+	assert may_match({}, {"deleted": None}, exact=False) is True
+	assert may_match({"text": "b"}, {"text": {"$regex": "^a"}}, exact=False) is True
+	assert may_match({"text": "b"}, {"$nor": [{"text": "a"}]}, exact=False) is True
+
+	# Other types compare in MongoDB's own ways
+	from datetime import datetime, timezone
+	assert may_match({"at": datetime(2026, 1, 1)}, {"at": datetime(2026, 1, 1, tzinfo=timezone.utc)}, exact=False) is True
+	assert may_match({"a": {"b": 1}}, {"a": {"b": 1, "c": 2}}, exact=False) is True
+
+
+def test_may_match_in_mongodb_minds_booleans_and_nan():
+
+	assert may_match({"done": 1}, {"done": {"$ne": True}}, exact=False) is True
+	assert may_match({"done": True}, {"done": {"$nin": [1]}}, exact=False) is True
+	assert may_match({"score": float("nan")}, {"score": float("nan")}, exact=False) is True
+	assert may_match({"done": False}, {"done": {"$ne": False}}, exact=False) is False
+	assert may_match({"n": 2}, {"n": {"$exists": False}}, exact=False) is False
+
+
+def test_change_stream_events_name_their_document():
+
+	document = {"_id": "a", "done": True}
+
+	assert changed_documents({"operationType": "insert", "documentKey": {"_id": "a"}, "fullDocument": document}) == [("a", document)]
+	assert changed_documents({"operationType": "update", "documentKey": {"_id": "a"}, "fullDocument": None}) == [("a", None)]
+	assert changed_documents({"operationType": "delete", "documentKey": {"_id": "a"}}) == [("a", None)]
+	assert changed_documents({"operationType": "drop"}) is None
+	assert changed_documents({"operationType": "invalidate"}) is None
+
+
+@pytest.mark.mongo
+def test_a_number_written_where_a_boolean_was_expected_re_renders():
+
+	name = unique_name()
+	tasks = watched(Collection(name))
+	renders = show({"done": {"$ne": True}}, tasks)
+
+	# In MongoDB 1 isn't True, so this one is not done
+	mongo.database()[name].insert_one({"_id": "x", "text": "one", "done": 1, "n": 1})
+	settled()
+
+	assert renders[-1] == ["one"]
+
+
+@pytest.mark.mongo
+def test_nan_re_renders():
+
+	tasks = watched(Collection(unique_name()))
+	renders = show({"score": float("nan")}, tasks)
+
+	# MongoDB's queries find NaN with NaN
+	tasks.insert({"text": "nan", "score": float("nan"), "n": 1})
+	settled()
+
+	assert renders[-1] == ["nan"]
+
+
+@pytest.mark.mongo
+def test_a_collection_with_a_collation_re_renders_on_every_change():
+
+	from pymongo.collation import Collation
+
+	name = unique_name()
+	mongo.database().create_collection(name, collation=Collation("en", strength=2))
+	tasks = watched(Collection(name))
+	renders = show({"text": "ada"}, tasks)
+
+	# Case-insensitive: "Ada" is found by "ada"
+	tasks.insert({"text": "Ada", "n": 1})
+	settled()
+
+	assert renders[-1] == ["Ada"]
+
+
+@pytest.mark.mongo
+def test_a_shared_component_shown_on_other_pages_stays_up_to_date(monkeypatch):
+
+	import threading
+	from domino.testing import TestPage
+
+	tasks = watched(Collection(unique_name()))
+	tasks.insert({"text": "a", "done": False})
+	tasks.insert({"text": "b", "done": False})
+	settled()
+
+	class Board(t.ul):
+
+		def render(self):
+			return [t.li() [task["text"], t.button(on_click=self.finish_first) ["Done"]] for task in tasks.find({"done": False}, sort="text")]
+
+		def finish_first(self):
+			tasks.update({"done": False}, {"$set": {"done": True}})
+
+	# One instance on every page, like a board everyone sees
+	board = Board()
+	app = Domino(__name__)
+	apps.append(app)
+
+	@app.route("/")
+	def index():
+		return Document() [board]
+
+	first = TestPage(app)
+	second = TestPage(app)
+
+	# The change stream announces the change only after the click's response
+	gate = threading.Event()
+	announce = mongo.changed_documents
+
+	def later(change):
+		gate.wait(1)
+		return announce(change)
+
+	monkeypatch.setattr(mongo, "changed_documents", later)
+	first.click("button")
+	gate.set()
+	settled()
+
+	assert first.sync().text().count("Done") == 1
+	assert second.sync().text().count("Done") == 1
+
+
+@pytest.mark.mongo
+def test_a_change_too_large_to_send_with_its_document_still_re_renders():
+
+	name = unique_name()
+	tasks = watched(Collection(name))
+	# Almost MongoDB's 16 MB limit, so the event with the whole document is over it
+	big = "x" * (16 * 1024 * 1024 - 200)
+	mongo.database()[name].insert_one({"_id": "big", "text": "big", "done": True, "n": 1, "blob": big})
+	settled()
+	renders = show({"done": False}, tasks, sort=None)
+
+	mongo.database()[name].update_one({"_id": "big"}, {"$set": {"done": False}})
+	settled()
+	assert tasks.store().watching
+	assert renders[-1] == ["big"]
+
+	# Still live afterwards
+	mongo.database()[name].insert_one({"_id": "small", "text": "small", "done": False, "n": 2})
+	settled()
+	assert sorted(renders[-1]) == ["big", "small"]

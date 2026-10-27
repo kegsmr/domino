@@ -1,5 +1,5 @@
 """Reactive data, like Meteor's Tracker: reading it in a component's render() subscribes the
-component, and changing it re-renders every subscribed component on every open page."""
+component, and changing it re-renders the subscribed components it affects on every open page."""
 
 import logging
 import queue
@@ -116,12 +116,13 @@ class Read:
 	"""A query a render read, and the _ids of what it found."""
 
 
-	def __init__(self, query, exact):
+	def __init__(self, query, matching):
 
-		self.query = query
-		# Whether the store itself matches with matches(), so it decides exactly; MongoDB's own
-		# matching only agrees with it for simple values (see plainly_matched)
-		self.exact = exact
+		# A copy, so a dict the caller changes later doesn't change what's checked
+		self.query = copy_document(query)
+		# "exact" when the store itself matches with matches(); "plain" for MongoDB, whose own
+		# matching only agrees with it for plain values (see plainly_matched); None to never tell
+		self.matching = matching
 		# None until the result is in, so any change meanwhile counts
 		self.ids = None
 
@@ -148,7 +149,9 @@ class Read:
 					return True
 			except TypeError:
 				return True
-			if document is not None and may_match(document, self.query, self.exact):
+			if document is None:
+				continue
+			if self.matching is None or may_match(document, self.query, self.matching == "exact"):
 				return True
 
 		return False
@@ -544,7 +547,7 @@ class Collection:
 	def _fetch(self, query, sort, limit):
 
 		store = self.store()
-		read = Read(query, isinstance(store, MemoryStore))
+		read = Read(query, getattr(store, "matching", "exact"))
 		self._dependency.depend(read)
 
 		key = repr((query, sort, limit))
@@ -716,8 +719,9 @@ def may_match(document, query, exact=True):
 		if not exact and not plainly_matched(document, query):
 			return True
 		return matches(document, query)
-	except (ValueError, TypeError, AttributeError):
-		# Not a query matches() reads, such as an operator it doesn't support
+	except Exception:
+		# Not a query matches() reads, such as an operator it doesn't support. Never raises: it
+		# runs in the change stream's thread
 		return True
 
 
@@ -729,7 +733,8 @@ def plainly_matched(document, query):
 	"""Whether matches() decides `query` on `document` as MongoDB would. MongoDB looks inside
 	lists ("tags.name" finds a name in a list of dicts; {"$gt": 5} matches [1, 10]), its null also
 	matches a missing field, and it compares other types (numbers of different BSON types,
-	dates) in ways Python may not. So: no lists on the fields read, and plain values to compare."""
+	dates; a boolean never equals a number; NaN equals NaN) in ways Python may not. So: no lists
+	on the fields read, and plain values to compare, of the same kind."""
 
 	for key, condition in (query or {}).items():
 		if key in ("$and", "$or"):
@@ -746,27 +751,43 @@ def plainly_matched(document, query):
 				break
 			value = value[part]
 
-		if value is not MISSING and not isinstance(value, (dict,) + PLAIN):
+		if value is not MISSING and not isinstance(value, dict) and not plain(value):
 			return False
-		if not plain_condition(condition):
+		if not plain_condition(condition, value):
 			return False
 
 	return True
 
 
-def plain_condition(condition):
+def plain_condition(condition, value):
 
 	if isinstance(condition, dict) and condition and all(key.startswith("$") for key in condition):
 		for operator, operand in condition.items():
+			if operator == "$exists":
+				continue
 			if operator in ("$in", "$nin"):
-				if not isinstance(operand, (list, tuple)) or not all(plain_condition(option) for option in operand):
+				if not isinstance(operand, (list, tuple)) or not all(plain_condition(option, value) for option in operand):
 					return False
-			elif not plain_condition(operand):
+			elif not plain_condition(operand, value):
 				return False
 		return True
 
 	# None and embedded documents and lists compare differently in MongoDB
-	return isinstance(condition, PLAIN)
+	if not plain(condition):
+		return False
+
+	# MongoDB never takes True for 1 (or False for 0), as Python does
+	numbers = (int, float)
+	if isinstance(value, numbers) and isinstance(condition, numbers):
+		return isinstance(value, bool) == isinstance(condition, bool)
+
+	return True
+
+
+def plain(value):
+
+	# NaN equals NaN in MongoDB's queries, not in Python
+	return isinstance(value, PLAIN) and value == value
 
 
 def matches_value(value, condition):
