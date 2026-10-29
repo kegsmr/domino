@@ -1806,6 +1806,11 @@ class Lookup:
 		self.namespaces = namespaces  # where classes are looked up first
 		self.element = component
 		self.context = context
+		# Module-level functions of the modules the namespaces are, called like the component's own
+		# helpers: {{ format_price(item) }} with format_price outside any class
+		self.functions = {}
+		for namespace in reversed(namespaces):
+			self.functions.update(module_functions(namespace))
 
 
 	def __call__(self, name, where):
@@ -1817,10 +1822,14 @@ class Lookup:
 				return values[name]
 			if name in component_names(type(element)):
 				return getattr(element, name)
+			if name in self.functions:
+				return self.functions[name]
 			if isinstance(element, MarkupComponent) and not name.startswith("_") and name not in BUILTINS:
 				return None
 		elif name in self.context:
 			return self.context[name]
+		elif name in self.functions:
+			return self.functions[name]
 
 		if name in BUILTINS:
 			return BUILTINS[name]
@@ -1839,10 +1848,11 @@ class Lookup:
 	def available(self):
 
 		if self.element is None:
-			return list(self.context)
+			return list(self.context) + list(self.functions)
 
 		names = component_names(type(self.element))
 		names |= {name for name in self.element.__dict__ if not name.startswith("_") and name not in ELEMENT_NAMES}
+		names |= set(self.functions)
 
 		return names
 
@@ -1860,6 +1870,47 @@ class Lookup:
 			cls = cache["class"] = find_class(name, where, self.path)
 
 		return cls
+
+
+def module_functions(namespace):
+	"""The functions a module defines at its top level (not those it imports, nor _private ones),
+	by name, if `namespace` is a module's variables."""
+
+	# Not Domino's own (a component with no class is made in this module)
+	module = namespace.get("__name__")
+	if not isinstance(module, str) or "__file__" not in namespace or module.split(".")[0] == "domino":
+		return {}
+
+	return {
+		name: value for name, value in namespace.items()
+		if isinstance(value, types.FunctionType) and value.__module__ == module and not name.startswith("_")
+	}
+
+
+def module_next_to(path):
+	"""The variables of the module next to a template file (components/card.py for
+	components/card.html), if it's imported."""
+
+	source = os.path.abspath(os.path.splitext(path)[0] + ".py")
+
+	# Found once, then checked: a module imported again (hot reloading, tests) is found again
+	name = _next_to.get(source)
+	module = sys.modules.get(name) if name else None
+	if module is not None and os.path.abspath(getattr(module, "__file__", None) or "") == source:
+		return vars(module)
+
+	if not os.path.isfile(source):
+		return None
+
+	for name, module in list(sys.modules.items()):
+		if os.path.abspath(getattr(module, "__file__", None) or "") == source:
+			_next_to[source] = name
+			return vars(module)
+
+	return None
+
+
+_next_to = {}  # a template's .py file -> the name of its module
 
 
 def known_classes():
@@ -2201,8 +2252,14 @@ def render_component(element, path):
 	if slot is None:
 		slot = element.__dict__["_domino_slot"] = list(element.content_root.__children__)
 
+	# Names come from the class's module, then the one next to the template (a component with
+	# no class may still have its helper functions there)
 	module = sys.modules.get(cls.__module__)
-	lookup = Lookup(path, [vars(module)] if module else [], component=element)
+	namespaces = [vars(module)] if module else []
+	beside = module_next_to(path)
+	if beside is not None and all(beside is not namespace for namespace in namespaces):
+		namespaces.append(beside)
+	lookup = Lookup(path, namespaces, component=element)
 	context = Context({}, lookup, slot)
 
 	_root(element, definition, context)
