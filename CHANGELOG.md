@@ -2,6 +2,7 @@
 
 ## 0.4.0 (unreleased)
 
+- Templates call the functions defined at the top level of a component's module, as they do its methods: `{{ money(amount) }}` with `def money(cents)` outside any class. A component with no state needs no class, only its functions.
 - `examples/pixels`: a canvas everyone paints together, live in every window, with drag painting.
 - `while-pressed`: hover events (`on-pointerenter`, `on-mouseover`, ...) count only while a mouse button is down, for painting or selecting by dragging.
 - Page tests: `page.trigger(selector, event)` fires any event, like `page.click` does clicks.
