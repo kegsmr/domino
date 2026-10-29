@@ -18,7 +18,7 @@ While you work on it, run the app in a window instead of a browser tab:
 domino desktop myapp
 ```
 
-It's `domino run` in a window: hot reloading and the development MongoDB work as they do in a browser. Closing the window stops the server. Settings for the window go in `settings.json`:
+It's `domino run` in a window: hot reloading and the development MongoDB work as they do in a browser. Closing the window stops the server, and so does the window's program ending any other way (a crash, say). Settings for the window go in `settings.json`:
 
 ```json
 {"desktop": {"title": "Notes", "width": 1024, "height": 768}}
@@ -32,7 +32,7 @@ The title defaults to the folder's name.
 domino build --desktop myapp
 ```
 
-This packages the app with PyInstaller into one program in `myapp/dist/`: `<name>.exe` on Windows, `<name>.app` on macOS, `<name>` on Linux, named after the window's title. Users don't need Python. Build on each system you ship for, since PyInstaller doesn't cross-compile.
+This packages the app with PyInstaller into one program in `myapp/dist/`: `<name>.exe` on Windows, `<name>.app` on macOS, `<name>` on Linux, named after the window's title. Users don't need Python. Build on each system you ship for, since PyInstaller doesn't cross-compile. On Windows and macOS the program uses the system's web engine; on Linux it carries Qt's, which makes it about 270 MB.
 
 - The program holds the app's files (not its `_test.py` files), Domino, and the Python modules the app's files import. A module imported in an unusual way (`importlib`, say) needs an `import` somewhere in the app's files to be packaged.
 - Its Tailwind CSS is built first, if it uses Tailwind.

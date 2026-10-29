@@ -43,3 +43,22 @@ jobs:
       - run: pip install -e .[test] playwright
       - run: python -m playwright install chromium
       - run: python -m pytest -v
+
+  # `domino build --desktop` on Windows: package examples/todo with PyInstaller, then run the
+  # program, which serves its page and checks a request without its token is refused
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e .[desktop]
+      - run: domino build --desktop examples/todo
+      - run: examples/todo/dist/todo.exe
+        env:
+          DOMINO_DESKTOP_SMOKE: "1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: todo-windows
+          path: examples/todo/dist/todo.exe

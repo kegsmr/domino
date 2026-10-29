@@ -9,6 +9,7 @@ token, which the window's first URL carries once and then keeps in a cookie. Req
 sockets without it are refused, so other programs and web pages on the machine can't use the app.
 """
 
+import _thread
 import ast
 import os
 import secrets
@@ -26,6 +27,9 @@ from pathlib import Path
 
 # The launch's token, for the server (also in the reloader's process, through the environment)
 ENV_TOKEN = "DOMINO_DESKTOP_TOKEN"
+
+# The window's process, which `domino run` watches, to stop if it ends without stopping it
+ENV_PARENT = "DOMINO_DESKTOP_PARENT"
 
 # The cookie that holds it, and the query parameter that brings it the first time
 COOKIE = "domino_desktop"
@@ -45,7 +49,7 @@ import sys
 
 from domino.desktop import launch
 
-sys.exit(launch(os.path.join(sys._MEIPASS, "app")))
+sys.exit(launch(os.path.join(sys._MEIPASS, "app"), {name!r}))
 '''
 
 
@@ -138,15 +142,16 @@ def wait_for(port, alive=lambda: True, timeout=120):
 	return False
 
 
-def options(folder):
-	"""The window's settings: {"desktop": {"title": ..., "width": ..., "height": ...}} in settings.json."""
+def options(folder, name=None):
+	"""The window's settings: {"desktop": {"title": ..., "width": ..., "height": ...}} in settings.json.
+	The title defaults to the app's folder's name (`name`, for a packaged app, whose folder is "app")."""
 
 	from .settings import load_settings
 
 	desktop = load_settings(str(folder)).get("desktop") or {}
 
 	return {
-		"title": desktop.get("title") or Path(folder).name.replace("-", " ").replace("_", " ").title(),
+		"title": desktop.get("title") or (name or Path(folder).name).replace("-", " ").replace("_", " ").title(),
 		"width": int(desktop.get("width") or 1024),
 		"height": int(desktop.get("height") or 768),
 	}
@@ -200,7 +205,7 @@ def run(path, port=None):
 	port = port or free_port()
 
 	command = [sys.executable, "-m", "domino", "run", str(path), "--port", str(port)]
-	env = dict(os.environ, **{ENV_TOKEN: value})
+	env = dict(os.environ, **{ENV_TOKEN: value, ENV_PARENT: str(os.getpid())})
 	# Its own process group, so stopping it reaches the reloader and MongoDB as Ctrl+C would
 	if os.name == "nt":
 		server = subprocess.Popen(command, env=env, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
@@ -215,6 +220,45 @@ def run(path, port=None):
 		stop(server)
 
 	return 0
+
+
+def watch_parent():
+	"""In the `domino run` that `domino desktop` started: stop as Ctrl+C would if the window's
+	process ends without stopping it (it crashed, or was killed), so no server is left behind."""
+
+	# Taken out, so the reloader's processes don't watch too
+	parent = os.environ.pop(ENV_PARENT, None)
+	if not parent:
+		return
+
+	def watch():
+		while alive(int(parent)):
+			time.sleep(1)
+		if os.name == "nt":
+			_thread.interrupt_main()
+		else:
+			os.kill(os.getpid(), signal.SIGINT)
+
+	threading.Thread(target=watch, daemon=True, name="domino-desktop-parent").start()
+
+
+def alive(pid):
+	"""Whether the process that started this one is still running."""
+
+	if os.name != "nt":
+		# A process whose parent ended is handed to another
+		return os.getppid() == pid
+
+	import ctypes
+
+	kernel32 = ctypes.windll.kernel32
+	handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+	if not handle:
+		return False
+	try:
+		return kernel32.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT: still running
+	finally:
+		kernel32.CloseHandle(handle)
 
 
 def stop(process, timeout=15):
@@ -237,7 +281,7 @@ def stop(process, timeout=15):
 # The packaged program
 
 
-def launch(folder):
+def launch(folder, name=None):
 	"""The packaged program: serve the app in a thread of this process, on a free local port, and
 	show it in a window. Closing the window ends the program."""
 
@@ -268,7 +312,7 @@ def launch(folder):
 		if os.environ.get(ENV_SMOKE):
 			return smoke(port, value)
 
-		show(first_url(port, value), options(folder))
+		show(first_url(port, value), options(folder, name))
 	finally:
 		server.should_exit = True
 		thread.join(5)
@@ -373,7 +417,7 @@ def build(path):
 
 	copy_app(folder, work / "app")
 	launcher = work / "launcher.py"
-	launcher.write_text(LAUNCHER, encoding="utf-8")
+	launcher.write_text(LAUNCHER.format(name=folder.name), encoding="utf-8")
 
 	command = [
 		sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--log-level", "WARN",

@@ -2,6 +2,7 @@
 what `domino build --desktop` packages."""
 
 import asyncio
+import os
 import json
 import urllib.error
 import urllib.request
@@ -175,3 +176,42 @@ def test_desktop_command_needs_an_app(tmp_path):
 	from domino.cli import main
 
 	assert main(["desktop", str(tmp_path)]) == 1
+
+
+def test_a_packaged_app_is_titled_after_its_own_folder(tmp_path):
+
+	# Packaged, the app's files are in a folder called "app"; the launcher passes the real name
+	app = tmp_path / "app"
+	(app / "pages").mkdir(parents=True)
+	assert desktop.options(app, "my-notes")["title"] == "My Notes"
+
+
+def test_the_server_stops_when_its_window_process_is_gone(tmp_path):
+
+	import subprocess
+	import sys
+
+	# A process standing in for `domino run` watches the one that started it, which ends at once
+	code = (
+		"import os, signal, sys, time\n"
+		"from domino import desktop\n"
+		"signal.signal(signal.SIGINT, lambda *args: sys.exit(7))\n"
+		f"open({str(tmp_path / 'started')!r}, 'w').close()\n"
+		"desktop.watch_parent()\n"
+		"time.sleep(30)\n"
+	)
+	# As `domino desktop` starts `domino run`: its own pid in the child's environment
+	spawn = (f"import os, subprocess, sys; env = dict(os.environ, {desktop.ENV_PARENT}=str(os.getpid())); "
+		f"print(subprocess.Popen([sys.executable, '-c', {code!r}], env=env).pid)")
+	parent = subprocess.Popen([sys.executable, "-c", spawn], stdout=subprocess.PIPE, text=True)
+	child = int(parent.stdout.readline())
+	parent.wait()
+
+	from conftest import running, wait_until
+
+	try:
+		wait_until((tmp_path / "started").exists, message="the child didn't start")
+		wait_until(lambda: not running(child), message="the child kept running after its parent ended")
+	finally:
+		if running(child):
+			os.kill(child, 9)

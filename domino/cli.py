@@ -427,6 +427,9 @@ def load_app(path):
 
 def run(args):
 
+	# Started by `domino desktop`: stop with its window
+	desktop.watch_parent()
+
 	if args.no_mongo:
 		os.environ[devmongo.ENV_DISABLE] = "1"
 
