@@ -8,7 +8,7 @@ from domino import Domino
 
 
 # The documentation site, a Domino app itself: each file in pages/ is a page, and the guide's
-# pages are made from the repository's README.md when the app starts
+# pages are made from the Markdown in docs/guide/ when the app starts
 app = Domino(__name__)
 
 

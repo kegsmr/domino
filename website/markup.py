@@ -1,4 +1,4 @@
-"""Markdown and code highlighting for the docs: Markdown (README.md's sections, the tutorial's
+"""Markdown and code highlighting for the docs: Markdown (the guide's sections, the tutorial's
 prose) becomes HTML, with its code blocks split out so pages show them as Code components."""
 
 import functools
@@ -17,7 +17,7 @@ from pygments.util import ClassNotFound
 # The code blocks Markdown makes: <pre><code class="language-python">...</code></pre>
 CODE_BLOCK = re.compile(r'<pre><code(?: class="language-([\w+-]+)")?>(.*?)</code></pre>', re.S)
 
-# Links to README sections (#testing-your-app) and to files of the repository (examples/...)
+# Links to sections (#testing-your-app) and to files of the repository (examples/...)
 HREF = re.compile(r'href="([^"]*)"')
 
 REPOSITORY = "https://github.com/kegsmr/domino"
@@ -25,7 +25,7 @@ REPOSITORY = "https://github.com/kegsmr/domino"
 
 def slug(title):
 	"""A heading's anchor, the way GitHub makes them: "Template strings (Python 3.14)" ->
-	"template-strings-python-314", so README links (#testing-your-app) keep working."""
+	"template-strings-python-314", so links to sections (#testing-your-app) keep working."""
 
 	text = re.sub(r"[^\w\- ]", "", title.strip().lower())
 

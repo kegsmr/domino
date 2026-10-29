@@ -4,7 +4,7 @@ from components.code import Code
 
 
 class Prose(t.div):
-	"""Text written in Markdown: README sections and the tutorial's prose."""
+	"""Text written in Markdown: the guide's sections and the tutorial's prose."""
 
 	css = {
 		"line_height": "1.7",

@@ -1,6 +1,7 @@
 window.Domino = (() => {
     const FIELDS = ['INPUT', 'SELECT', 'TEXTAREA'];
     const TOGGLES = ['checkbox', 'radio', 'range', 'color', 'file', 'submit', 'button'];
+    const HOVERS = ['pointerenter', 'pointerover', 'pointermove', 'mouseenter', 'mouseover', 'mousemove'];
 
     // Event types we already listen for on the document
     const listening = new Set();
@@ -1081,8 +1082,10 @@ window.Domino = (() => {
         while (el && el.nodeType === Node.ELEMENT_NODE) {
             const ids = el.getAttribute('data-event-id');
             if (ids) {
+                // while-pressed: hovering counts only with a button down (painting by dragging)
+                const idle = !e.buttons && HOVERS.includes(e.type) && el.hasAttribute('while-pressed');
                 for (const eventId of ids.split(' ')) {
-                    if (eventId.split('-').pop() === e.type) handle(el, eventId, e);
+                    if (!idle && eventId.split('-').pop() === e.type) handle(el, eventId, e);
                 }
             }
             // Events like focus or mouseenter belong only to their own element
