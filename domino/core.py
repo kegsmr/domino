@@ -735,6 +735,10 @@ class Domino(Flask):
 		self._add_session_handoff('/_domino/session/<token>')
 		self._add_health_check('/_domino/health')
 
+		# Windows (<window name="Settings">), each shown as a page of its own
+		from .windows import add_route as add_window_route
+		add_window_route(self)
+
 		# The inspector's script and data; they answer 404 unless the app is in debug mode
 		from .devtools import add_routes
 		add_routes(self)
@@ -982,6 +986,12 @@ class Domino(Flask):
 		if g.get("domino_redirect"):
 			response["redirect"] = g.domino_redirect
 
+		# Windows to open, and whether to close this one (see domino.windows)
+		if g.get("domino_windows"):
+			response["windows"] = g.domino_windows
+		if g.get("domino_close"):
+			response["close"] = True
+
 		# For the inspector's event log (see handle_event)
 		debug = g.get("domino_debug")
 		if debug:
@@ -1019,6 +1029,8 @@ class Domino(Flask):
 
 			g.domino_page = page
 			g.domino_redirect = None  # set by redirect()
+			g.domino_windows = []  # set by open_window()
+			g.domino_close = False  # set by close_window()
 			g.domino_called = None  # a parent whose handler the callback called (see Callback)
 
 			_, callback = event

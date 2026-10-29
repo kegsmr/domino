@@ -307,6 +307,66 @@ window.Domino = (() => {
         // Unmark first, so the server's HTML decides whether the element ends up disabled
         if (request && request.unmark) request.unmark();
         apply(data, request ? request.reset : null);
+        // The handler opened windows, or closed this one (see domino/windows.py)
+        if (data.windows) data.windows.forEach(openWindow);
+        if (data.close) closeWindow();
+    }
+
+    // In a desktop app (domino desktop) pywebview's bridge opens a native window; in a browser, a
+    // dialog on this page shows the window's page in a frame
+    function openWindow(spec) {
+        if (!spec.url || !spec.url.startsWith('/_domino/window/')) return;
+        const bridge = window.pywebview && window.pywebview.api;
+        if (bridge && bridge.open_window) {
+            bridge.open_window(spec);
+            return;
+        }
+        // One of each at a time, as in the desktop app, showing what it's opened with now
+        const open = Array.from(document.querySelectorAll('dialog[data-domino-window]')).find((dialog) => dialog.dataset.dominoWindow === spec.name);
+        if (open) {
+            const shown = open.querySelector('iframe');
+            if (shown.getAttribute('src') !== spec.url) shown.setAttribute('src', spec.url);
+            shown.focus();
+            return;
+        }
+        const dialog = document.createElement('dialog');
+        dialog.dataset.dominoWindow = spec.name;
+        dialog.style.cssText = 'padding:0;border:1px solid #8886;border-radius:8px;box-shadow:0 12px 40px #0004;max-width:95vw;max-height:90vh;overflow:hidden';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:1em;padding:.35em .5em .35em 1em;font:600 14px system-ui,sans-serif;background:#f3f3f3;color:#222;border-bottom:1px solid #ddd';
+        const title = document.createElement('span');
+        title.textContent = spec.title || spec.name;
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.textContent = '\u00d7';
+        close.setAttribute('aria-label', 'Close');
+        close.style.cssText = 'border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:inherit;padding:0 .25em';
+        close.addEventListener('click', () => dialog.close());
+        bar.append(title, close);
+        const frame = document.createElement('iframe');
+        frame.src = spec.url;
+        frame.title = spec.title || spec.name;
+        frame.style.cssText = 'display:block;border:0;width:' + (spec.width || 640) + 'px;height:' + (spec.height || 480) + 'px;max-width:95vw;max-height:calc(90vh - 2.5em)';
+        dialog.append(bar, frame);
+        dialog.addEventListener('close', () => dialog.remove());
+        document.body.appendChild(dialog);
+        dialog.showModal();
+    }
+
+    function closeWindow() {
+        const bridge = window.pywebview && window.pywebview.api;
+        if (bridge && bridge.close_window) {
+            bridge.close_window();
+            return;
+        }
+        // A window shown in a dialog of the page that opened it
+        const frame = window.frameElement;
+        const dialog = frame && frame.closest('dialog[data-domino-window]');
+        if (dialog) {
+            dialog.close();
+            return;
+        }
+        window.close();
     }
 
     // Pages served through app.asgi (marked data-domino-ws) talk to the server over one
