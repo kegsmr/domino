@@ -775,12 +775,13 @@ def stop_on_exit(mongo):
 
 def install_signal_handlers():
 
-	# SIGTERM and SIGHUP would otherwise end the process without running atexit.
-	# SIGINT already raises KeyboardInterrupt, which does
+	# SIGTERM, SIGHUP and (on Windows, Ctrl+Break, which `domino desktop` stops it with) SIGBREAK
+	# would otherwise end the process without running atexit. SIGINT already raises
+	# KeyboardInterrupt, which does
 	if threading.current_thread() is not threading.main_thread():
 		return
 
-	for name in ("SIGTERM", "SIGHUP"):
+	for name in ("SIGTERM", "SIGHUP", "SIGBREAK"):
 		number = getattr(signal, name, None)
 		if number is not None and signal.getsignal(number) == signal.SIG_DFL:
 			signal.signal(number, exit_on_signal)

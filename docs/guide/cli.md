@@ -1,6 +1,6 @@
 # Command line
 
-domino create, run, serve, build and deploy.
+domino create, run, serve, build, deploy and desktop.
 
 Installing the package adds a `domino` command:
 
@@ -19,6 +19,8 @@ domino run
 `domino serve [folder or app.py] [--workers N] [--port 8000] [--host 127.0.0.1]` serves the app in production, on every CPU core; see [Serving in production](deployment.md#serving-in-production).
 
 `domino build [folder] [--force]` writes a `Dockerfile` for the app, and `domino deploy fly|render|docker [folder] [--name NAME] [--mongo-url URL] [--force]` deploys it; see [Deploying](deployment.md#deploying).
+
+`domino desktop [folder or app.py] [--port N]` runs the app like `domino run`, in a desktop window instead of a browser tab, and `domino build --desktop [folder]` packages it as a program with PyInstaller; see [Desktop apps](desktop.md).
 
 `domino tailwind build [folder or app.py]` builds an app's minified Tailwind CSS before deploying, and `domino create myapp --tailwind` makes an app styled with Tailwind; see [Tailwind CSS](tailwind.md#tailwind-css).
 

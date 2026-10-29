@@ -56,6 +56,7 @@ GUIDE_PAGES = [
 	("settings", "Reference"),
 	("testing", "Reference"),
 	("deployment", "Reference"),
+	("desktop", "Reference"),
 	("cli", "Reference"),
 	("how-it-works", "Reference"),
 	("contributing", "Reference"),

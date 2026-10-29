@@ -69,6 +69,7 @@ Clicking the button runs `increment` on the server, and only what changed is upd
 - **Development.** [Hot reloading](docs/guide/cli.md), a development MongoDB downloaded for you, and [developer tools](docs/guide/devtools.md) in the page.
 - **Tests next to their page.** `pages/about_test.py` tests `pages/about.py` in a [simulated browser](docs/guide/testing.md), in about a millisecond per click.
 - **One-command deploys.** [`domino deploy`](docs/guide/deployment.md) to Fly.io, Render or Docker, and `domino serve` uses every CPU core.
+- **Desktop apps.** [`domino desktop`](docs/guide/desktop.md) shows an app in a native window, and `domino build --desktop` packages it with PyInstaller.
 - **Experimental:** [client components](docs/guide/client-components.md) that run in the browser, in Python.
 
 ## Learn more

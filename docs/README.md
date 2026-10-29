@@ -43,7 +43,8 @@ Build an app step by step:
 - [Settings](guide/settings.md): settings.json, local overrides and environment variables.
 - [Testing](guide/testing.md): Tests next to their page, in a simulated browser.
 - [Deployment](guide/deployment.md): Deploy with one command, and serve on every CPU core.
-- [Command line](guide/cli.md): domino create, run, serve, build and deploy.
+- [Desktop apps](guide/desktop.md): Run an app in a native window, and package it as a program with PyInstaller.
+- [Command line](guide/cli.md): domino create, run, serve, build, deploy and desktop.
 - [How it works](guide/how-it-works.md): One WebSocket per tab, and the HTTP fallback.
 - [Contributing](guide/contributing.md): Run Domino's own tests, publish a release, and the license.
 
