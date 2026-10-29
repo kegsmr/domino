@@ -24,7 +24,7 @@ from werkzeug.datastructures import MultiDict
 
 from .settings import Settings, load_settings
 from .util import *
-from . import css, optimistic, reactive
+from . import compression, css, optimistic, reactive
 from .uploads import Uploads
 
 
@@ -701,6 +701,7 @@ class Domino(Flask):
 		self.config.setdefault("DOMINO_FRAME_OPTIONS", "SAMEORIGIN")  # X-Frame-Options; False lets other sites frame pages
 		self.config.setdefault("DOMINO_PATCHES", True)  # the WebSocket sends what changed in a component, not all of it
 		self.config.setdefault("DOMINO_WS_COMPRESSION", True)  # per-message deflate on the WebSocket (uvicorn's)
+		self.config.setdefault("DOMINO_COMPRESSION", True)  # gzip for pages, the script and streams (see domino.compression)
 		self.config.setdefault("DOMINO_HOT_RELOAD", True)  # debug mode updates pages in place on changes
 		self.config.setdefault("DOMINO_CLIENT_RUNTIME", None)  # client components' runtime: a URL, "local" or "cdn"
 		self.config.setdefault("DOMINO_CLIENT_PYTHON", "micropython")  # or "pyodide"
@@ -1130,10 +1131,24 @@ class Domino(Flask):
 					if not pushed:
 						yield ": keepalive\n\n"
 
-			return Response(updates(), mimetype="text/event-stream", headers={
-				"Cache-Control": "no-cache",
-				"X-Accel-Buffering": "no"
-			})
+			headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Vary": "Accept-Encoding"}
+			body = updates()
+			if self.config["DOMINO_COMPRESSION"] and compression.accepts_gzip(request.headers.get("Accept-Encoding")):
+				headers["Content-Encoding"] = "gzip"
+				body = gzipped(body)
+
+			return Response(body, mimetype="text/event-stream", headers=headers)
+
+		def gzipped(chunks):
+
+			gzip = compression.GzipStream()
+			try:
+				for chunk in chunks:
+					yield gzip.chunk(chunk.encode("utf-8"))
+				yield gzip.end()
+			finally:
+				# Stops pulling the page when the client goes
+				chunks.close()
 
 		self.add_url_rule(route, route, stream, methods=["GET"])
 
@@ -1255,7 +1270,19 @@ class Domino(Flask):
 
 	def _add_static_route(self, route, data):
 
-		self.add_url_rule(route, route, lambda: Response(data, mimetype="text/javascript"), methods=["GET"])
+		# Compressed once here rather than on every page load
+		compressed = compression.compress(data.encode("utf-8"))
+
+		def view():
+
+			response = Response(data, mimetype="text/javascript")
+			response.vary.add("Accept-Encoding")
+			if self.config["DOMINO_COMPRESSION"] and compression.accepts_gzip(request.headers.get("Accept-Encoding")):
+				compression.set_gzip(response, compressed)
+
+			return response
+
+		self.add_url_rule(route, route, view, methods=["GET"])
 
 
 	def route(self, rule, **options):
@@ -1353,6 +1380,10 @@ class Domino(Flask):
 			response.headers.setdefault("X-Frame-Options", str(frame_options))
 		response.headers.setdefault("X-Content-Type-Options", "nosniff")
 		response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+
+		# Last, so it compresses what the app's own after_request hooks made
+		if self.config["DOMINO_COMPRESSION"]:
+			response = compression.compress_response(response, request.headers.get("Accept-Encoding"))
 
 		return response
 
