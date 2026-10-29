@@ -8,9 +8,9 @@ python examples/counter/app.py
 
 or, with Domino installed (`pip install -e .`), `domino run examples/counter`. `app.py` finds the repository's `domino` package by its own path, so it also works from any other folder.
 
-The examples run in debug mode. Only `chat` stores data in MongoDB, so the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it; running `chat` starts one, as `domino run` does.
+The examples run in debug mode. `chat`, `pixels` and `accounts` store data in MongoDB; the others turn the development MongoDB off in their `settings.json` (`"mongo": {"auto": false}`) and don't download it. Running one that uses it starts one, as `domino run` does.
 
-Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms`, `functional`, `uploads`, `instant`, `client` and `tailwind`. Run them all with `python -m pytest examples`.
+Some pages have their tests next to them (`pages/index_test.py` tests `pages/index.py`): see `counter`, `todo`, `search`, `forms`, `functional`, `uploads`, `instant`, `client`, `tailwind` and `pixels`. Run them all with `python -m pytest examples`.
 
 | Example | Shows |
 |---|---|
@@ -34,5 +34,6 @@ Some pages have their tests next to them (`pages/index_test.py` tests `pages/ind
 | `bootstrap/` | Layout built purely from Bootstrap grid and utility mixins (`col_4` renders as `col-4`) |
 | `settings/` | `app.settings` from `settings.json`, the `domino` block, and `public` settings read in the browser as `Domino.settings`. Copy `settings.local.json.example` to `settings.local.json` to override locally |
 | `tailwind/` | Tailwind CSS with zero setup: `"tailwind": true` in `settings.json`, and pages styled only with Tailwind classes: a responsive navbar whose menu button toggles classes (`State`), a card grid, a form, dark mode with `dark:` variants, and a pricing toggle written as a paired Jinja template. The first run downloads Tailwind's CLI; edit a class and open pages pick up the new CSS |
+| `pixels/` | A canvas everyone paints together, like a tiny r/place: open it in two windows and each pixel shows up in both at once. `Studio` composes in Python (`Palette`, `Canvas`, `Stats`); the canvas reads a `Collection`, so every open canvas repaints when anyone paints, while each window keeps its own brush color in `State`. Hold the mouse button and drag to paint (`on-pointerenter` with `while-pressed`). About 80 lines, no JavaScript |
 | `templating/` | Domino templates, markup in HTML and logic in Python: `layouts/main.html`, the `<layout name="Main">` document with the navigation and a `<slot />` for the page, which stays as you move between pages; `pages/index.html` and `pages/about.html`, `<page layout="Main" title="...">` pages that use components as tags; a counter (`components/counter.py` + `counter.html`: `{{ }}` values, `disabled="{{ at_zero }}"`, `{{ if }}`/`{{ elif }}`/`{{ else }}` blocks); a todo list whose `Todos` composes in Python (`TodoForm(on_add=self.add)`, then `TodoList` or `EmptyState`), with `{{ for }}`, `on-click="on_remove(index)"` and `class="{{ item_class(item) }}"`; an instant FAQ (`on-click="toggle(index)"`); a `Card` with a `<slot />`. `/jinja` is a Jinja page (`jinja_home.html`) with the same counter and, on Python 3.14, a todo list written with a template string (`html(t"...")`) |
 | `showcase/` | A full landing page using the imperative style (`t.h1(parent, "text")`), written as a `Page` class, styled with each component's `css`, and a contact form event |

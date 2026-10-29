@@ -73,7 +73,7 @@ class TodoList(t.div):
 
 **Attributes** are written as they are, with any `{{ }}` values in them filled in and escaped. An attribute that is just one value can switch it on and off: `disabled="{{ at_zero }}"` writes `disabled` when the value is true and leaves it out when it's false or None, and on a component, `items="{{ items }}"` passes the list itself. In `class`, a list or a dict `{class: bool}` gives the names that are on (`class="task {{ row_class(task) }}"`); in `style`, a dict gives declarations (`{"font_weight": "bold"}`).
 
-**Events**: `on-click="increment"` binds a method; `on-click="remove(index)"` binds it with values, so each item of a list gets its own. `on-input="search(event)"` passes the `Event`; `debounce="250"` waits until the user pauses. Handlers that only change the component's own `State` are [instant](instant-ui.md#instant-updates), with values too.
+**Events**: `on-click="increment"` binds a method; `on-click="remove(index)"` binds it with values, so each item of a list gets its own. `on-input="search(event)"` passes the `Event`; `debounce="250"` waits until the user pauses; `while-pressed` makes hover events (`on-pointerenter`, `on-pointerover`, `on-mouseenter`, ...) count only while a mouse button is held down, for painting or selecting by dragging (see `examples/pixels`). Handlers that only change the component's own `State` are [instant](instant-ui.md#instant-updates), with values too.
 
 **Whitespace** is kept as written: nothing is added around inline elements (`<a>Domino</a>.` has no space before the dot), and a block's own lines leave nothing behind, so each item is on a line of its own and a hidden element leaves no empty line.
 
@@ -127,7 +127,7 @@ Template strings need Python 3.14; on older versions `html()` raises an error sa
 
 ## Jinja templates
 
-Flask's Jinja templates suit layouts and mostly static pages. Domino finds `.html` templates by file name anywhere in the app's folder: `templates/` as in Flask, or next to the code that uses them. Hidden folders, `.domino/`, `static/`, `node_modules/`, `__pycache__/` and virtualenvs are skipped. Since names are looked up without folders, two templates with the same name stop the app at startup with both paths. While debugging, edited and new templates are picked up without a restart.
+Flask's Jinja templates suit layouts and mostly static pages. Domino finds `.html` templates by file name anywhere in the app's folder: `templates/` as in Flask, or next to the code that uses them. Hidden folders, `.domino/`, `static/`, `node_modules/`, `__pycache__/`, virtualenvs and folders with an `app.py` of their own (other apps) are skipped. Since names are looked up without folders, two templates with the same name stop the app at startup with both paths. While debugging, edited and new templates are picked up without a restart.
 
 `template(name, **context)` renders one as an element; return it from a page's `page()` (or a route) to make it the whole page (Domino adds its script, its page id and the CSS of the components inside), or use it as a child. Inside, `{{ component(Counter) }}` (or `{{ component(Counter, title="x") }}`) and `{{ element }}` render live Domino components, whose events and re-renders work as usual; the Jinja part around them is static.
 
