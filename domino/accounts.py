@@ -36,7 +36,7 @@ from . import forms, mail, mongo
 from . import tags as t
 from .core import DEFAULT_PAGE, SESSION_USER_KEY, Page, redirect
 from .reactive import Collection, State
-from .util import is_local_url
+from .util import is_local_url, urlopen
 
 
 log = logging.getLogger(__name__)
@@ -734,7 +734,7 @@ def _fetch_json(url, data=None, token=None):
 		body = urllib.parse.urlencode(data).encode("utf-8")
 
 	try:
-		with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers), timeout=10) as response:
+		with urlopen(urllib.request.Request(url, data=body, headers=headers), timeout=10) as response:
 			return json.loads(response.read().decode("utf-8"))
 	except (urllib.error.URLError, ValueError) as error:
 		raise OAuthError(f"{url}: {error}") from None

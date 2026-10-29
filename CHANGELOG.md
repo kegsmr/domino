@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Downloads (the development MongoDB, Tailwind CSS, client components) work with Python from python.org on macOS before its "Install Certificates" script has run: when the system can't verify a site's certificate, Domino tries again with certifi's certificates (a new, small dependency). A download that still fails says why and what to do, instead of showing a traceback.
+
 ## 0.3.0
 
 ### Development

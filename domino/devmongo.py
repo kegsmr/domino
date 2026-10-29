@@ -16,10 +16,13 @@ import tarfile
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
+
+from .util import download_problem, urlopen
 
 
 INDEX_URL = "https://downloads.mongodb.org/full.json"
@@ -260,8 +263,14 @@ def fetch_index():
 
 	log(f"Looking up MongoDB releases at {INDEX_URL}")
 
-	with urllib.request.urlopen(INDEX_URL, timeout=60) as response:
-		return json.load(response)
+	try:
+		with urlopen(INDEX_URL, timeout=60) as response:
+			return json.load(response)
+	except (urllib.error.URLError, OSError) as error:
+		raise DevMongoError(
+			f"Couldn't look up MongoDB's releases at {INDEX_URL}: {download_problem(error)}. Or set mongo.url "
+			"to a MongoDB you run (settings.local.json), or DOMINO_NO_MONGO=1 to run without one"
+		) from None
 
 
 def binary_name():
@@ -344,11 +353,14 @@ def download_archive(download, folder):
 
 	handle, temp = tempfile.mkstemp(dir=folder, prefix=archive.name, suffix=".part")
 	try:
-		with os.fdopen(handle, "wb") as out, urllib.request.urlopen(url, timeout=60) as response:
+		with os.fdopen(handle, "wb") as out, urlopen(url, timeout=60) as response:
 			digest = copy_with_progress(response, out, int(response.headers.get("Content-Length") or 0), algorithm)
 
 		check_digest(digest, expected, url)
 		os.replace(temp, archive)
+	except (urllib.error.URLError, ConnectionError) as error:
+		Path(temp).unlink(missing_ok=True)
+		raise DevMongoError(f"Couldn't download MongoDB from {url}: {download_problem(error)}") from None
 	except BaseException:
 		Path(temp).unlink(missing_ok=True)
 		raise
