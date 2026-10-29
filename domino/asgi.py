@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 from a2wsgi import WSGIMiddleware
 from werkzeug.test import EnvironBuilder
 
-from . import tailwind
+from . import desktop, tailwind
 from .core import DEFAULT_PAGE, max_event_bytes
 from .patches import Patcher
 
@@ -63,6 +63,9 @@ class ASGIApp:
 		# one. A pool of its own, so slow page loads can't hold up events (or the other way)
 		self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="domino-event")
 
+		# Run as a desktop app (domino desktop), it answers only its window (see domino.desktop)
+		self.desktop_token = desktop.token()
+
 		# Made once in the process that serves, so a debug server warns here, once
 		if app.debug:
 			from .devtools import startup_warnings
@@ -72,6 +75,9 @@ class ASGIApp:
 	async def __call__(self, scope, receive, send):
 
 		path = scope.get("path")
+
+		if self.desktop_token is not None and not await desktop.admit(self.desktop_token, scope, receive, send):
+			return
 
 		if scope["type"] == "websocket" and path == WS_PATH and self.app.config["DOMINO_WEBSOCKET"]:
 			await Connection(self, scope, receive, send).run()

@@ -2,6 +2,7 @@
 
 ## 0.4.0 (unreleased)
 
+- Desktop apps: `domino desktop` runs an app in a native window (pywebview), and `domino build --desktop` packages it with PyInstaller. The server answers only its window, through a token made for each launch. `pip install domino-web[desktop]`.
 - `examples/pixels`: a canvas everyone paints together, live in every window, with drag painting.
 - `while-pressed`: hover events (`on-pointerenter`, `on-mouseover`, ...) count only while a mouse button is down, for painting or selecting by dragging.
 - Page tests: `page.trigger(selector, event)` fires any event, like `page.click` does clicks.
