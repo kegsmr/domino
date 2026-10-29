@@ -25,4 +25,4 @@ A few things are new:
 
 Some handlers don't need to wait for the server at all. When a handler only changes its own component's `State` with plain expressions, like a counter's `self.count += 1` or a menu's `self.open = not self.open`, Domino reads its code, works out ahead of time what the component will look like after it, and the browser shows that the moment you click; the server's answer then confirms it. The menu button of this site works that way on a phone.
 
-The handlers here call other code (`dict()`, a list comprehension) or use what was typed, so they go to the server first, which on a normal connection takes a few milliseconds. See [Instant UI](/guide/instant-ui) for what qualifies.
+The handlers here call other code (`dict()`, a list comprehension) or use what was typed, so they go to the server first, which on a normal connection takes a few milliseconds. See [Instant UI](../guide/instant-ui.md) for what qualifies.

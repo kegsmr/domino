@@ -1,10 +1,10 @@
-# Tests for pages/guide/[topic].py: the guide is README.md's sections, all of them
+# Tests for pages/guide/[topic].py: the guide is docs/guide/*.md, every page and section
 
 import content
 import markup
 
 
-def test_every_topic_renders_its_readme_sections(open_page):
+def test_every_topic_renders_its_sections(open_page):
 
 	for topic in content.GUIDE:
 		page = open_page(topic=topic.slug)
@@ -16,15 +16,15 @@ def test_every_topic_renders_its_readme_sections(open_page):
 		assert [link.text for link in page.find_all(".Toc a")] == content.topic_headings(topic)
 
 
-def test_every_readme_section_is_in_the_guide():
+def test_every_guide_page_is_in_the_navigation():
 
-	shown = [title for topic in content.GUIDE for title in topic.sections]
+	listed = {slug for slug, _ in content.GUIDE_PAGES}
 
-	assert sorted(shown) == sorted(content.SECTIONS)
-	assert len(shown) == len(set(shown))
+	assert listed == {path.stem for path in content.GUIDE_FOLDER.glob("*.md")}
+	assert all(page.sections for page in content.GUIDE)
 
 
-def test_readme_text_and_code_are_shown(open_page):
+def test_text_and_code_are_shown(open_page):
 
 	page = open_page(topic="styles")
 	section = content.SECTIONS["Styles"].text
@@ -36,12 +36,12 @@ def test_readme_text_and_code_are_shown(open_page):
 	assert [node for node in code.elements() if node.attrs.get("class") == "k" and node.text == "class"]
 
 
-def test_readme_links_lead_to_the_docs_or_github(open_page):
+def test_links_lead_to_the_docs_or_github(open_page):
 
 	cli = open_page(topic="cli")
 	hrefs = [link.attrs.get("href") for link in cli.find_all("article a")]
 
-	# [Testing your app](#testing-your-app) in the Command line section
+	# [Testing your app](testing.md#testing-your-app) in the Command line section
 	assert "/guide/testing#testing-your-app" in hrefs
 	assert "/guide/deployment#deploying" in hrefs
 	assert "/guide/deployment#serving-in-production" in hrefs
