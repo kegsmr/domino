@@ -17,6 +17,8 @@ domino run
 
 Open http://127.0.0.1:5000. If `domino` isn't found, use `python -m domino run`. See [Installation](docs/guide/installation.md) for more.
 
+For the smallest app that runs, one page with a counter and no database, use `domino create myapp --minimal`.
+
 ## A taste
 
 A component is a Python class for its logic and an HTML template for its markup:
