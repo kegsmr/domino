@@ -1,0 +1,1 @@
+<li{% if item.done %} class="done"{% endif %}><input type="checkbox" hx-post="/todo/{{ item.id }}/toggle" hx-target="closest li" hx-swap="outerHTML"{% if item.done %} checked{% endif %}> {{ item.text }}</li>
