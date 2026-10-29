@@ -1,7 +1,7 @@
 """Gzip for responses: pages, /_domino/core, event results over HTTP and Server-Sent Event streams.
 
 Pages and the script are mostly repeated markup, so gzip shrinks them several times over (a
-1,000-item todo page goes from about 250 KB to 25 KB). Only browsers that send Accept-Encoding:
+1,000-row list page goes from 77 KB to 3 KB, /_domino/core from 58 KB to 16 KB). Only browsers that send Accept-Encoding:
 gzip get it, and only for text bigger than MIN_SIZE. Files sent with send_file() (direct
 passthrough) are left to a proxy or CDN, and the WebSocket has its own per-message deflate.
 {"domino": {"compression": false}} turns it off, e.g. when a proxy in front compresses already.
@@ -18,7 +18,7 @@ MIN_SIZE = 1024
 LEVEL = 6
 
 # Streams keep a compressor each for as long as the tab is open, so a smaller window and
-# memory level about halve what it holds (16 + 13: gzip, with an 8 KB window)
+# memory level hold about a fifth of the defaults' 256 KB (16 + 13: gzip, with an 8 KB window)
 STREAM_WBITS = 16 + 13
 STREAM_MEMLEVEL = 5
 
@@ -91,6 +91,8 @@ def set_gzip(response, data):
 
 	response.set_data(data)
 	response.headers["Content-Encoding"] = "gzip"
+	# Byte ranges would count the uncompressed body
+	response.headers.pop("Accept-Ranges", None)
 	# The same entity tag would claim the compressed bytes are the uncompressed ones
 	etag, weak = response.get_etag()
 	if etag and not weak:

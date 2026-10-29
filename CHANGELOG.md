@@ -2,7 +2,7 @@
 
 ## 0.4.0 (unreleased)
 
-- Pages, `/_domino/core`, event results and Server-Sent Event streams are gzipped when the browser accepts it: a counter page loads 17 KB instead of 61 KB, a 1,000-row list 20 KB instead of 137 KB. `{"domino": {"compression": false}}` turns it off.
+- Pages, `/_domino/core`, event results and Server-Sent Event streams are gzipped when the browser accepts it: a counter page and the script load 17 KB instead of 61 KB, and a 1,000-row list page is 3 KB instead of 77 KB. `{"domino": {"compression": false}}` turns it off.
 - `examples/pixels`: a canvas everyone paints together, live in every window, with drag painting.
 - `while-pressed`: hover events (`on-pointerenter`, `on-mouseover`, ...) count only while a mouse button is down, for painting or selecting by dragging.
 - Page tests: `page.trigger(selector, event)` fires any event, like `page.click` does clicks.

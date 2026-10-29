@@ -8,7 +8,7 @@ import zlib
 from pathlib import Path
 
 import pytest
-from flask import jsonify, send_file
+from flask import jsonify, request, send_file
 
 import domino.tags as t
 from domino import Domino
@@ -84,7 +84,7 @@ def make_app(counter=None, **settings):
 	def tagged():
 		response = jsonify(items=["x" * 50] * 100)
 		response.set_etag("v1")
-		return response
+		return response.make_conditional(request)
 
 	return app
 
@@ -189,6 +189,31 @@ def test_small_streamed_and_already_encoded_responses_are_left_alone():
 	assert "Content-Encoding" not in file.headers
 	assert file.data == Path(__file__).read_bytes()
 	file.close()
+
+
+def test_head_requests_give_the_gzipped_length():
+
+	client = make_app().test_client()
+
+	full = client.get("/_domino/core", headers=GZIP)
+	head = client.head("/_domino/core", headers=GZIP)
+	assert head.headers["Content-Encoding"] == "gzip"
+	assert head.headers["Content-Length"] == full.headers["Content-Length"]
+	assert head.data == b""
+
+
+def test_vary_is_sent_even_when_nothing_is_compressed():
+
+	client = make_app().test_client()
+
+	# Under 1 KB, refused, or not modified: a cache must still keep the versions apart
+	assert client.get("/small", headers=GZIP).headers["Vary"] == "Accept-Encoding"
+	assert client.get("/data").headers["Vary"] == "Accept-Encoding"
+
+	not_modified = client.get("/tagged", headers=dict(GZIP, **{"If-None-Match": 'W/"v1"'}))
+	assert not_modified.status_code == 304
+	assert "Content-Encoding" not in not_modified.headers
+	assert not_modified.headers["Vary"] == "Accept-Encoding"
 
 
 def test_a_strong_etag_becomes_weak_once_gzipped():

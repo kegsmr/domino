@@ -164,7 +164,10 @@ class ASGIApp:
 				chunk = "".join(f"data: {json.dumps(update)}\n\n" for update in updates) or ": keepalive\n\n"
 				await send({"type": "http.response.body", "body": encode(chunk), "more_body": True})
 			if not disconnected.done():
-				await send({"type": "http.response.body", "body": gzip.end() if gzip else b""})
+				end = b""
+				if gzip is not None:
+					end = gzip.end()
+				await send({"type": "http.response.body", "body": end})
 		finally:
 			disconnected.cancel()
 			subscription.close()
