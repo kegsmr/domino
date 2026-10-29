@@ -193,6 +193,47 @@ def test_page_module_change_updates_open_pages_and_its_route(make_app):
 	assert app.test_page("/").text("h1") == "Hot counter"
 
 
+WRAPPED_INDEX = '''\
+import domino.tags as t
+from domino.components import Document
+
+from components.counter import Counter
+
+
+class Wrapper(t.section):
+
+	def render(self):
+
+		return [t.h2() ["Wrapped"], Counter()]
+
+
+def page():
+
+	return Document(title="Hot") [
+		t.h1() ["Counter"],
+		Wrapper()
+	]
+'''
+
+
+def test_page_module_change_keeps_the_state_of_components_a_render_made(make_app):
+
+	app, reloader = make_app({"pages/index.py": WRAPPED_INDEX})
+	page = app.test_page("/")
+	page.click("button", text="+")
+	assert page.text("p") == "Count: 1"
+
+	change(reloader, "pages/index.py", WRAPPED_INDEX.replace('["Wrapped"]', '["Still wrapped"]'))
+
+	# The Counter that Wrapper's render() makes takes over the one in the same place
+	(message,) = messages(app, page)
+	page.apply(message, None)
+	assert page.text("h2") == "Still wrapped"
+	assert page.text("p") == "Count: 1"
+	page.click("button", text="+")
+	assert page.text("p") == "Count: 2"
+
+
 LAYOUT_HTML = '<layout name="Main"><html><head><title>Site</title></head><body><nav>{nav}</nav><slot /></body></html></layout>'
 
 
