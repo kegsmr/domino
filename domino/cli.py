@@ -199,6 +199,57 @@ TAILWIND_COMPONENT_HTML_TEMPLATE = '''\
 <component name="NoTasks" class="mt-4 text-slate-500">Nothing to do yet.</component>
 '''
 
+# `domino create --minimal`: the smallest app that runs, with no MongoDB
+MINIMAL_APP_TEMPLATE = '''\
+from domino import Domino
+
+
+# pages/index.py is the page at /
+app = Domino(__name__)
+
+
+if __name__ == "__main__":
+	app.run(debug=True)
+'''
+
+# "{title}" is replaced with the app's name, as a Python string
+MINIMAL_INDEX_TEMPLATE = '''\
+from domino import State
+from domino.components import Document
+import domino.tags as t
+
+
+# Logic in Python, markup in index.html next to this file: <component name="Counter"> there
+class Counter(t.div):
+
+	# This component's own data, one per open tab. Changing it re-renders this at once
+	count = State(0)
+
+
+	def increment(self):
+
+		self.count += 1
+
+
+# This file is the page at /
+def page():
+
+	return Document(title={title}) [
+		Counter()
+	]
+'''
+
+MINIMAL_INDEX_HTML_TEMPLATE = '''\
+<!-- The markup of the Counter class in index.py -->
+<component name="Counter">
+	<h1>{{ count }}</h1>
+	<button on-click="increment">+1</button>
+</component>
+'''
+
+# The app keeps its data in State only, so `domino run` doesn't start (or download) a MongoDB
+MINIMAL_SETTINGS = {"mongo": {"auto": False}}
+
 GITIGNORE_TEMPLATE = '''\
 settings.local.json
 .domino/
@@ -246,7 +297,9 @@ def build_parser():
 
 	create = commands.add_parser("create", help="create a new app folder")
 	create.add_argument("name", help="folder to create")
-	create.add_argument("--tailwind", action="store_true", help="style it with Tailwind CSS")
+	style = create.add_mutually_exclusive_group()
+	style.add_argument("--tailwind", action="store_true", help="style it with Tailwind CSS")
+	style.add_argument("--minimal", action="store_true", help="the smallest app that runs: one page with a counter, no MongoDB")
 
 	tailwind_parser = commands.add_parser("tailwind", help="Tailwind CSS: `domino tailwind build` before deploying")
 	tailwind_parser.set_defaults(usage=tailwind_parser)
@@ -277,7 +330,7 @@ def main(argv=None):
 		if args.command == "serve":
 			return serve(args)
 		if args.command == "create":
-			return create(args.name, args.tailwind)
+			return create(args.name, args.tailwind, args.minimal)
 		if args.command == "build":
 			deploy.build(args.app, args.force)
 			return 0
@@ -455,9 +508,13 @@ def tailwind_build(args):
 	return 0
 
 
-def create(name, with_tailwind=False):
+def create(name, with_tailwind=False, minimal=False):
 
 	folder = Path(name)
+
+	# As on the command line, where argparse refuses the two together
+	if with_tailwind and minimal:
+		raise CliError("--minimal and --tailwind can't be combined")
 
 	if folder.exists() and (not folder.is_dir() or any(folder.iterdir())):
 		raise CliError(f"{folder} already exists and isn't empty")
@@ -465,6 +522,9 @@ def create(name, with_tailwind=False):
 	folder.mkdir(parents=True, exist_ok=True)
 
 	title = folder.resolve().name
+	if minimal:
+		return create_minimal(folder, name, title)
+
 	settings = {"public": {"title": title}}
 	if with_tailwind:
 		settings["tailwind"] = True
@@ -486,5 +546,23 @@ def create(name, with_tailwind=False):
 		(folder / path).write_text(text, encoding="utf-8")
 
 	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n\nTo test it:\n\n    pytest\n\nTo deploy it (to Fly.io, Render, or anywhere Docker runs):\n\n    domino deploy fly\n")
+
+	return 0
+
+
+def create_minimal(folder, name, title):
+
+	files = {
+		"app.py": MINIMAL_APP_TEMPLATE,
+		"pages/index.py": MINIMAL_INDEX_TEMPLATE.replace("{title}", json.dumps(title, ensure_ascii=False)),
+		"pages/index.html": MINIMAL_INDEX_HTML_TEMPLATE,
+		"settings.json": json.dumps(MINIMAL_SETTINGS, indent=4) + "\n",
+	}
+
+	for path, text in files.items():
+		(folder / path).parent.mkdir(parents=True, exist_ok=True)
+		(folder / path).write_text(text, encoding="utf-8")
+
+	print(f"Created {folder}/\n\nTo run it:\n\n    cd {name}\n    domino run\n\nFor the full project, with a layout, components, a test and a MongoDB collection:\n\n    domino create <name>\n")
 
 	return 0

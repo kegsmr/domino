@@ -68,10 +68,15 @@ def forget(folder):
 	the folder off the import path, so the next app's components/ and data.py are its own."""
 
 	folder = os.path.abspath(folder)
+	# Its own top-level modules (data, components, ...), whichever app's copy is loaded now
+	own = {os.path.splitext(name)[0] for name in os.listdir(folder) if name.endswith(".py") or os.path.isdir(os.path.join(folder, name))}
 
 	for name, module in list(sys.modules.items()):
 		paths = [getattr(module, "__file__", None) or ""] + list(getattr(module, "__path__", None) or [])
-		if any(os.path.abspath(path).startswith(folder + os.sep) for path in paths if path):
+		mine = any(os.path.abspath(path).startswith(folder + os.sep) for path in paths if path)
+		# Another example's data.py or components/ would shadow this one's
+		shadow = name.split(".")[0] in own and "examples" in os.path.abspath(paths[0] or "").split(os.sep)
+		if mine or shadow:
 			del sys.modules[name]
 
 	sys.path[:] = [path for path in sys.path if os.path.abspath(path) != folder]

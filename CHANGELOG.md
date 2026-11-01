@@ -1,8 +1,13 @@
 # Changelog
 
-## 0.3.1
+## 0.4.0 (unreleased)
 
 - Downloads (the development MongoDB, Tailwind CSS, client components) work with Python from python.org on macOS before its "Install Certificates" script has run: when the system can't verify a site's certificate, Domino tries again with certifi's certificates (a new, small dependency). A download that still fails says why and what to do, instead of showing a traceback.
+- Pages, `/_domino/core`, event results and Server-Sent Event streams are gzipped when the browser accepts it: a counter page and the script load 17 KB instead of 61 KB, and a 1,000-row list page is 3 KB instead of 77 KB. `{"domino": {"compression": false}}` turns it off.
+- `examples/pixels`: a canvas everyone paints together, live in every window, with drag painting.
+- `while-pressed`: hover events (`on-pointerenter`, `on-mouseover`, ...) count only while a mouse button is down, for painting or selecting by dragging.
+- Page tests: `page.trigger(selector, event)` fires any event, like `page.click` does clicks.
+- Templates are no longer looked for in subfolders that are apps of their own (with an `app.py`), so an app in a folder of examples doesn't pick up theirs.
 
 ## 0.3.0
 

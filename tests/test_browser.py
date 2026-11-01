@@ -2137,3 +2137,59 @@ def test_a_layout_component_updates_without_breaking_the_page(serve_app, browser
 		sys.path.remove(str(tmp_path))
 		for name in [name for name in sys.modules if name.split(".")[0] in ("layouts", "components")]:
 			del sys.modules[name]
+
+
+def test_while_pressed_hover_events_count_only_with_a_button_down(serve_app, browser):
+
+	import domino.tags as t
+	from domino import Domino, State
+	from domino.components import Document
+
+	class Strip(t.div):
+
+		painted = State([])
+
+		def render(self):
+			return [
+				t.button(class_=f"cell c{index}", on_pointerdown=self.painter(index),
+					on_pointerenter=self.painter(index), while_pressed=True) [str(index)]
+				for index in range(6)
+			] + [t.p(class_="painted") [",".join(map(str, self.painted))]]
+
+		def painter(self, index):
+			return lambda: self.paint(index)
+
+		def paint(self, index):
+			if index not in self.painted:
+				self.painted = self.painted + [index]
+
+	app = Domino(__name__)
+
+	@app.route("/")
+	def index():
+		return Document() [Strip()]
+
+	page = browser.new_page()
+	try:
+		page.goto(serve_app(app))
+		assert page.get_attribute(".c0", "while-pressed") is not None
+
+		def center(index):
+			box = page.locator(f".c{index}").bounding_box()
+			return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+		# Moving over the cells without a button down sends nothing
+		for index in range(6):
+			page.mouse.move(*center(index))
+		page.wait_for_timeout(300)
+		assert page.text_content(".painted").strip() == ""
+
+		# Pressing paints, and dragging on paints as it goes
+		page.mouse.move(*center(1))
+		page.mouse.down()
+		for index in (2, 3, 4):
+			page.mouse.move(*center(index), steps=3)
+		page.mouse.up()
+		page.wait_for_function("document.querySelector('.painted').textContent.trim() === '1,2,3,4'")
+	finally:
+		page.close()
