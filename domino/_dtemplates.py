@@ -24,7 +24,7 @@ A component's markup lives in an .html file, inside a tag named after its class:
 
 Each file is parsed once (again when it changes, while debugging) into ops: static HTML merged
 into strings, and the few dynamic parts. Rendering walks them, writing strings straight out;
-only components are Domino elements. See README.md, "Templates".
+only components are Domino elements. See docs/guide/templates.md.
 """
 
 import ast

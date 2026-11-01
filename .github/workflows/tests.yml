@@ -7,7 +7,8 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04: ubuntu-latest became 26.04, which has no Python 3.9
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -22,7 +23,7 @@ jobs:
         with:
           mongodb-version: "7.0"
           mongodb-replica-set: rs0
-      - run: pip install -e .[test] playwright -r docs/requirements.txt
+      - run: pip install -e .[test] playwright -r website/requirements.txt
       - run: python -m playwright install --with-deps chromium
       - run: python -m pytest -v
         env:

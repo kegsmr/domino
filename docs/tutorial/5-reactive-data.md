@@ -36,4 +36,4 @@ Now run the app without `--no-mongo`:
 domino run tasks
 ```
 
-`domino run` downloads MongoDB the first time (about 100 MB, then cached in `~/.domino/`), and runs it for the app, with its data in `tasks/.domino/`. It runs MongoDB as a replica set, so Domino can watch each collection's change stream: a change made by another server process, a script or `mongosh` re-renders the pages too. In production you point the app at your own database with the `mongo.url` setting; see [Reactive data & MongoDB](/guide/reactive-data).
+`domino run` downloads MongoDB the first time (about 100 MB, then cached in `~/.domino/`), and runs it for the app, with its data in `tasks/.domino/`. It runs MongoDB as a replica set, so Domino can watch each collection's change stream: a change made by another server process, a script or `mongosh` re-renders the pages too. In production you point the app at your own database with the `mongo.url` setting; see [Reactive data & MongoDB](../guide/reactive-data.md).

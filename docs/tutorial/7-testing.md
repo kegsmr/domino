@@ -24,4 +24,4 @@ pytest
 
 The tests use named collections, so like `meteor test`, Domino starts a MongoDB for the test session (the same cached download as `domino run`), and gives each test an empty database of its own, dropped after it. Tests that only use `State` or `Collection()` never start it.
 
-These very tests run with Domino's own test suite, so this step's code can't stop working without someone noticing. See [Testing](/guide/testing) for the rest of the API.
+These very tests run with Domino's own test suite, so this step's code can't stop working without someone noticing. See [Testing](../guide/testing.md) for the rest of the API.

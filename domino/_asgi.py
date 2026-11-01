@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 from a2wsgi import WSGIMiddleware
 from werkzeug.test import EnvironBuilder
 
-from . import _tailwind as tailwind
+from . import _compression as compression, _tailwind as tailwind
 from ._core import DEFAULT_PAGE, max_event_bytes
 from ._patches import Patcher
 
@@ -125,12 +125,28 @@ class ASGIApp:
 			await send({"type": "http.response.body", "body": body})
 			return
 
-		await send({"type": "http.response.start", "status": 200, "headers": [
+		headers = [
 			(b"content-type", b"text/event-stream; charset=utf-8"),
 			(b"cache-control", b"no-cache"),
 			(b"x-accel-buffering", b"no"),
-		]})
-		await send({"type": "http.response.body", "body": b": open\n\n", "more_body": True})
+			(b"vary", b"Accept-Encoding"),
+		]
+		# Each chunk is flushed through gzip, so updates still arrive as they're sent
+		gzip = None
+		if self.app.config["DOMINO_COMPRESSION"] and compression.accepts_gzip(header(scope, b"accept-encoding")):
+			gzip = compression.GzipStream()
+			headers.append((b"content-encoding", b"gzip"))
+
+		def encode(text):
+
+			data = text.encode()
+			if gzip is None:
+				return data
+
+			return gzip.chunk(data)
+
+		await send({"type": "http.response.start", "status": 200, "headers": headers})
+		await send({"type": "http.response.body", "body": encode(": open\n\n"), "more_body": True})
 
 		subscription = Subscription(self.app, page)
 		# Pauses are told over the WebSocket; this page is back without one, so catch up
@@ -146,9 +162,12 @@ class ASGIApp:
 				if updates is None or disconnected.done():
 					break
 				chunk = "".join(f"data: {json.dumps(update)}\n\n" for update in updates) or ": keepalive\n\n"
-				await send({"type": "http.response.body", "body": chunk.encode(), "more_body": True})
+				await send({"type": "http.response.body", "body": encode(chunk), "more_body": True})
 			if not disconnected.done():
-				await send({"type": "http.response.body", "body": b""})
+				end = b""
+				if gzip is not None:
+					end = gzip.end()
+				await send({"type": "http.response.body", "body": end})
 		finally:
 			disconnected.cancel()
 			subscription.close()
@@ -289,6 +308,10 @@ class Connection:
 						tasks.append(asyncio.ensure_future(self.resend(data.get("id"))))
 		finally:
 			self.closed = True
+			# The page stays until it expires or a new socket takes it (whose hello resumes it);
+			# paused meanwhile, so changes to what it shows aren't rendered for nobody
+			if self.subscription is not None:
+				self.subscription.page.pause_for(self.subscription.stream)
 			for task in tasks:
 				task.cancel()
 			if self.listening is not None:
@@ -320,12 +343,14 @@ class Connection:
 		# Patches start from what this socket sent for the page; the browser forgets the rest too
 		self.patcher = Patcher() if patch and self.app.config["DOMINO_PATCHES"] else None
 
-		# A socket that went while the tab was hidden left it paused
+		self.page_id = page.id
+		self.subscription = Subscription(self.app, page)
+
+		# A socket that went (or whose tab was hidden) left it paused. Resumed once this socket's
+		# stream is the page's, so the old socket can't pause it again after this
 		if page.paused:
 			await asyncio.get_running_loop().run_in_executor(self.asgi.executor, page.resume)
 
-		self.page_id = page.id
-		self.subscription = Subscription(self.app, page)
 		self.listening = asyncio.ensure_future(self.listen(self.subscription))
 
 
@@ -469,6 +494,14 @@ def with_cookies(header, set_cookies):
 				cookies[name] = morsel.value
 
 	return "; ".join(f"{name}={value}" for name, value in cookies.items())
+
+
+def header(scope, name):
+	"""A request header's value (repeated ones joined with commas), or "" if it wasn't sent."""
+
+	values = [value.decode("latin-1") for key, value in scope.get("headers", []) if key.lower() == name]
+
+	return ", ".join(values)
 
 
 def same_origin(scope):

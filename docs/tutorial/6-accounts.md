@@ -36,4 +36,4 @@ Accounts keep the signed-in user in Flask's session cookie, which is signed with
 domino run tasks
 ```
 
-Sign up, add a task, and open a private window: it sees the task, with your name next to it, but can't add one until it signs in. GitHub and Google sign-in take a few lines of settings; see [Accounts](/guide/accounts).
+Sign up, add a task, and open a private window: it sees the task, with your name next to it, but can't add one until it signs in. GitHub and Google sign-in take a few lines of settings; see [Accounts](../guide/accounts.md).

@@ -28,4 +28,4 @@ They can also go in `settings.json` in the app's folder, and `settings.local.jso
 
 For HTTPS, put a proxy such as nginx or Caddy in front, and let it pass WebSockets for `/_domino/ws`, which each browser tab uses to talk to its page. In production the session cookie is only sent over HTTPS.
 
-That's the whole app: pages, components, live data, accounts and tests, with no JavaScript, no API and no build step. The [guide](/guide) covers everything else, starting with [Components](/guide/components). This docs site is a Domino app too: its source is in `docs/` in the repository, and `domino serve docs` serves it.
+That's the whole app: pages, components, live data, accounts and tests, with no JavaScript, no API and no build step. The [guide](../README.md) covers everything else, starting with [Components](../guide/components.md). This docs site is a Domino app too: its source is in `website/` in the repository, and `domino serve website` serves it.
