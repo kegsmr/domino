@@ -32,7 +32,7 @@ While you work on an app with `domino run` or `app.run(debug=True)`, saving a fi
 domino: hot reloaded components/counter.py (2 pages) in 12 ms
 ```
 
-- A changed module (a component, a page, a layout, `data.py`, ...) is run again in place, and so are the app's modules that import it. Components on open pages switch to the new classes and are rendered again with the state they had: a `State` attribute added since starts at its default, one removed is dropped. The components their `render()` makes are new, as whenever they're rendered.
+- A changed module (a component, a page, a layout, `data.py`, ...) is run again in place, and so are the app's modules that import it. Components on open pages switch to the new classes and are rendered again with the state they had: a `State` attribute added since starts at its default, one removed is dropped. The components their `render()` makes keep their `State` too, as whenever their parent renders again (see [State](state.md)).
 - A changed page or layout makes the page again with its new code; components in the same places (the first `Counter`, and so on) take over the state of the old ones. Pages added or deleted get or lose their routes.
 - `State` and `Collection` objects at a module's top level are kept, with their values, when it's run again.
 - Templates (Domino and Jinja) and component CSS are updated in place too; a template page added to or deleted from `pages/` gets or loses its route. Stylesheets in the app's folder are fetched again; a changed `.js` file reloads the page.

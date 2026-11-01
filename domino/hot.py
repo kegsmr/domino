@@ -14,9 +14,9 @@ of changed files to HotReloader.reload(), which:
   gives the routes of pages/ their new views (or adds and removes pages);
 - updates every open page over its socket (or stream): the components whose class changed are
   rendered again, or the whole page when its page or layout module changed (its view runs again,
-  and the components it makes take over the State and ids of those in the same places) or a Jinja
-  template did. The browser morphs the page, so focus and what's typed stay. Stylesheets are
-  fetched again, and other static files reload the page.
+  and the components it makes take over the State and ids of those in the same places, as when a
+  parent renders again) or a Jinja template did. The browser morphs the page, so focus and what's
+  typed stay. Stylesheets are fetched again, and other static files reload the page.
 
 What can't be swapped in safely restarts the server process instead, and the open tabs reload: the
 app's own module (app.py) and anything that imports it, settings files, deleted modules, and
@@ -514,6 +514,7 @@ class HotReloader:
 				g.domino_page = page
 				root = visit.root
 				events = dict(page.events)
+				replaced = []
 				if rerun:
 					# Its events are all bound again, by the view and by rendering
 					page.events.clear()
@@ -523,7 +524,7 @@ class HotReloader:
 						if not isinstance(root, Element):
 							page.notify({"type": "hot", "reload": True})
 							return
-						adopt(visit.root, root)
+						replaced = adopt(visit.root, root)
 						for key, value in visit.root.__attributes__.items():
 							if key.startswith("data_domino"):
 								root.configure(**{key: value})
@@ -533,6 +534,8 @@ class HotReloader:
 					page.events.clear()
 					page.events.update(events)
 					raise
+				for old, new in replaced:
+					core.retire(old, new)
 				html = styles.finish(html)
 				page.css = set(styles.classes)
 				visit.root = root
@@ -720,7 +723,8 @@ def made_by_view(root):
 def adopt(old, new):
 	"""Give the elements a page's view made again (`new`) the State and ids of those it made
 	before (`old`) in the same places: the first Counter takes over the first Counter's, and so
-	on. The components their render() makes are new, as whenever they're rendered."""
+	on. The components their render() makes are matched in turn as they render, as whenever
+	they're rendered (see core.Matches). Gives the (old, new) pairs."""
 
 	def key(element):
 		cls = type(element)
@@ -731,20 +735,19 @@ def adopt(old, new):
 		previous.setdefault(key(element), []).append(element)
 
 	counts = {}
+	replaced = []
 	for element in made_by_view(new):
 		index = counts.get(key(element), 0)
 		counts[key(element)] = index + 1
 		olds = previous.get(key(element), [])
 		if index >= len(olds):
 			continue
-		before = olds[index]
-		for name in state_names(type(element)):
-			state = before.__dict__.get(f"__state_{name}__")
-			if state is not None:
-				element.__dict__[f"__state_{name}__"] = state
-		# The same id, so the browser keeps the same node (and its focus, and what's typed in it)
-		if before.__id__ is not None and "id" not in element.__attributes__:
-			element.__id__ = before.__id__
+		# The same State and id, so the browser keeps the same node (and its focus, and what's
+		# typed in it)
+		core.take_over(olds[index], element)
+		replaced.append((olds[index], element))
+
+	return replaced
 
 
 def page_css(root):
