@@ -1062,6 +1062,14 @@ class Domino(Flask):
 			# The response carries this render, so it isn't pushed to this page again
 			changes.skip(page, result)
 
+			# Other pages showing it get this render too. A change a MongoDB change stream
+			# announces later is judged against the result this render found (see
+			# reactive.Read), which the other pages wouldn't be showing yet
+			with _pages_lock:
+				shared = any(other is not page for other in result.__pages__ or ())
+			if shared:
+				changes.pending[result] = None
+
 			response = {
 				"id": result.id(),
 				"html": styles.finish(html, fallback=False),
