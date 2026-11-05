@@ -4,6 +4,8 @@
 
 - Desktop apps: `domino desktop` runs an app in a native window (pywebview), and `domino build --desktop` packages it with PyInstaller. The server answers only its window, through a token made for each launch. `pip install domino-web[desktop]`.
 - Windows: `<window name="Settings" width="420" height="300">` defines a window, opened by `<button open-window="Settings">` or `open_window("Settings", tab="audio")` and closed by `close`; native windows in a desktop app, dialogs in a browser. `<window main>` sets the main window's title and size (instead of `settings.json`), and windows remember their size. See `examples/windows/`.
+- Downloads (the development MongoDB, Tailwind CSS, client components) work with Python from python.org on macOS before its "Install Certificates" script has run: when the system can't verify a site's certificate, Domino tries again with certifi's certificates (a new, small dependency). A download that still fails says why and what to do, instead of showing a traceback.
+- Pages, `/_domino/core`, event results and Server-Sent Event streams are gzipped when the browser accepts it: a counter page and the script load 17 KB instead of 61 KB, and a 1,000-row list page is 3 KB instead of 77 KB. `{"domino": {"compression": false}}` turns it off.
 - `examples/pixels`: a canvas everyone paints together, live in every window, with drag painting.
 - `while-pressed`: hover events (`on-pointerenter`, `on-mouseover`, ...) count only while a mouse button is down, for painting or selecting by dragging.
 - Page tests: `page.trigger(selector, event)` fires any event, like `page.click` does clicks.
