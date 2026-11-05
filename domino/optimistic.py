@@ -365,11 +365,18 @@ def state_list(component):
 	"""The component's own State objects, in a fixed order."""
 
 	cls = type(component)
+
+	return [getattr(cls, name)._of(component) for name in sorted_state_names(cls)]
+
+
+def sorted_state_names(cls):
+	"""Names of the class's State attributes, in a fixed order, worked out once per class."""
+
 	names = _state_lists.get(cls)
 	if names is None:
 		names = _state_lists[cls] = [name for name in sorted(state_names(cls)) if isinstance(getattr(cls, name, None), State)]
 
-	return [getattr(cls, name)._of(component) for name in names]
+	return names
 
 
 def overlay(states, values):
