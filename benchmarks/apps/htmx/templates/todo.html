@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body %}
+<form hx-post="/todo" hx-target="#todos" hx-swap="beforeend" hx-on::after-request="if (event.detail.successful) this.reset()">
+  <input id="new" name="text" placeholder="What needs doing?" autocomplete="off">
+  <button id="add" type="submit">Add</button>
+</form>
+<p id="summary">{{ summary }}</p>
+<ul id="todos">
+{% for item in todos %}{% include "todo_item.html" %}
+{% endfor %}
+</ul>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block head %}<script src="{{ url_for('static', filename='sse.min.js') }}"></script>{% endblock %}
+{% block body %}
+<ul id="messages" hx-ext="sse" sse-connect="/chat/stream" sse-swap="message" hx-swap="beforeend">
+{% for message in messages %}{% include "message.html" %}
+{% endfor %}
+</ul>
+<form hx-post="/chat" hx-swap="none" hx-on::after-request="if (event.detail.successful) this.reset()">
+  <input id="text" name="text" placeholder="Message" autocomplete="off">
+  <button id="send" type="submit">Send</button>
+</form>
+{% endblock %}

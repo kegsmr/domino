@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block body %}
+<button id="inc" hx-post="/counter/increment" hx-target="#count">+1</button>
+<span id="count">{{ count }}</span>
+{% endblock %}
