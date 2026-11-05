@@ -11,6 +11,7 @@ sockets without it are refused, so other programs and web pages on the machine c
 
 import _thread
 import ast
+import json
 import os
 import secrets
 import shutil
@@ -143,18 +144,43 @@ def wait_for(port, alive=lambda: True, timeout=120):
 
 
 def options(folder, name=None):
-	"""The window's settings: {"desktop": {"title": ..., "width": ..., "height": ...}} in settings.json.
-	The title defaults to the app's folder's name (`name`, for a packaged app, whose folder is "app")."""
+	"""The main window's options: <window main title="Notes" width="1200" height="800"> in one of the
+	app's templates, the rest by default. The title defaults to the app's folder's name (`name`, for
+	a packaged app, whose folder is "app")."""
 
-	from .settings import load_settings
-
-	desktop = load_settings(str(folder)).get("desktop") or {}
-
-	return {
-		"title": desktop.get("title") or (name or Path(folder).name).replace("-", " ").replace("_", " ").title(),
-		"width": int(desktop.get("width") or 1024),
-		"height": int(desktop.get("height") or 768),
+	found = {
+		"title": (name or Path(folder).name).replace("-", " ").replace("_", " ").title(),
+		"width": 1024,
+		"height": 768,
 	}
+	found.update(main_window(folder))
+
+	return found
+
+
+def main_window(folder):
+	"""The options of <window main ...>, read from the app's templates without importing the app."""
+
+	from . import dtemplates
+	from .templates import DEFINITION_START
+
+	for root, folders, files in os.walk(folder):
+		folders[:] = sorted(name for name in folders if name not in SKIPPED_FOLDERS and not name.startswith("."))
+		for name in sorted(files):
+			if not name.endswith(".html"):
+				continue
+			path = os.path.join(root, name)
+			try:
+				with open(path, encoding="utf-8") as file:
+					source = file.read()
+			except (OSError, UnicodeDecodeError):
+				continue
+			if "<window" in source and DEFINITION_START.match(source):
+				compiled = dtemplates.parse_file(path, source)
+				if compiled.main_window is not None:
+					return compiled.main_window
+
+	return {}
 
 
 def import_webview():
@@ -167,12 +193,156 @@ def import_webview():
 	return webview
 
 
-def show(url, settings):
-	"""Open the window and wait until it's closed."""
+def show(port, value, settings, state):
+	"""Open the main window, at the app's first page, and wait until it's closed. `state` is the
+	file where windows' sizes and places are remembered."""
 
 	webview = import_webview()
-	webview.create_window(settings["title"], url, width=settings["width"], height=settings["height"])
+	windows = Windows(f"http://127.0.0.1:{port}", value, state)
+	windows.create("main", "/", settings)
 	webview.start()
+
+
+class Windows:
+	"""The app's windows in this process: the main one, and those its pages open (see
+	domino.windows). Each is opened once at a time, and remembers its size and place."""
+
+
+	def __init__(self, base, value, state=None):
+
+		self.base = base
+		self.value = value  # the launch's token, which each window's first URL carries
+		self.state = Path(state) if state else None
+		self.open = {}  # name -> pywebview window
+		self.urls = {}  # name -> what it shows (/_domino/window/Settings?values=...)
+		self.saved = {}
+		if self.state is not None:
+			try:
+				self.saved = json.loads(self.state.read_text(encoding="utf-8"))
+			except (OSError, ValueError):
+				self.saved = {}
+
+
+	def create(self, name, url, options):
+
+		webview = import_webview()
+
+		remember = options.get("remember", True) and self.state is not None
+		place = (self.saved.get(name) or {}) if remember else {}
+		size = {
+			"width": place.get("width") or options.get("width") or 640,
+			"height": place.get("height") or options.get("height") or 480,
+		}
+		# The place too, but on Linux, where what X11 window managers report and what they're
+		# asked for differ by the title bar, so a window would creep down at each launch
+		if "x" in place and "y" in place and sys.platform in ("win32", "darwin"):
+			size.update(x=place["x"], y=place["y"])
+		if "min-width" in options or "min-height" in options:
+			size["min_size"] = (options.get("min-width", 200), options.get("min-height", 100))
+
+		window = webview.create_window(
+			options.get("title") or name, self.address(url),
+			js_api=Bridge(self, name), resizable=options.get("resizable", True), on_top=options.get("on-top", False),
+			maximized=options.get("maximized", False), **size,
+		)
+		self.open[name] = window
+		self.urls[name] = url
+
+		def closing():
+			if remember:
+				self.remember(name, window)
+
+		def closed():
+			self.open.pop(name, None)
+			# Closing the main window ends the program, with its other windows
+			if name == "main":
+				for other in list(self.open.values()):
+					other.destroy()
+
+		window.events.closing += closing
+		window.events.closed += closed
+
+		return window
+
+
+	def address(self, url):
+		"""The URL a window loads: the app's, with the token for its first request."""
+
+		separator = "&" if "?" in url else "?"
+
+		return f"{self.base}{url}{separator}{COOKIE}={self.value}"
+
+
+	def remember(self, name, window):
+
+		try:
+			self.saved[name] = {"width": window.width, "height": window.height, "x": window.x, "y": window.y}
+			self.state.parent.mkdir(parents=True, exist_ok=True)
+			self.state.write_text(json.dumps(self.saved, indent=1), encoding="utf-8")
+		except Exception:
+			pass  # a size not remembered is no reason to stop closing
+
+
+	def opened(self, spec):
+		"""A page asked for a window (core.js, through Bridge.open_window)."""
+
+		name = str(spec.get("name") or "")
+		url = str(spec.get("url") or "")
+		if not name.isidentifier() or not url.startswith(f"/_domino/window/{name}"):
+			return
+
+		# Open already: shown again, with the values it's opened with now (Settings.open(tab="audio"))
+		window = self.open.get(name)
+		if window is not None:
+			if self.urls.get(name) != url:
+				self.urls[name] = url
+				window.load_url(self.address(url))
+			window.restore()
+			window.show()
+			return
+
+		self.create(name, url, spec)
+
+
+class Bridge:
+	"""What a window's page can call (window.pywebview.api in core.js). Names starting with _ are
+	pywebview's to leave alone."""
+
+
+	def __init__(self, windows, name):
+
+		self._windows = windows
+		self._name = name
+
+
+	def open_window(self, spec):
+
+		if isinstance(spec, dict):
+			self._windows.opened(spec)
+
+
+	def close_window(self):
+
+		window = self._windows.open.get(self._name)
+		if window is not None:
+			window.destroy()
+
+
+def state_file(folder=None, name=None):
+	"""Where windows' sizes and places are kept: the app's .domino folder while developing, the
+	user's settings folder for a packaged app (%APPDATA%, ~/Library/Application Support, ~/.config)."""
+
+	if folder is not None:
+		return Path(folder) / ".domino" / "windows.json"
+
+	if os.name == "nt":
+		base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+	elif sys.platform == "darwin":
+		base = Path.home() / "Library" / "Application Support"
+	else:
+		base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+
+	return base / name / "windows.json"
 
 
 def first_url(port, value):
@@ -215,7 +385,7 @@ def run(path, port=None):
 	try:
 		if not wait_for(port, alive=lambda: server.poll() is None):
 			raise DesktopError("The app's server stopped before it started serving; see above")
-		show(first_url(port, value), options(folder))
+		show(port, value, options(folder), state_file(folder))
 	finally:
 		stop(server)
 
@@ -312,7 +482,9 @@ def launch(folder, name=None):
 		if os.environ.get(ENV_SMOKE):
 			return smoke(port, value)
 
-		show(first_url(port, value), options(folder, name))
+		from .deploy import slug
+		settings = options(folder, name)
+		show(port, value, settings, state_file(name=slug(settings["title"])))
 	finally:
 		server.should_exit = True
 		thread.join(5)

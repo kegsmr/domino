@@ -1,5 +1,6 @@
 from .core import *
 from .reactive import State, Collection, batch, wait
+from .windows import Window, open_window, close_window
 from .templates import TemplateError, html, template
 from . import mongo
 

@@ -2193,3 +2193,38 @@ def test_while_pressed_hover_events_count_only_with_a_button_down(serve_app, bro
 		page.wait_for_function("document.querySelector('.painted').textContent.trim() === '1,2,3,4'")
 	finally:
 		page.close()
+
+
+def test_a_window_opens_as_a_dialog_in_a_browser(serve, page):
+
+	# Outside a desktop app, <window name="Settings"> shows in a dialog on the page that opened it
+	page.goto(serve("windows"))
+	page.click("text=Audio settings")
+	page.wait_for_selector("dialog[data-domino-window=Settings] iframe")
+
+	window = page.frame_locator("dialog[data-domino-window=Settings] iframe")
+	assert window.locator("p").inner_text() == "Section: audio"
+	box = page.locator("dialog[data-domino-window=Settings] iframe").bounding_box()
+	assert (box["width"], box["height"]) == (420, 300)
+
+	# The main page shows what the window changes, live
+	window.locator("select").select_option("dark")
+	page.wait_for_function("document.querySelector('b').textContent === 'dark'")
+
+	# Its close handler closes the dialog
+	window.locator("text=Done").click()
+	page.wait_for_function("!document.querySelector('dialog[data-domino-window]')")
+	assert page.evaluate("document.querySelectorAll('iframe').length") == 0
+	assert page.errors == []
+
+
+def test_a_window_dialog_closes_with_its_close_button(serve, page):
+
+	page.goto(serve("windows"))
+	page.click("text=Settings")
+	page.wait_for_selector("dialog[data-domino-window=Settings]")
+	assert page.locator("dialog[data-domino-window=Settings] span").inner_text() == "Settings"
+
+	page.click("dialog[data-domino-window=Settings] button[aria-label=Close]")
+	page.wait_for_function("!document.querySelector('dialog[data-domino-window]')")
+	assert page.errors == []

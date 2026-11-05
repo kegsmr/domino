@@ -1,0 +1,12 @@
+<!-- A window of its own: <button open-window="Settings"> opens it, or Settings.open(tab="audio") -->
+<window name="Settings" width="420" height="300" resizable="false">
+	<h2>Settings</h2>
+	<p>Section: {{ tab }}</p>
+	<label>Theme
+		<select name="theme" on-change="pick(event)">
+			<option value="light" selected="{{ not dark }}">Light</option>
+			<option value="dark" selected="{{ dark }}">Dark</option>
+		</select>
+	</label>
+	<button on-click="close">Done</button>
+</window>

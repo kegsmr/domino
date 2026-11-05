@@ -134,17 +134,27 @@ def test_admit_lets_lifespan_through():
 	assert sent == []
 
 
-def test_window_options_come_from_settings(tmp_path):
-
-	(tmp_path / "pages").mkdir()
-	assert desktop.options(tmp_path / "pages")["title"] == "Pages"
+def test_the_main_window_is_set_in_a_template(tmp_path):
 
 	app = tmp_path / "my_notes"
 	(app / "pages").mkdir(parents=True)
 	assert desktop.options(app) == {"title": "My Notes", "width": 1024, "height": 768}
 
-	(app / "settings.json").write_text(json.dumps({"desktop": {"title": "Notes", "width": 400, "height": 300}}), encoding="utf-8")
-	assert desktop.options(app) == {"title": "Notes", "width": 400, "height": 300}
+	(app / "windows").mkdir()
+	(app / "windows" / "main.html").write_text(
+		'<window main title="Notes" width="400" height="300" min-width="320" resizable="false"></window>', encoding="utf-8")
+	assert desktop.options(app) == {"title": "Notes", "width": 400, "height": 300, "min-width": 320, "resizable": False}
+
+
+def test_the_main_window_shows_the_pages_so_it_has_no_markup(tmp_path):
+
+	from domino import TemplateError
+
+	(tmp_path / "pages").mkdir()
+	(tmp_path / "main.html").write_text('<window main width="400"><p>hello</p></window>', encoding="utf-8")
+
+	with pytest.raises(TemplateError, match="leave it empty"):
+		desktop.options(tmp_path)
 
 
 def test_what_gets_packaged(tmp_path):

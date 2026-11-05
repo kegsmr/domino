@@ -72,8 +72,9 @@ VALUE_TAG = re.compile(r"\{\{(.*?)\}\}", re.S)
 # {{ for item in items }}, {{ /for }}
 BLOCK = re.compile(r"\s*(if|elif|else|for|/\s*if|/\s*for)\b(.*)", re.S)
 
-# The tags that define what a file holds: <component name="TodoList">, <layout name="Main">
-DEFINERS = ("component", "layout")
+# The tags that define what a file holds: <component name="TodoList">, <layout name="Main">,
+# <window name="Settings"> (see domino.windows)
+DEFINERS = ("component", "layout", "window")
 
 # Just "{{ x }}": the attribute's value is x itself
 SINGLE_VALUE = re.compile(r"\s*\{\{(.*?)\}\}\s*", re.S)
@@ -874,10 +875,10 @@ VALUE, ATTRIBUTE_OP, CLASS, STYLE, EVENTS, IF, EACH, COMPONENT, SLOT = range(9)
 class Definition:
 	"""A component's markup: <TodoList class="x">...</TodoList> at the top level of a file."""
 
-	__slots__ = ("name", "where", "ops", "root", "document", "outer")
+	__slots__ = ("name", "where", "ops", "root", "document", "outer", "kind", "window")
 
 
-	def __init__(self, name, where, ops, root, document=False, outer=None):
+	def __init__(self, name, where, ops, root, document=False, outer=None, kind="component", window=None):
 
 		self.name = name
 		self.where = where
@@ -885,6 +886,8 @@ class Definition:
 		self.root = root  # (static [(name, value)], bound [(name, function)], events, debounce)
 		self.document = document  # its markup is a whole <html> document (a layout)
 		self.outer = outer  # <layout name="Admin" layout="Main">: the layout it goes inside
+		self.kind = kind  # "component", "layout" or "window"
+		self.window = window  # a window's options: {"title": ..., "width": ..., ...}
 
 
 class Compiled:
@@ -899,6 +902,7 @@ class Compiled:
 		self.document = False
 		self.wrap = False  # Meteor-style <head> and <body> without <html>
 		self.single = None  # a page that is one component (<Layout title="About">...</Layout>): its name
+		self.main_window = None  # <window main width="1024">: the main window's options
 
 
 def parse_file(path, source=None):
@@ -920,7 +924,8 @@ def parse_file(path, source=None):
 	top = [node for node in nodes if not (isinstance(node, Text) and node.blank())]
 	first = top[0] if top else None
 
-	# <component name="TodoList">...</component> and <layout name="Main">...</layout>
+	# <component name="TodoList">...</component>, <layout name="Main">...</layout> and
+	# <window name="Settings">...</window>
 	if isinstance(first, Tag) and not first.component and first.name in DEFINERS:
 		for node in top:
 			if not (isinstance(node, Tag) and not node.component and node.name in DEFINERS):
@@ -928,8 +933,15 @@ def parse_file(path, source=None):
 				shown = f"<{node.name}>" if isinstance(node, Tag) else "text"
 				raise TemplateError(
 					f"{where}: {shown} is outside a definition. A file that defines components (<component "
-					"name=\"...\">) or layouts (<layout name=\"...\">) holds only definitions; put this inside one"
+					"name=\"...\">), layouts (<layout name=\"...\">) or windows (<window name=\"...\">) holds only "
+					"definitions; put this inside one"
 				)
+			# <window main width="1200">: the main window's options; what it shows is the app's pages
+			if node.name == "window" and node.attribute("main") is not None:
+				if compiled.main_window is not None:
+					raise node.where.error("the main window is set twice in this file")
+				compiled.main_window = main_window_options(node)
+				continue
 			definition = compile_definition(node)
 			if definition.name in compiled.definitions:
 				previous = compiled.definitions[definition.name].where
@@ -1019,11 +1031,18 @@ def compile_definition(tag):
 		raise tag.where.error(f"<{kind}> needs a name, the class's: <{kind} name=\"{'Main' if kind == 'layout' else 'TodoList'}\">")
 	name = named[1]
 	outer = tag.attribute("layout")
-	if outer is not None and kind != "layout":
-		raise outer[3].error("layout= goes on a <page> (or a <layout>, to put it inside another), not on a <component>")
+	if outer is not None and kind == "component":
+		raise outer[3].error("layout= goes on a <page> (or a <layout> or <window>, to put it inside one), not on a <component>")
 	if outer is not None and (not outer[1] or not is_component_name(outer[1])):
 		raise outer[3].error("layout= names a layout, like layout=\"Main\"")
 	attributes = [attribute for attribute in tag.attributes if attribute[0] not in ("name", "layout")]
+
+	# <window name="Settings" width="420" height="560">: options for the window, not attributes
+	window = None
+	if kind == "window":
+		from .windows import OPTIONS
+		window = window_options(tag, name)
+		attributes = [attribute for attribute in attributes if attribute[0] not in OPTIONS]
 
 	if tag.self_closing:
 		raise TemplateError(f"{tag.where}: <{kind} name=\"{name}\" /> has no markup; put it inside: <{kind} name=\"{name}\">...</{kind}>")
@@ -1066,7 +1085,52 @@ def compile_definition(tag):
 			compiler.literal(value, where)
 			static.append((name, True if value is None else unescape(value)))
 
-	return Definition(named[1], tag.where, compiler.nodes(children), (static, bound, events, debounce, element), document, outer and outer[1])
+	return Definition(named[1], tag.where, compiler.nodes(children), (static, bound, events, debounce, element), document,
+		outer and outer[1], kind, window)
+
+
+def window_options(tag, name=None):
+	"""A <window>'s options, checked: {"title": ..., "width": 420, "resizable": False, ...}."""
+
+	from .windows import OPTIONS
+
+	options = {}
+	for option, value, text, where in tag.attributes:
+		kind = OPTIONS.get(option)
+		if kind is None:
+			continue
+		if value is not None and "{{" in value:
+			raise where.error(f"{option}= is the window's, set once: a value, not {{{{ }}}}")
+		if kind is int:
+			if value is None or not value.strip().isdigit() or int(value) <= 0:
+				raise where.error(f"{option}= is a size in pixels, like {option}=\"480\"")
+			options[option] = int(value)
+		elif kind is bool:
+			if value not in (None, "", "true", "false", option):
+				raise where.error(f"{option}= is true or false (or just {option})")
+			options[option] = value != "false"
+		else:
+			options[option] = value or ""
+
+	if name is not None:
+		options.setdefault("title", name)
+
+	return options
+
+
+def main_window_options(tag):
+	"""<window main width="1024" height="768" title="Notes"></window>: the main window shows the app's
+	pages, so it has options and no markup."""
+
+	if any(not (isinstance(node, Text) and node.blank()) for node in tag.children):
+		raise tag.where.error("<window main> sets the main window's options; what it shows is the app's pages, so leave it empty")
+	if tag.attribute("name") is not None:
+		raise tag.attribute("name")[3].error("<window main> needs no name: it's the window the app's pages are in")
+
+	options = window_options(tag)
+	options.pop("main", None)
+
+	return options
 
 
 class Compiler:
@@ -1189,6 +1253,17 @@ class Compiler:
 		return compile_expression(expression, where, mode)
 
 
+	def opener(self, text, where):
+
+		if not text or not is_component_name(text) or not text.isidentifier():
+			raise where.error("open-window= names a window, like open-window=\"Settings\" for <window name=\"Settings\">")
+
+		from .windows import Opener
+		opener = Opener(text)
+
+		return lambda context: opener
+
+
 	def handler(self, text, where):
 
 		if text is None:
@@ -1269,6 +1344,9 @@ class Compiler:
 				continue
 			if name.startswith("on-"):
 				events.append((name[3:].lower(), self.handler(value, where)))
+			elif name == "open-window":
+				# <button open-window="Settings">: a click opens the window (see domino.windows)
+				events.append(("click", self.opener(value, where)))
 			elif name == "debounce" and any(other.startswith("on-") for other, *_ in node.attributes):
 				debounce = self.debounce(value, where)
 			elif name.startswith(":"):
@@ -1277,7 +1355,7 @@ class Compiler:
 				raise where.error(DIRECTIVE_ATTRIBUTE.format(name=name))
 
 		for name, value, text, where in node.attributes:
-			if name in skip or name.startswith("on-") or name == "debounce" and events:
+			if name in skip or name.startswith("on-") or name == "open-window" or name == "debounce" and events:
 				continue
 			if value is not None and "{{" in value:
 				# class="task {{ if done }}done{{ /if }}", href="/polls/{{ poll._id }}", disabled="{{ at_zero }}"
@@ -1975,7 +2053,13 @@ def markup_component(name, path):
 	key = (name, os.path.abspath(path))
 	cls = _markup_components.get(key)
 	if cls is None:
-		cls = _markup_components[key] = type(name, (MarkupComponent,), {"_domino_definition": key[1], "__module__": __name__})
+		# A window (<window name="Settings">) can close itself: on-click="close"
+		base = MarkupComponent
+		definition = load(path, _checking()).definitions.get(name)
+		if definition is not None and definition.kind == "window":
+			from .windows import MarkupWindow
+			base = MarkupWindow
+		cls = _markup_components[key] = type(name, (base,), {"_domino_definition": key[1], "__module__": __name__})
 
 	return cls
 

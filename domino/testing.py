@@ -204,7 +204,21 @@ class TestPage:
 
 		self.app = app
 		self.client = client or app.test_client()
+		self.windows = []  # the windows this page's events opened (see domino.windows), the newest last
+		self.closed = False  # whether an event closed this window
 		self.load(path)
+
+
+	def window(self, name):
+		"""The window called `name` that this page opened last (<button open-window="Settings">), open
+		in a simulated tab of its own, with the same cookies."""
+
+		for spec in reversed(self.windows):
+			if spec["name"] == name:
+				return TestPage(self.app, spec["url"], self.client)
+
+		opened = ", ".join(spec["name"] for spec in self.windows) or "none"
+		raise DominoTestError(f"No window called {name} was opened (opened: {opened})")
 
 
 	def load(self, path):
@@ -395,6 +409,9 @@ class TestPage:
 		for node in [element, *element.elements()]:
 			node.files = None
 		self.apply(payload, element)
+		self.windows += payload.get("windows") or []
+		if payload.get("close"):
+			self.closed = True
 		self.sync()
 
 
