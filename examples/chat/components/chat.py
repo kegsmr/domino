@@ -28,7 +28,7 @@ class Chat(t.div):
 		recent = messages.find(sort=[("sent", -1)], limit=50).fetch()
 
 		return [
-			t.ul(class_="messages")([
+			t.ul(class_="messages") [[
 				t.li() [
 					t.strong() [
 						message["name"]
@@ -36,7 +36,7 @@ class Chat(t.div):
 					f" {message['text']}"
 				]
 				for message in reversed(recent)
-			]),
+			]],
 			t.form(on_submit=self.send) [
 				t.input(name="name", placeholder="Name", required=True, autocomplete="off", value=self.name),
 				t.input(name="text", placeholder="Message", required=True, autocomplete="off"),

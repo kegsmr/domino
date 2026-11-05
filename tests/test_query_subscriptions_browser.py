@@ -12,7 +12,7 @@ from werkzeug.serving import make_server
 
 import domino.tags as t
 from domino import Collection, Domino
-from domino.components import Document
+from domino import Document
 
 from test_query_subscriptions import watched
 

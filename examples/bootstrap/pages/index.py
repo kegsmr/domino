@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 from domino.bootstrap import (
 	BootstrapCSS, container, row, col_4, d_flex, justify_content_between,
 	align_items_center, bg_dark, bg_light, bg_white, text_white, text_muted, text_center,
@@ -74,7 +74,7 @@ def page():
 			]
 		],
 		Grid() [
-			Row()([
+			Row() [[
 				Third() [
 					Card() [
 						CardTitle() [
@@ -86,7 +86,7 @@ def page():
 					]
 				]
 				for title, description in FEATURES
-			])
+			]]
 		],
 		Footer() [
 			"Built with Domino"

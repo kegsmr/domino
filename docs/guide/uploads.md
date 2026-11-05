@@ -12,7 +12,7 @@ class Avatar(t.div):
             t.form(on_submit=self.save) [
                 t.input(type="file", name="photo", accept="image/*"),
                 t.input(type="file", name="extras", multiple=True),
-                t.button() ["Upload"],
+                t.button ["Upload"],
             ],
             t.input(type="file", name="quick", on_change=self.quick),  # uploads as soon as a file is picked
         ]

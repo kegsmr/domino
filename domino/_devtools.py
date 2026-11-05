@@ -4,6 +4,7 @@ frames and component stack behind the browser's error overlay, the component ins
 pages render exactly as they would without it and its URLs answer 404.
 """
 
+import functools
 import gc
 import inspect
 import linecache
@@ -16,9 +17,10 @@ import types
 from flask import Response, abort, jsonify, request
 from markupsafe import escape
 
-from . import optimistic
-from .core import Element
-from .reactive import Collection, State
+from . import _optimistic as optimistic
+from ._core import Element
+from ._reactive import Collection, State
+from ._util import handler_owner
 
 
 # Lines of source shown around each frame: the app's own, and libraries' (collapsed)
@@ -185,7 +187,7 @@ def hints(error, frames):
 	from jinja2 import TemplateNotFound, TemplateSyntaxError, UndefinedError
 
 	from .mongo import MongoNotConfigured
-	from .templates import TemplateError
+	from ._templates import TemplateError
 
 	name = type(error).__name__
 	message = str(error)
@@ -238,7 +240,7 @@ def template_details(error, frames):
 
 	from jinja2 import TemplateSyntaxError
 
-	from .templates import TemplateError
+	from ._templates import TemplateError
 
 	if isinstance(error, TemplateSyntaxError) and error.lineno:
 		filename = error.filename or error.name or "template"
@@ -471,7 +473,7 @@ def page_components(page):
 	roots = [getattr(page, "root", None)]
 	for element, callback in page.events.values():
 		roots.append(element)
-		roots.append(getattr(callback, "__self__", None))
+		roots.append(handler_owner(callback))
 	roots.extend(page.components)
 
 	for root in roots:
@@ -513,7 +515,12 @@ def short_repr(value):
 
 
 def describe_callback(callback):
-	"""A handler's name for people: "TodoList.add", "lambda (todo_list.py:21)", "save"."""
+	"""A handler's name for people: "TodoList.add", "lambda (todo_list.py:21)", "save",
+	"TodoList.remove(3)" for on_click=(self.remove, 3)."""
+
+	if isinstance(callback, functools.partial):
+		arguments = ", ".join(short_repr(argument) for argument in callback.args)
+		return f"{describe_callback(callback.func)}({arguments})"
 
 	function = getattr(callback, "__func__", callback)
 	owner = getattr(callback, "__self__", None)
@@ -526,6 +533,102 @@ def describe_callback(callback):
 		return f"{type(owner).__name__}.{name}"
 
 	return getattr(function, "__qualname__", name)
+
+
+class PlainChanges:
+	"""While debugging: the plain attributes (not State) of the component an event's handler
+	belongs to, kept before the handler runs, to warn when it changes one and the component
+	isn't re-rendered, so the page doesn't show the change."""
+
+
+	def __init__(self, page, event_id, element, callback):
+
+		component = handler_owner(callback)
+		if not is_component(component):
+			component = event_component(page, event_id, element)
+		self.component = component
+		self.callback = callback
+		self.before = plain_attributes(component) if component is not None else None
+
+
+	def check(self, logger, rendered):
+		"""Log a warning per plain attribute the handler changed, unless `rendered` (the element
+		the response re-renders, or None) shows the component."""
+
+		if self.before is None:
+			return
+
+		after = plain_attributes(self.component)
+		changed = [name for name, value in after.items() if name not in self.before or not same(self.before[name], value)]
+		if not changed or (rendered is not None and contains(rendered, self.component)):
+			return
+
+		cls = type(self.component)
+		# "increment()", "remove(3)" or "lambda (todo.py:12)"
+		handler = describe_callback(self.callback)
+		if not handler.startswith("lambda"):
+			name, parenthesis, arguments = handler.partition("(")
+			handler = name.split(".")[-1] + (parenthesis + arguments if parenthesis else "()")
+		for name in changed:
+			default = getattr(cls, name, self.before.get(name, after[name]))
+			logger.warning(
+				f"{cls.__name__}.{name} changed in {handler} but isn't a State, so the page didn't "
+				f"update — use {name} = State({short_repr(default)})"
+			)
+
+
+def plain_attributes(component):
+	"""A component's public instance attributes (State values live elsewhere), with lists, dicts
+	and sets copied, so changes made in place show."""
+
+	found = {}
+	for name, value in vars(component).items():
+		if name.startswith("_") or name == "content_root":
+			continue
+		if isinstance(value, (list, dict, set)):
+			value = type(value)(value)
+		found[name] = value
+
+	return found
+
+
+def same(before, after):
+
+	try:
+		return before is after or bool(before == after)
+	except Exception:
+		return True
+
+
+def contains(root, element):
+	"""Whether `element` is `root` or rendered inside it."""
+
+	seen = set()
+	stack = [root]
+	while stack:
+		current = stack.pop()
+		if current is element:
+			return True
+		if not isinstance(current, Element) or id(current) in seen:
+			continue
+		seen.add(id(current))
+		stack.extend(current.__children__)
+		stack.extend(getattr(current, "__embedded__", ()))
+
+	return False
+
+
+def event_component(page, event_id, element):
+	"""The component whose render() bound an event (its id is in the event id:
+	"event-<component id>-<n>-click"), or the element itself if it's a component."""
+
+	parts = (event_id or "")[len("event-"):].rsplit("-", 2)
+	if len(parts) == 3 and parts[1].isdigit():
+		found = page_components(page).get(parts[0])
+		if found is not None:
+			return found[0]
+
+	return element if is_component(element) else None
 
 
 def describe_element(element):
@@ -694,7 +797,7 @@ def startup_warnings(app):
 		return
 	app._domino_warned = True
 
-	from . import devmongo, mongo
+	from . import _devmongo as devmongo, mongo
 
 	root = os.path.abspath(app.root_path)
 	no_mongo = not callable(mongo._url) and not mongo.configured_url() and devmongo.disabled_reason(app.settings)

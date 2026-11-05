@@ -13,7 +13,7 @@ websockets_client = pytest.importorskip("websockets.sync.client")
 
 import domino.tags as t
 from domino import Domino
-from domino.components import Document
+from domino import Document
 
 
 class Counter(t.div):
@@ -643,7 +643,7 @@ def test_sockets_from_other_sites_are_refused(asgi_server):
 
 def test_with_cookies_applies_set_cookie_headers():
 
-	from domino.asgi import with_cookies
+	from domino._asgi import with_cookies
 
 	header = "flavor=mint; session=old"
 

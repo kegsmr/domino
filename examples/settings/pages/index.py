@@ -1,7 +1,7 @@
 from flask import current_app
 
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 
 # This file is the page at /. Pages read the app's settings through current_app

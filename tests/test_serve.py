@@ -16,8 +16,8 @@ import pytest
 
 websockets_client = pytest.importorskip("websockets.sync.client")
 
-import domino.asgi
-import domino.workers as workers
+import domino._asgi
+import domino._workers as workers
 from domino import Domino
 
 from conftest import Served, running, wait_until
@@ -33,7 +33,7 @@ from flask import request
 
 import domino.tags as t
 from domino import Collection, Domino, State, accounts
-from domino.components import Document
+from domino import Document
 
 
 app = Domino(__name__)
@@ -222,7 +222,7 @@ def test_forwarded_headers_are_kept_only_from_trusted_proxies():
 
 def test_page_ids_and_session_tokens_start_with_the_worker(monkeypatch):
 
-	from domino.core import Page
+	from domino._core import Page
 
 	assert not Page().id.startswith("w")
 	monkeypatch.setenv("DOMINO_WORKER_ID", "7")
@@ -241,7 +241,7 @@ def test_app_run_with_workers_serves_its_file(monkeypatch):
 
 	calls = []
 	monkeypatch.setattr(workers, "serve", lambda *args: calls.append(args))
-	monkeypatch.setattr(domino.asgi, "serve", lambda *args, **kwargs: calls.append("single"))
+	monkeypatch.setattr(domino._asgi, "serve", lambda *args, **kwargs: calls.append("single"))
 	monkeypatch.delenv("FLASK_DEBUG", raising=False)
 
 	app = Domino(__name__)

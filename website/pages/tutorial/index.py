@@ -41,7 +41,7 @@ def page():
 			"live demo is that app's own component, running on the page. The apps are in ",
 			t.a(href=markup.repository_link("docs/tutorial/")) ["docs/tutorial/"]
 		],
-		Steps()([
+		Steps() [[
 			t.li() [
 				t.a(href=f"/tutorial/{step.slug}") [
 					t.strong() [step.title],
@@ -49,6 +49,6 @@ def page():
 				]
 			]
 			for step in content.STEPS
-		])
+		]]
 	]
 

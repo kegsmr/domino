@@ -1,9 +1,8 @@
 # Template strings (t"...") need Python 3.14; app.py only imports this module there
-import domino.tags as t
-from domino import State, html
+from domino import Component, State, html
 
 
-class Todo(t.div):
+class Todo(Component):
 
 	items = State([])
 

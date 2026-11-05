@@ -1,8 +1,7 @@
 from flask import request
 
+from domino import Document, accounts
 import domino.tags as t
-from domino import accounts
-from domino.components import Document
 
 
 LINKS = [
@@ -14,16 +13,17 @@ LINKS = [
 def layout(content):
 
 	page = Document(title="Tasks") [
-		t.nav()([
-			t.a(href=href, aria_current="page" if request.path == href else None) [
-				text
-			]
-			for text, href in LINKS
-		] + [
+		t.nav [
+			[
+				t.a(href=href, aria_current="page" if request.path == href else None) [
+					text
+				]
+				for text, href in LINKS
+			],
 			# "Signed in as …" and Log out, or Log in and Sign up; updates when you log in or out
 			accounts.UserMenu()
-		]),
-		t.main() [
+		],
+		t.main [
 			content
 		]
 	]

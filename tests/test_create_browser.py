@@ -10,7 +10,7 @@ import pytest
 
 playwright = pytest.importorskip("playwright.sync_api")
 
-import domino.cli as cli
+import domino._cli as cli
 
 from conftest import ROOT, wait_until
 
@@ -28,7 +28,7 @@ def domino_run(tmp_path):
 		# The tests' own MongoDB settings would hide whether the app turns it off itself
 		env = {name: value for name, value in os.environ.items() if not name.startswith("DOMINO_") and name != "MONGO_URL"}
 		env.update(PYTHONPATH=str(ROOT), DOMINO_HOME=str(tmp_path / "home"))
-		command = "import sys; from domino.cli import main; sys.exit(main(sys.argv[1:]))"
+		command = "import sys; from domino._cli import main; sys.exit(main(sys.argv[1:]))"
 		process = subprocess.Popen([sys.executable, "-c", command, "run", str(folder), "--port", "0"],
 			stdout=log, stderr=subprocess.STDOUT, env=env, cwd=str(tmp_path), start_new_session=True)
 		processes.append((process, log))

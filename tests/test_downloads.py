@@ -6,7 +6,7 @@ import urllib.request
 
 import pytest
 
-from domino import devmongo, util
+from domino import _devmongo as devmongo, _util as util
 
 
 def certificate_error():

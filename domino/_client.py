@@ -35,8 +35,8 @@ from pathlib import Path
 
 from flask import Response, abort, request, send_from_directory
 
-from . import devmongo, optimistic
-from .util import urlopen
+from . import _devmongo as devmongo, _optimistic as optimistic
+from ._util import urlopen
 
 
 HERE = Path(__file__).parent

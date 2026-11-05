@@ -10,14 +10,14 @@ import types
 import pytest
 from flask import session
 
-import domino.workers as workers
+import domino._workers as workers
 from domino import Domino
-from domino.core import Page
+from domino._core import Page
 
 from conftest import ASGIServer
 
 
-# The router of `domino serve --workers N` (domino.workers) -------------------------------------
+# The router of `domino serve --workers N` (domino._workers) -------------------------------------
 
 
 async def client_address(scope, receive, send):
@@ -204,7 +204,7 @@ def test_script_and_style_text_cant_end_their_element():
 
 def test_client_components_render_names_and_scripts_the_same_way():
 
-	from domino import client
+	from domino import _client as client
 
 	tags = client.shim().tags
 
@@ -218,7 +218,7 @@ def test_client_components_render_names_and_scripts_the_same_way():
 def test_pages_cant_be_framed_by_other_sites():
 
 	import domino.tags as t
-	from domino.components import Document
+	from domino import Document
 
 	app = Domino(__name__)
 
@@ -242,7 +242,7 @@ def test_form_fields_cant_carry_mongodb_operators():
 
 	import domino.tags as t
 	from domino import Collection
-	from domino.components import Document
+	from domino import Document
 
 	users = Collection()
 	users.insert({"email": "ada@example.com", "secret": "ada's"})
@@ -280,7 +280,7 @@ def test_a_page_id_alone_doesnt_act_as_its_user(monkeypatch):
 
 	import domino.tags as t
 	from domino import Collection, accounts
-	from domino.components import Document
+	from domino import Document
 
 	monkeypatch.setattr(accounts, "users", Collection())
 	accounts._failures.clear()
@@ -437,7 +437,7 @@ def test_oauth_callback_url_uses_public_url(users):
 
 def test_platform_configs_trust_only_the_platform_proxy(tmp_path, monkeypatch, capsys):
 
-	from domino import deploy
+	from domino import _deploy as deploy
 
 	(tmp_path / "app.py").write_text("from domino import Domino\napp = Domino(__name__)\n", encoding="utf-8")
 	for name in ("DOMINO_MONGO__URL", "MONGO_URL", "DOMINO_SECRET_KEY"):
@@ -485,7 +485,7 @@ def slow_app():
 	import time as time_
 
 	import domino.tags as t
-	from domino.components import Document
+	from domino import Document
 
 	app = Domino(__name__)
 	app.config["DOMINO_MAX_EVENT_MB"] = 0.01  # 10 KB
@@ -563,7 +563,7 @@ def test_unclaimed_uploads_cant_pile_up():
 
 	from werkzeug.datastructures import FileStorage, MultiDict
 
-	from domino.uploads import Uploads
+	from domino._uploads import Uploads
 
 	uploads = Uploads({"DOMINO_MAX_UPLOAD_MB": 1, "DOMINO_MAX_PENDING_UPLOADS_MB": 3, "DOMINO_UPLOAD_TTL": 600})
 	megabyte = b"x" * (1024 * 1024)
@@ -629,7 +629,7 @@ def test_core_js_claims_the_hand_off_with_its_page(asgi_server, monkeypatch):
 
 	import domino.tags as t
 	from domino import Collection, accounts
-	from domino.components import Document
+	from domino import Document
 
 	monkeypatch.setattr(accounts, "users", Collection())
 	accounts._failures.clear()

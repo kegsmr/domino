@@ -1,12 +1,12 @@
 import time
 
+from domino import Component, accounts
 import domino.tags as t
-from domino import accounts
 
 from data import tasks
 
 
-class Tasks(t.div):
+class Tasks(Component):
 
 	css = {
 		"max_width": "28rem",
@@ -31,7 +31,7 @@ class Tasks(t.div):
 		items = tasks.find(sort=[("created", 1)]).fetch()
 		left = len([item for item in items if not item["done"]])
 
-		form = t.p() [
+		form = t.p [
 			t.a(href="/login?next=/") ["Log in"],
 			" to add tasks."
 		]
@@ -45,19 +45,19 @@ class Tasks(t.div):
 
 		return [
 			form,
-			t.ul()([
+			t.ul [[
 				t.li(class_="done" if item["done"] else None) [
-					t.label() [
+					t.label [
 						t.input(type="checkbox", checked=item["done"], disabled=user is None,
-							on_change=lambda event, id=item["_id"]: self.toggle(id, event.value)),
+							on_change=(self.toggle, item["_id"])),
 						f" {item['text']} ",
-						t.small() [
+						t.small [
 							item["by"]
 						]
 					]
 				]
 				for item in items
-			]),
+			]],
 			t.div(class_="footer") [
 				f"{left} left",
 				t.button(type="button", disabled=user is None, on_click=self.clear) [
@@ -76,10 +76,11 @@ class Tasks(t.div):
 			tasks.insert({"text": text[:200], "done": False, "by": user.get("name") or user["email"], "created": time.time()})
 
 
-	def toggle(self, id, done):
+	# Gets the task's id, then the event (event.value: whether the box is ticked)
+	def toggle(self, id, event):
 
 		if accounts.user_id() is not None:
-			tasks.update({"_id": id}, {"$set": {"done": done}})
+			tasks.update({"_id": id}, {"$set": {"done": event.value}})
 
 
 	def clear(self):

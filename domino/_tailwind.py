@@ -21,8 +21,8 @@ from pathlib import Path
 
 from flask import Response, abort, current_app, has_app_context, request, send_file
 
-from .devmongo import copy_with_progress, die_with_parent, domino_home, file_lock, log
-from .util import download_problem, urlopen
+from ._devmongo import copy_with_progress, die_with_parent, domino_home, file_lock, log
+from ._util import download_problem, urlopen
 
 
 DEFAULT_VERSION = "4.3.3"
@@ -554,7 +554,7 @@ async def serve_watch(app, scope, receive, send):
 	change, unlike a Server-Sent Events stream, which it would wait for (the pages it serves
 	without the socket use one)."""
 
-	from .asgi import wait_for_disconnect
+	from ._asgi import wait_for_disconnect
 
 	output = app.tailwind["output"]
 	keepalive = app.config["DOMINO_KEEPALIVE"]

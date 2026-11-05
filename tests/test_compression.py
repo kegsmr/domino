@@ -12,8 +12,8 @@ from flask import jsonify, request, send_file
 
 import domino.tags as t
 from domino import Domino
-from domino.compression import GzipStream, accepts_gzip, compressible
-from domino.components import Document
+from domino._compression import GzipStream, accepts_gzip, compressible
+from domino import Document
 
 
 GZIP = {"Accept-Encoding": "gzip, deflate, br"}

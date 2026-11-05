@@ -1,6 +1,6 @@
 import domino.tags as t
 from domino import accounts
-from domino.components import Document
+from domino import Document
 
 
 # Wraps every page: the navigation with the user menu, which updates when you log in or out

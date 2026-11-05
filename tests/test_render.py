@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino import Markup
+from markupsafe import Markup
 
 
 def render(element):

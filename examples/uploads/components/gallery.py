@@ -50,22 +50,22 @@ class Gallery(t.div):
 					"Upload"
 				],
 			],
-			t.div(class_="avatar")([
-				*avatar,
+			t.div(class_="avatar") [
+				avatar,
 				t.label() [
 					" Avatar, uploaded as soon as you pick it: ",
 					t.input(type="file", name="avatar", accept="image/*", on_change=self.set_avatar),
 				],
-			]),
+			],
 			t.p(class_="message") [
 				self.message
 			],
-			t.ul()([
+			t.ul() [[
 				t.li() [
 					t.img(src=f"/images/{id}", alt="Uploaded image")
 				]
 				for id in self.images
-			]),
+			]],
 			t.p() [
 				f"{len(self.images)} image(s)"
 			],

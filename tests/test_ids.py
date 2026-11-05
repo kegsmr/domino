@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino import Style
+from domino._core import Style
 
 
 class Card(t.div):

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from domino.cli import build_parser
-from domino.pytest_plugin import load_app
+from domino._cli import build_parser
+from domino._pytest_plugin import load_app
 
 
 # Each step's complete app is here; its text is docs/tutorial/<n>-<name>.md

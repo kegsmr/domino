@@ -1,11 +1,12 @@
 import time
 
+from domino import Component
 import domino.tags as t
 
 from data import tasks
 
 
-class Tasks(t.div):
+class Tasks(Component):
 
 	css = {
 		"max_width": "28rem",
@@ -36,16 +37,16 @@ class Tasks(t.div):
 					"Add"
 				]
 			],
-			t.ul()([
+			t.ul [[
 				t.li(class_="done" if item["done"] else None) [
-					t.label() [
+					t.label [
 						# A checkbox's event.value is True or False
-						t.input(type="checkbox", checked=item["done"], on_change=lambda event, id=item["_id"]: self.toggle(id, event.value)),
+						t.input(type="checkbox", checked=item["done"], on_change=(self.toggle, item["_id"])),
 						f" {item['text']}"
 					]
 				]
 				for item in items
-			]),
+			]],
 			t.div(class_="footer") [
 				f"{left} left",
 				t.button(type="button", on_click=self.clear) [
@@ -62,9 +63,10 @@ class Tasks(t.div):
 			tasks.insert({"text": text[:200], "done": False, "created": time.time()})
 
 
-	def toggle(self, id, done):
+	# Gets the task's id, then the event (event.value: whether the box is ticked)
+	def toggle(self, id, event):
 
-		tasks.update({"_id": id}, {"$set": {"done": done}})
+		tasks.update({"_id": id}, {"$set": {"done": event.value}})
 
 
 	def clear(self):

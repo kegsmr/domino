@@ -18,9 +18,9 @@ from pathlib import Path
 from flask import abort
 
 from . import tags as t
-from .components import Document
-from .core import Element
-from .templates import JinjaTemplate
+from ._components import Document
+from ._core import Element
+from ._templates import JinjaTemplate
 
 
 # [id], [int:id] and [...rest]
@@ -33,7 +33,7 @@ class PagesError(Exception):
 
 
 class PageRoute:
-	"""The view of a page's URL rule. Hot reloading (see domino.hot) gives it a new view when the
+	"""The view of a page's URL rule. Hot reloading (see domino._hot) gives it a new view when the
 	page changes, since Flask can't replace or remove a rule; with none (the page's file was
 	deleted) it answers 404. `modules` are the names of the page's module and its layouts'."""
 
@@ -146,7 +146,7 @@ def find_pages(folder):
 		if any(part.startswith(("_", ".")) for part in parts):
 			continue
 
-		# pages/about_test.py holds the tests for pages/about.py (see domino.pytest_plugin)
+		# pages/about_test.py holds the tests for pages/about.py (see domino._pytest_plugin)
 		if path.name == "layout.py" or path.name.endswith("_test.py"):
 			continue
 
@@ -271,7 +271,7 @@ def page_view(module, relative, rule, layouts):
 def template_page_view(path, relative, layouts):
 	"""The view of a template in pages/: the template, with the URL's parameters as its context."""
 
-	from .templates import page_template
+	from ._templates import page_template
 
 	return layout_view(functools.partial(page_template, str(path)), layouts)
 
@@ -292,7 +292,7 @@ def layout_view(make, layouts):
 		result = make(**params)
 
 		# A layout component (Layout(title="About") [...]) is the whole page
-		from .dtemplates import whole_page
+		from ._dtemplates import whole_page
 		result = whole_page(result)
 
 		# A whole document (Document or any <html>), a Jinja template(...), a Domino template with
@@ -335,7 +335,7 @@ def template_layout(markup, layout, names, content, params, kwargs, outer):
 	"""layout.html around `content`, which goes where it has <slot />. Its values are the URL's
 	parameters, and what layout() returns when there's a layout.py next to it."""
 
-	from .dtemplates import DominoTemplate
+	from ._dtemplates import DominoTemplate
 
 	values = dict(params)
 	if layout is not None:

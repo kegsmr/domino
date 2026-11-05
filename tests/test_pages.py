@@ -5,9 +5,10 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-import domino.cli as cli
-from domino import Domino, pages
-from domino.pages import PagesError
+import domino._cli as cli
+from domino import Domino
+from domino import _pages as pages
+from domino._pages import PagesError
 
 
 @pytest.fixture(autouse=True)
@@ -215,14 +216,14 @@ def test_a_page_returning_a_document_skips_layouts(tmp_path):
 	app = make_app(tmp_path, {
 		"pages/layout.py": (
 			"import domino.tags as t\n"
-			"from domino.components import Document\n"
+			"from domino import Document\n"
 			"def layout(content):\n"
 			"\treturn Document(title='Site') [t.nav() ['NAV'], content]\n"
 		),
 		"pages/index.py": "import domino.tags as t\ndef page():\n\treturn t.p() ['inside']\n",
 		"pages/print.py": (
 			"import domino.tags as t\n"
-			"from domino.components import Document\n"
+			"from domino import Document\n"
 			"def page():\n"
 			"\treturn Document(title='Print') [t.p() ['alone']]\n"
 		),
@@ -390,7 +391,7 @@ def test_events_and_state_work_on_a_page(tmp_path):
 	app = make_app(tmp_path, {
 		"pages/layout.py": (
 			"import domino.tags as t\n"
-			"from domino.components import Document\n"
+			"from domino import Document\n"
 			"def layout(content):\n"
 			"\treturn Document() [t.nav() ['NAV'], content]\n"
 		),
@@ -425,8 +426,8 @@ def served(monkeypatch):
 	"""Records the apps `domino run` would serve, instead of serving them."""
 
 	apps = []
-	# Domino.run() serves through domino.asgi.serve (uvicorn)
-	monkeypatch.setattr("domino.asgi.serve", lambda app, *args, **kwargs: apps.append(app))
+	# Domino.run() serves through domino._asgi.serve (uvicorn)
+	monkeypatch.setattr("domino._asgi.serve", lambda app, *args, **kwargs: apps.append(app))
 
 	# --no-mongo sets this; set then deleted so it's removed again after the test
 	monkeypatch.setenv("DOMINO_NO_MONGO", "")

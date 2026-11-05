@@ -1,4 +1,4 @@
-"""Client components (domino.client): checking their modules, rendering them on the server with
+"""Client components (domino._client): checking their modules, rendering them on the server with
 the code the browser runs, and what the app serves the browser. tests/test_client_browser.py runs
 them in a real browser."""
 
@@ -16,9 +16,10 @@ import textwrap
 import pytest
 
 import domino.tags as t
-from domino import Domino, State, client
-from domino.client import ClientComponentError
-from domino.components import Document
+from domino import Domino, State
+from domino import _client as client
+from domino._client import ClientComponentError
+from domino import Document
 
 
 COUNTER = '''

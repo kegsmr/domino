@@ -39,12 +39,12 @@ class Search(t.div):
 			t.p() [
 				f"{len(matches)} match(es), {self.requests} request(s) sent"
 			],
-			t.ul()([
+			t.ul() [[
 				t.li() [
 					name
 				]
 				for name in matches
-			])
+			]]
 		]
 
 

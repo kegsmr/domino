@@ -1,8 +1,8 @@
+from domino import Component, State
 import domino.tags as t
-from domino import State
 
 
-class Tasks(t.div):
+class Tasks(Component):
 
 	# A list of dicts now: each task knows whether it's done
 	items = State([
@@ -23,17 +23,17 @@ class Tasks(t.div):
 					"Add"
 				]
 			],
-			t.ul()([
-				t.li() [
-					t.label() [
-						# index=index keeps each checkbox's own index (a lambda alone would see the last one)
-						t.input(type="checkbox", checked=item["done"], on_change=lambda event, index=index: self.toggle(index)),
+			t.ul [[
+				t.li [
+					t.label [
+						# (handler, argument): a change calls self.toggle(index), with this checkbox's index
+						t.input(type="checkbox", checked=item["done"], on_change=(self.toggle, index)),
 						f" {item['text']}"
 					]
 				]
 				for index, item in enumerate(self.items)
-			]),
-			t.p() [
+			]],
+			t.p [
 				f"{left} left ",
 				t.button(type="button", on_click=self.clear) [
 					"Clear done"

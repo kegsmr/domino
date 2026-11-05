@@ -11,7 +11,7 @@ from werkzeug.serving import make_server
 
 import domino.tags as t
 from domino import Domino, State
-from domino.components import Document
+from domino import Document
 
 
 class Counter(t.div):

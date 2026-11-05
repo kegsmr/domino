@@ -1,7 +1,7 @@
 from flask import request
 
+from domino import Document
 import domino.tags as t
-from domino.components import Document
 
 
 LINKS = [
@@ -14,14 +14,14 @@ LINKS = [
 def layout(content):
 
 	page = Document(title="Tasks") [
-		t.nav()([
+		t.nav [[
 			# aria-current marks the link to the page being shown
 			t.a(href=href, aria_current="page" if request.path == href else None) [
 				text
 			]
 			for text, href in LINKS
-		]),
-		t.main() [
+		]],
+		t.main [
 			content
 		]
 	]

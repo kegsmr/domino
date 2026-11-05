@@ -39,7 +39,7 @@ def page():
 		],
 		t.section(id="features", class_="mx-auto max-w-6xl px-6 py-16") [
 			t.h2(class_="text-3xl font-bold tracking-tight") ["Everything in one place"],
-			t.div(class_="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3")([
+			t.div(class_="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3") [[
 				t.article(class_="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900") [
 					t.div(class_="mb-4 grid size-10 place-items-center rounded-lg bg-indigo-600/10 font-bold text-indigo-600 dark:text-indigo-400") [
 						str(number)
@@ -48,7 +48,7 @@ def page():
 					t.p(class_="mt-2 text-slate-600 dark:text-slate-400") [text]
 				]
 				for number, (title, text) in enumerate(FEATURES, 1)
-			])
+			]]
 		],
 		t.section(id="signup", class_="mx-auto max-w-6xl px-6 py-16") [
 			Signup()

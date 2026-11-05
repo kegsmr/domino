@@ -14,7 +14,7 @@ pip install domino-web
 
 ## A page
 
-Make a folder for the app, `tasks/`, with a `pages/` folder inside. Every Python file in `pages/` is a page, and its path is its URL: `pages/index.py` is the page at `/`. A page file has a `page()` function that returns what to show, built from tag classes: `t.h1()` is an `<h1>`, and what's in the square brackets goes inside it.
+Make a folder for the app, `tasks/`, with a `pages/` folder inside. Every Python file in `pages/` is a page, and its path is its URL: `pages/index.py` is the page at `/`. A page file has a `page()` function that returns what to show, built from tag classes: `t.h1` is an `<h1>`, and what's in the square brackets goes inside it. With attributes, call it first: `t.a(href="/about") ["About"]`.
 
 {{ file: 1-first-page/pages/index.py }}
 
@@ -22,7 +22,7 @@ The page imports `Tasks` from `components/`, which you write next. The app's fol
 
 ## A component
 
-A component is a Python class that subclasses the tag it renders as. Its `render()` returns what goes inside, and its `State` attributes hold what can change:
+A component is a Python class that subclasses `Component` (it renders as a `<div>`; `tag = "section"` picks another element). Its `render()` returns what goes inside, and its `State` attributes hold what can change:
 
 {{ file: 1-first-page/components/tasks.py }}
 

@@ -58,11 +58,11 @@ class Onboarding(t.div):
 			t.h2() [
 				f"Welcome, {self.account['name']}!"
 			],
-			t.dl()([
+			t.dl() [[
 				item
 				for key, value in self.account.items()
 				for item in (t.dt() [key], t.dd() [f"{value!r} ({type(value).__name__})"])
-			]),
+			]],
 			t.button(type="button", on_click=self.start_over) [
 				"Start over"
 			]

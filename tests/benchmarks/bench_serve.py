@@ -46,7 +46,7 @@ class Server:
 
 		self.port = free_port()
 		env = dict(os.environ, PYTHONPATH=str(ROOT))
-		command = "import sys; from domino.cli import main; sys.exit(main(sys.argv[1:]))"
+		command = "import sys; from domino._cli import main; sys.exit(main(sys.argv[1:]))"
 		self.process = subprocess.Popen(
 			[sys.executable, "-c", command, "serve", str(HERE / "bench_app.py"), "--workers", str(workers), "--port", str(self.port)],
 			env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

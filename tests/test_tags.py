@@ -2,7 +2,7 @@ import ast
 from pathlib import Path
 
 import domino.tags as t
-from domino.core import Element
+from domino._core import Element
 
 
 def test_every_tag_renders_its_own_name():
@@ -19,7 +19,7 @@ def test_stub_matches_tags():
 	stub = ast.parse((Path(t.__file__).parent / "tags.pyi").read_text())
 	stubbed = [node.name for node in stub.body if isinstance(node, ast.ClassDef)]
 
-	assert stubbed == t.TAGS
+	assert stubbed == t.TAGS + ["Component"]
 
 
 def test_subclassing_a_tag():

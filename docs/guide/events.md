@@ -2,7 +2,7 @@
 
 Clicks, typing and submits, handled in Python on the server.
 
-`element.bind("click", callback)` (or `on_click=callback`) runs `callback` on the server. A callback that takes an argument receives an `Event`:
+`on_click=callback` (or `on-click="callback"` in a template) runs `callback` on the server. A callback that takes an argument receives an `Event` (after the arguments of `on_click=(callback, *args)`):
 
 - `event.type`: the DOM event name (`"click"`, `"submit"`, `"change"`, ...)
 - `event.value`: the element's value (`True`/`False` for checkboxes)

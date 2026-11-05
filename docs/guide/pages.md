@@ -36,7 +36,7 @@ import domino.tags as t
 
 def page(id):
 
-    return t.h1() [
+    return t.h1 [
         f"User {id}"
     ]
 ```
@@ -45,11 +45,11 @@ A page can also be a component class named `Page`. Each visit gets a new one, an
 
 ```python
 # pages/counter.py  ->  /counter
-from domino import State
+from domino import Component, State
 import domino.tags as t
 
 
-class Page(t.div):
+class Page(Component):
 
     count = State(0)
 
@@ -97,7 +97,7 @@ A layout is the document and navigation pages share. It's a file of its own, by 
 ```
 
 - A page in a layout is the whole document: Domino adds the doctype, its script and the components' CSS. `<page>` without `layout=` is just its markup (or a whole document of its own, with `<html>`).
-- A layout needs no Python class. What a page gives it (`title="About"`) are its values, and a value it isn't given shows nothing. A class with the layout's name (`layouts/main.py`, `class Main(t.div)`) adds what any component has: helpers (the signed-in user for the nav), `State` and handlers (a menu that opens), live data. Its handlers are answered by the server rather than predicted.
+- A layout needs no Python class. What a page gives it (`title="About"`) are its values, and a value it isn't given shows nothing. A class with the layout's name (`layouts/main.py`, `class Main(Component)`) adds what any component has: helpers (the signed-in user for the nav), `State` and handlers (a menu that opens), live data. Its handlers are answered by the server rather than predicted.
 - Layouts nest: `<layout name="Admin" layout="Main">` goes inside Main (given the same values), so `<page layout="Admin">` gets the site's document with an admin frame around the page.
 - From Python, a page returns it like any component: `return Main(title="About") [Article()]`.
 - Links between pages keep the layout's elements as they are (see [Moving between pages](#moving-between-pages)), and saving it updates open pages.
@@ -107,14 +107,14 @@ The older way still works: a `layout.py` in `pages/` or a subfolder wraps every 
 
 ```python
 # pages/layout.py
+from domino import Document
 import domino.tags as t
-from domino.components import Document
 
 
 def layout(content):
 
     return Document(title="My site") [
-        t.nav() [
+        t.nav [
             t.a(href="/") ["Home"],
             t.a(href="/about") ["About"]
         ],

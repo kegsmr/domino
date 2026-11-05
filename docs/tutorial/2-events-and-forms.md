@@ -12,7 +12,7 @@ A few things are new:
 
 - `on_submit=self.add` on the form runs `add` when it's submitted, without reloading the page. A handler that takes an argument receives the `Event`, and `event.form` holds the form's fields by name.
 - After the submit, the form is reset to what the server rendered, so the text field is empty again, ready for the next task. While you type, Domino never overwrites what's in a field.
-- `on_change` on each checkbox calls a `lambda` with that task's index. Writing `index=index` keeps each checkbox's own index; a plain `lambda event: self.toggle(index)` would see the last one.
+- `on_change=(self.toggle, index)` on each checkbox calls `self.toggle(index)` with that checkbox's own index: a handler and its arguments, as a tuple. A handler that also takes the event gets it after them.
 - `required=True` is the browser's own check: an empty task isn't even sent.
 
 {{ demo: 2-events-and-forms }}

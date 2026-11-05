@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 from components.patterns import Patterns
 from components.server_stats import ServerTextStats

@@ -15,7 +15,7 @@ online = State(0)
 class Chat(t.ul):
 
     def render(self):
-        return [t.li() [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)]
+        return [t.li [m["text"]] for m in messages.find(sort=[("sent", -1)], limit=50)]
 
     def send(self, event):
         messages.insert({"text": event.form["text"], "sent": time.time()})  # every Chat updates

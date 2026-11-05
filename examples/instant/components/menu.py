@@ -33,15 +33,15 @@ class SortMenu(t.div):
 
 		# The options and their buttons exist only while the menu is open
 		if self.open:
-			children.append(t.ul(role="menu")([
+			children.append(t.ul(role="menu") [[
 				t.li() [
 					t.button(role="menuitemradio", aria_checked="true" if option == self.choice else "false",
-						on_click=lambda event, option=option: self.pick(option)) [
+						on_click=(self.pick, option)) [
 						option
 					]
 				]
 				for option in OPTIONS
-			]))
+			]])
 
 		return children
 

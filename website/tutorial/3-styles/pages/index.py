@@ -1,5 +1,5 @@
+from domino import Document
 import domino.tags as t
-from domino.components import Document
 
 from components.tasks import Tasks
 
@@ -8,8 +8,8 @@ from components.tasks import Tasks
 def page():
 
 	page = Document(title="Tasks") [
-		t.main() [
-			t.h1() [
+		t.main [
+			t.h1 [
 				"Tasks"
 			],
 			Tasks()

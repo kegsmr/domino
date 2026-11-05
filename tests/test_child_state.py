@@ -12,7 +12,7 @@ import pytest
 
 import domino.tags as t
 from domino import Collection, Domino, State
-from domino.components import Document
+from domino import Document
 
 
 class Counter(t.div):
@@ -178,7 +178,7 @@ def test_a_keyed_list_keeps_each_rows_state_across_reorder_insert_and_delete():
 
 def test_an_unkeyed_list_matches_by_position_and_warns_while_debugging(caplog):
 
-	from domino import core
+	from domino import _core as core
 	core._unkeyed_warned.clear()
 
 	component = UnkeyedList()
@@ -204,7 +204,7 @@ def test_an_unkeyed_list_matches_by_position_and_warns_while_debugging(caplog):
 
 def test_no_warning_outside_debug_mode(caplog):
 
-	from domino import core
+	from domino import _core as core
 	core._unkeyed_warned.clear()
 
 	component = UnkeyedList()
@@ -436,7 +436,7 @@ class Many(t.div):
 
 def test_rendering_the_parent_again_keeps_the_childrens_html_so_patches_stay_small():
 
-	from domino.patches import COPY_COST, diff
+	from domino._patches import COPY_COST, diff
 
 	app = make_app(Many)
 	client = app.test_client()
@@ -451,16 +451,13 @@ def test_rendering_the_parent_again_keeps_the_childrens_html_so_patches_stay_sma
 	first = bump()
 	second = bump()
 
-	# Only the parent's own line changed: the rows kept their ids, and so their HTML
+	# Only the parent's own line changed: the rows kept their ids, and so their HTML (the rest of the
+	# page is copied, a few bytes per run of lines)
 	ops = diff(first, second)
 	assert ops is not None
-	sent = 0
-	for op in ops:
-		if isinstance(op, str):
-			sent += len(op)
-		else:
-			sent += COPY_COST
-	assert sent < 100
+	sent = [op for op in ops if isinstance(op, str)]
+	assert len(sent) == 1 and "parent 2" in sent[0] and "Row" not in sent[0]
+	assert sum(COPY_COST for op in ops if not isinstance(op, str)) < 40
 
 
 total = State(0)

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import domino.tags as t  # noqa: E402
 from domino import Collection, Domino, mongo, wait  # noqa: E402
-from domino.components import Document  # noqa: E402
+from domino import Document  # noqa: E402
 
 
 USERS = 20

@@ -20,7 +20,7 @@ def login():
 @accounts.login_required                           # under @app.route, or on a page's page()
 def private():
     user = accounts.current_user()
-    return Document() [t.p() [f"Hello {user['email']}"]]
+    return Document() [t.p [f"Hello {user['email']}"]]
 ```
 
 - `accounts.current_user()` is the signed-in user's document (without its password hash), or None; `accounts.user_id()` is just the id. Both are reactive: a component that reads them in `render()` re-renders when the user logs in or out on that page.

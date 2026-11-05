@@ -4,7 +4,7 @@ import threading
 
 import domino.tags as t
 from domino import Domino
-from domino.components import Document
+from domino import Document
 
 
 class Counter(t.div):
@@ -81,7 +81,8 @@ def test_refresh_pushes_rerendered_html_to_its_page():
 	assert len(updates) == 1
 	assert updates[0]["id"] == counter.id()
 	assert "Count: 5" in updates[0]["html"]
-	assert updates[0]["html"].startswith(f'<div class="Counter" id="{counter.id()}"')
+	# Refreshed, so it's live: pages showing it from now on keep a channel open for it
+	assert updates[0]["html"].startswith(f'<div class="Counter" data-live id="{counter.id()}"')
 
 
 def test_refresh_pushes_to_every_page_showing_the_component():

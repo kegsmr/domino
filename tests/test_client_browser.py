@@ -9,7 +9,7 @@ import pytest
 
 playwright = pytest.importorskip("playwright.sync_api")
 
-from domino import client
+from domino import _client as client
 
 
 def runtime_or_skip(name):

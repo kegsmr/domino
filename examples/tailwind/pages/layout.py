@@ -1,7 +1,7 @@
 from flask import request
 
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 from components.navbar import NavBar
 

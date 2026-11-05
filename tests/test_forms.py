@@ -5,7 +5,7 @@ import pytest
 
 import domino.tags as t
 from domino import Domino, State, forms
-from domino.components import Document
+from domino import Document
 
 
 def render(element):

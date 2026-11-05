@@ -184,7 +184,7 @@ class MongoStore:
 		self.generation = _generation
 		self.watching = False
 
-		# Changes are only judged by query (see domino.reactive.Read) when MongoDB compares
+		# Changes are only judged by query (see domino._reactive.Read) when MongoDB compares
 		# strings as Python does: a default collation (case-insensitive, say) changes that
 		self.matching = "plain"
 		try:

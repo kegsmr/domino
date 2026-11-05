@@ -1,5 +1,6 @@
-from domino.components import Core
+from domino import State
 import domino.tags as t
+from domino import Core
 
 
 # Define reusable components. Each one's `css` is scoped to its class (.Navbar a, ...)
@@ -26,18 +27,18 @@ class Navbar(t.div):
 		},
 	}
 
-	def init(self):
-		t.h1(self, "Domino Showcase")
-		nav_links = t.div(self)
+	links = [
+		("Home", "#home"),
+		("Features", "#features"),
+		("Gallery", "#gallery"),
+		("Contact", "#contact"),
+	]
 
-		links = [
-			("Home", "#home"),
-			("Features", "#features"),
-			("Gallery", "#gallery"),
-			("Contact", "#contact"),
+	def render(self):
+		return [
+			t.h1 ["Domino Showcase"],
+			t.div [[t.a(href=href) [text] for text, href in self.links]],
 		]
-		for link_text, link_href in links:
-			t.a(nav_links, link_text, href=link_href)
 
 
 class HeroSection(t.section):
@@ -66,11 +67,14 @@ class HeroSection(t.section):
 		},
 	}
 
-	def init(self):
-		self.id("home")
-		t.h1(self, "Welcome to Domino")
-		t.p(self, "Build web pages with ease and elegance.")
-		t.a(self, "Learn More", href="#features")
+	attrs = {"id": "home"}
+
+	def render(self):
+		return [
+			t.h1 ["Welcome to Domino"],
+			t.p ["Build web pages with ease and elegance."],
+			t.a(href="#features") ["Learn More"],
+		]
 
 
 class FeatureCard(t.div):
@@ -98,21 +102,19 @@ class FeaturesSection(t.section):
 		},
 	}
 
-	def init(self):
-		self.__attributes__["id"] = "features"
-		t.h2(self, "Features")
+	attrs = {"id": "features"}
 
-		features = [
-			("Simplicity", "Write minimal code to generate clean HTML and CSS."),
-			("Flexibility", "Style elements dynamically with reusable styles."),
-			("Modularity", "Build reusable components for efficient development."),
+	features = [
+		("Simplicity", "Write minimal code to generate clean HTML and CSS."),
+		("Flexibility", "Style elements dynamically with reusable styles."),
+		("Modularity", "Build reusable components for efficient development."),
+	]
+
+	def render(self):
+		return [
+			t.h2 ["Features"],
+			t.div [[FeatureCard [t.h3 [title], t.p [description]] for title, description in self.features]],
 		]
-
-		grid = t.div(self)
-		for title, desc in features:
-			card = FeatureCard(grid)
-			t.h3(card, title)
-			t.p(card, desc)
 
 
 class Tile(t.div):
@@ -141,18 +143,20 @@ class GallerySection(t.section):
 		},
 	}
 
-	def init(self):
-		self.__attributes__["id"] = "gallery"
-		t.h2(self, "Gallery")
+	attrs = {"id": "gallery"}
 
-		gallery = t.div(self)
-
+	def render(self):
 		# Generated tiles instead of images, so the example needs no network. Only the
 		# color differs per tile, so it's an inline style; the rest is Tile's css
-		for i in range(1, 7):
-			Tile(gallery, f"Image {i}", style={
-				"background_image": f"linear-gradient(135deg, hsl({i * 50}, 70%, 55%), hsl({i * 50 + 40}, 70%, 40%))"
-			})
+		return [
+			t.h2 ["Gallery"],
+			t.div [[
+				Tile(style={
+					"background_image": f"linear-gradient(135deg, hsl({i * 50}, 70%, 55%), hsl({i * 50 + 40}, 70%, 40%))"
+				}) [f"Image {i}"]
+				for i in range(1, 7)
+			]],
+		]
 
 
 class ContactSection(t.section):
@@ -187,35 +191,30 @@ class ContactSection(t.section):
 		},
 	}
 
-	def init(self):
-		self.__attributes__["id"] = "contact"
-		self.sender = None
+	attrs = {"id": "contact"}
+
+	sender = State(None)
 
 
 	def render(self):
 
-		# Rebuilt on every render, so start from no children
-		self([])
-		t.h2(self, "Contact Us")
-
 		if self.sender:
-			t.p(self, f"Thanks, {self.sender}! We'll be in touch.")
-			return
+			return [t.h2 ["Contact Us"], t.p [f"Thanks, {self.sender}! We'll be in touch."]]
 
-		form = t.form(self)
-		form.bind("submit", self.send)
-
-		t.input(form, type="text", name="name", placeholder="Your Name", required=True)
-		t.input(form, type="email", name="email", placeholder="Your Email")
-		t.textarea(form, name="message", placeholder="Your Message", rows="4")
-		t.button(form, "Send Message", type="submit")
+		return [
+			t.h2 ["Contact Us"],
+			t.form(on_submit=self.send) [
+				t.input(type="text", name="name", placeholder="Your Name", required=True),
+				t.input(type="email", name="email", placeholder="Your Email"),
+				t.textarea(name="message", placeholder="Your Message", rows="4"),
+				t.button(type="submit") ["Send Message"],
+			],
+		]
 
 
 	def send(self, event):
 
 		self.sender = event.form.get("name") or "friend"
-
-		return self
 
 
 class Footer(t.footer):
@@ -228,8 +227,8 @@ class Footer(t.footer):
 		"margin_top": "50px",
 	}
 
-	def init(self):
-		t.p(self, "© 2025 Domino Showcase. All rights reserved.")
+	def render(self):
+		return [t.p ["© 2025 Domino Showcase. All rights reserved."]]
 
 
 # A page can be a component class named Page: each visit gets a new one, so each
@@ -242,20 +241,21 @@ class Page(t.html):
 		"h2": {"font_size": "2.5rem", "margin_bottom": "40px", "color": "#333"},
 	}
 
-	def init(self):
+	def render(self):
 
-		head = t.head(self)
-		t.title(head, "Domino Showcase")
-
-		# Domino's client script, needed for events (Document adds this itself)
-		head.add_children([Core()])
-
-		body = t.body(self)
-
-		Navbar(body)
-		HeroSection(body)
-		FeaturesSection(body)
-		GallerySection(body)
-		ContactSection(body)
-		Footer(body)
+		return [
+			t.head [
+				t.title ["Domino Showcase"],
+				# Domino's client script, needed for events (Document adds this itself)
+				Core()
+			],
+			t.body [
+				Navbar(),
+				HeroSection(),
+				FeaturesSection(),
+				GallerySection(),
+				ContactSection(),
+				Footer(),
+			]
+		]
 

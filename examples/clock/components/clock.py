@@ -4,11 +4,8 @@ import time
 import domino.tags as t
 
 
+# Nothing to mark: this module calls clock.refresh(), so pages showing it keep a channel open
 class Clock(t.div):
-
-	# Pages showing a live component keep a stream open for refresh()
-	live = True
-
 
 	def render(self):
 

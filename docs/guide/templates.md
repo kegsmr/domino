@@ -29,7 +29,7 @@ Domino templates are plain HTML with three additions: components are capitalized
 
 ```python
 # components/todos.py
-class TodoList(t.div):
+class TodoList(Component):
 
     items = State([])
 
@@ -62,7 +62,7 @@ class TodoList(t.div):
 
 - Attributes become what the component declares: a `State` (its starting value), a property with a setter, or a class attribute (`heading = ""`). Plain attributes are strings; `items="{{ visible }}"` passes the value itself. Other attributes (`class`, `id`, `aria-*`, ...) go on its element, as in Python.
 - `on-add="add"` passes a handler: if the component declares `on_add = None`, the handler is its prop, which it calls itself (`self.on_add(text)`), and the event then re-renders the parent; otherwise it's a DOM event on the component's element.
-- What's between `<Card>` and `</Card>` goes where Card's template has `<slot />` (`<slot>fallback</slot>` shows its own content when there's none). Python composition works the same way: `Card(heading="Tips") [t.p() ["..."]]`.
+- What's between `<Card>` and `</Card>` goes where Card's template has `<slot />` (`<slot>fallback</slot>` shows its own content when there's none). Python composition works the same way: `Card(heading="Tips") [t.p ["..."]]`.
 
 **Values.** `{{ name }}`, `{{ item.text }}` and `{{ item["text"] }}` read the component's `State`, properties, attributes and helper methods (called without arguments: helpers are how logic stays in Python), and loop variables. `.name` also reads a dict's key, and a missing key is nothing; an unknown name, or an object's unknown attribute, is an error naming the template's file, line and column, with the names that exist. `helper(item, "text")` calls a method with values; `not x` is the one operator. Nothing else: no comparisons, arithmetic or filters, so write a helper (`is_open(index)`, `remaining`).
 
@@ -90,11 +90,10 @@ Jinja stays available, for pages and existing templates. A file is Jinja when it
 `html()` turns a [template string](https://peps.python.org/pep-0750/) (`t"..."`) into the same Domino elements tag classes make, so events, `State`, escaping, instant updates and in-place patching all work as before:
 
 ```python
-from domino import State, html
-import domino.tags as t
+from domino import Component, State, html
 
 
-class Counter(t.div):
+class Counter(Component):
 
     count = State(0)
     items = State(["a", "b"])
@@ -149,7 +148,7 @@ Components can have Jinja templates too, the older way: a component without a `r
 
 ```python
 # components/counter.py
-class Counter(t.div):
+class Counter(Component):
 
     count = State(0)
 

@@ -7,9 +7,9 @@ import pytest
 
 import domino.tags as t
 from domino import Collection, Domino, mongo, wait
-from domino.components import Document
+from domino import Document
 from domino.mongo import changed_documents
-from domino.reactive import may_match
+from domino._reactive import may_match
 
 
 # The apps a test showed, so their pages (and components) stay alive until it ends

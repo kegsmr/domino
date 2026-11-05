@@ -26,10 +26,10 @@ class NavBar(t.header):
 					t.span(class_="grid size-8 place-items-center rounded-lg bg-indigo-600 text-sm text-white") ["D"],
 					"Domino"
 				],
-				t.div(class_="hidden items-center gap-8 md:flex")([
+				t.div(class_="hidden items-center gap-8 md:flex") [[
 					self.link(text, href, "text-sm font-medium")
 					for text, href in LINKS
-				]),
+				]],
 				t.button(
 					on_click=self.toggle,
 					aria_expanded="true" if self.open else "false",
@@ -40,10 +40,10 @@ class NavBar(t.header):
 					"Close" if self.open else "Menu"
 				]
 			],
-			t.div(id="mobile-menu", class_="border-t border-slate-200 px-6 py-3 md:hidden dark:border-slate-800 " + ("block" if self.open else "hidden"))([
+			t.div(id="mobile-menu", class_="border-t border-slate-200 px-6 py-3 md:hidden dark:border-slate-800 " + ("block" if self.open else "hidden")) [[
 				self.link(text, href, "block rounded-lg px-3 py-2 font-medium hover:bg-slate-100 dark:hover:bg-slate-800")
 				for text, href in LINKS
-			])
+			]]
 		]
 
 

@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino import Style
+from domino._core import Style
 from domino.bootstrap import col_6, container_fluid, d_flex, row
 
 

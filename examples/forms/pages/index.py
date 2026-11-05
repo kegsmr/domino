@@ -1,5 +1,5 @@
 import domino.tags as t
-from domino.components import Document
+from domino import Document
 
 from components.seat_picker import SeatPicker
 from components.signup import Onboarding

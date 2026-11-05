@@ -1,10 +1,9 @@
-import domino.tags as t
-from domino import State
+from domino import Component, State
 
 
 # No render(): <Counter> in counter.html, next to this file, is its markup. The Python side is
 # only the logic: its State, helpers the template reads, and the handlers its events call
-class Counter(t.div):
+class Counter(Component):
 
 	count = State(0)
 

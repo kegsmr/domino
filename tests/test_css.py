@@ -1,6 +1,7 @@
 import domino.tags as t
-from domino import Domino, State, Style
-from domino.components import Document
+from domino import Domino, State
+from domino._core import Style
+from domino import Document
 
 
 class Card(t.div):

@@ -220,29 +220,35 @@ def unmount(island_id):
 
 def _call(callback, event):
 
+	# on_click=(self.remove, index): the arguments come first, then the event if it takes one
+	args = ()
+	if isinstance(callback, tuple):
+		callback, args = callback[0], tuple(callback[1:])
+
 	if event is None:
-		callback()
+		callback(*args)
 		return
 
-	takes = _takes_event(callback)
+	takes = _takes_event(callback, len(args))
 	if takes is not None:
 		if takes:
-			callback(event)
+			callback(*args, event)
 		else:
-			callback()
+			callback(*args)
 		return
 
 	# MicroPython can't tell how many arguments a function takes: try with the event first
 	try:
-		callback(event)
+		callback(*args, event)
 	except TypeError as error:
 		if "positional argument" not in str(error):
 			raise
-		callback()
+		callback(*args)
 
 
-def _takes_event(callback):
-	"""Whether `callback` takes the event, or None when this Python can't tell."""
+def _takes_event(callback, given=0):
+	"""Whether `callback` takes the event (after `given` arguments), or None when this Python
+	can't tell."""
 
 	# MicroPython's inspect.signature() isn't CPython's
 	import sys
@@ -252,7 +258,9 @@ def _takes_event(callback):
 	try:
 		import inspect
 		parameters = inspect.signature(callback).parameters.values()
-		return any(parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD, parameter.VAR_POSITIONAL) for parameter in parameters)
+		if any(parameter.kind == parameter.VAR_POSITIONAL for parameter in parameters):
+			return True
+		return len([parameter for parameter in parameters if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)]) > given
 	except Exception:
 		return None
 

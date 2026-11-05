@@ -1,6 +1,6 @@
 import domino.tags as t
 from domino import Domino, State, wait
-from domino.components import Document
+from domino import Document
 
 
 class Counter(t.div):
@@ -156,6 +156,6 @@ def test_properties_and_state_are_not_rendered_as_attributes():
 
 	html = render(Card())
 
-	assert 'title="kept as an attribute"' in html
+	assert 'title=' not in html  # class attributes are Python, not HTML attributes (attrs = {...} are)
 	assert "count=" not in html
 	assert "label=" not in html

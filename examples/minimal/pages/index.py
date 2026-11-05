@@ -1,10 +1,8 @@
-from domino import State
-from domino.components import Document
-import domino.tags as t
+from domino import Component, Document, State
 
 
 # Logic in Python, markup in index.html next to this file: <component name="Counter"> there
-class Counter(t.div):
+class Counter(Component):
 
 	# This component's own data, one per open tab. Changing it re-renders this at once
 	count = State(0)

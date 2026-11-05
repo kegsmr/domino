@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-import domino.cli as cli
-from domino import Domino, devmongo
+import domino._cli as cli
+from domino import Domino
+from domino import _devmongo as devmongo
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -234,7 +235,7 @@ def make_mongo_app(folder, settings=None):
 		""",
 		# Runs first: a page without named Collections doesn't start MongoDB
 		"pages/about_test.py": """
-			from domino import pytest_plugin
+			from domino import _pytest_plugin as pytest_plugin
 
 			def test_no_mongodb_yet(page, request):
 				assert page.text("h1") == "About"
@@ -245,7 +246,7 @@ def make_mongo_app(folder, settings=None):
 			import json
 			from pathlib import Path
 
-			from domino import pytest_plugin
+			from domino import _pytest_plugin as pytest_plugin
 
 
 			def test_add(page, open_page, domino_db, request):
@@ -300,7 +301,7 @@ def test_domino_test_mongo_url_is_used_without_starting_anything(tmp_path):
 	write(tmp_path, {"pages/server_test.py": """
 		import os
 
-		from domino import pytest_plugin
+		from domino import _pytest_plugin as pytest_plugin
 
 
 		def test_uses_the_server(domino_db, request):
@@ -344,7 +345,7 @@ def test_a_mongod_that_cant_start_explains_how_to_use_a_server(tmp_path):
 
 	make_mongo_app(tmp_path)
 	write(tmp_path, {"conftest.py": """
-		from domino import devmongo
+		from domino import _devmongo as devmongo
 
 		calls = []
 

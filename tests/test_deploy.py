@@ -11,8 +11,8 @@ import urllib.request
 
 import pytest
 
-import domino.cli as cli
-import domino.deploy as deploy
+import domino._cli as cli
+import domino._deploy as deploy
 from domino import Domino
 
 from conftest import Served

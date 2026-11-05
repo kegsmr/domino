@@ -20,19 +20,19 @@ class container(t.div):
 # Define the HTML page; a whole <html> page is used as it is, without layouts
 class HelloWorld(t.html):
 
-	lang="en"
+	# HTML attributes of the element itself; other class attributes are plain Python
+	attrs = {"lang": "en"}
 
-	def init(self):
+	title = "Hello World!"
+	subtitle = "Welcome to the world of Domino-based web development."
+	url = "www.example.com"
 
-		# Page content
-		title = "Hello World!"
-		subtitle = "Welcome to the world of Domino-based web development."
-		url = "www.example.com"
+	def render(self):
 
-		self([
+		return [
 			t.head() [
 				t.title() [
-					title
+					self.title
 				],
 				# Link the app's stylesheet, served at /style.css
 				current_app.stylesheet.link()
@@ -40,17 +40,17 @@ class HelloWorld(t.html):
 			t.body() [
 				container() [
 					t.h1() [
-						title
+						self.title
 					],
 					t.p() [
-						subtitle
+						self.subtitle
 					],
-					t.a(href=f"https://{url}", target="_blank") [
+					t.a(href=f"https://{self.url}", target="_blank") [
 						"Visit Example"
 					]
 				]
 			]
-		])
+		]
 
 
 # This file is the page at /

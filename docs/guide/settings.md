@@ -24,6 +24,6 @@ Settings work as a dict or with attributes: `app.settings.mongo.url`, `app.setti
 
 - `domino` sets Domino's Flask config: `page_ttl` becomes `app.config["DOMINO_PAGE_TTL"]`, and so on. Changes to `app.config` made in code afterwards still win. From the environment, these are `DOMINO_DOMINO__PAGE_TTL=600` and so on.
 - `secret_key` sets `app.secret_key`.
-- `public` is sent to the browser, where it's available as `Domino.settings`. `Document` adds it to the page head; pages built without `Document` can add `PublicSettings()` from `domino.components` to theirs. Nothing outside `public` is sent.
+- `public` is sent to the browser, where it's available as `Domino.settings`. `Document` adds it to the page head; pages built without `Document` can add `PublicSettings()` (`from domino import PublicSettings`) to theirs. Nothing outside `public` is sent.
 
 See `examples/settings/`.

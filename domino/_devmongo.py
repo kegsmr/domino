@@ -22,7 +22,7 @@ import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from .util import download_problem, urlopen
+from ._util import download_problem, urlopen
 
 
 INDEX_URL = "https://downloads.mongodb.org/full.json"

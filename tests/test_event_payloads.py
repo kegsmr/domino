@@ -1,6 +1,6 @@
 import domino.tags as t
 from domino import Domino, Event
-from domino.components import Document
+from domino import Document
 
 
 class Greeter(t.div):

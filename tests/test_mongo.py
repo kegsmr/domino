@@ -5,7 +5,7 @@ import pytest
 
 import domino.tags as t
 from domino import Collection, Domino, mongo
-from domino.components import Document
+from domino import Document
 
 
 def unique_name():

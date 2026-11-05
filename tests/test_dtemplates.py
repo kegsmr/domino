@@ -1,4 +1,4 @@
-"""Domino templates (domino.dtemplates): HTML for markup, components as capitalized tags, lists and
+"""Domino templates (domino._dtemplates): HTML for markup, components as capitalized tags, lists and
 conditions as attributes, values and handlers from Python."""
 
 import importlib.util
@@ -14,8 +14,8 @@ import pytest
 
 import domino.tags as t
 from domino import Domino, TemplateError, template
-from domino import dtemplates
-from domino.components import Document
+from domino import _dtemplates as dtemplates
+from domino import Document
 
 
 @pytest.fixture(autouse=True)
@@ -480,7 +480,7 @@ def test_predictions_for_handlers_with_values(tmp_path):
 
 def test_a_handler_taking_the_event_is_not_predicted(tmp_path):
 
-	from domino import optimistic
+	from domino import _optimistic as optimistic
 
 	module = component(tmp_path, LIST, LIST_HTML)
 	app = serve(tmp_path, module.Widget)
@@ -765,7 +765,7 @@ def test_a_template_in_pages_is_a_page_inside_the_layouts(tmp_path):
 	write(tmp_path / "pages" / "users" / "[name].html", "<page><h1>User {{ name }}</h1></page>")
 	write(tmp_path / "pages" / "layout.py", """
 		import domino.tags as t
-		from domino.components import Document
+		from domino import Document
 
 
 		def layout(content):
@@ -921,7 +921,7 @@ def test_edits_are_picked_up_while_debugging(tmp_path):
 
 def test_hot_reloading_forgets_parsed_files(tmp_path):
 
-	from domino import hot
+	from domino import _hot as hot
 
 	module = component(tmp_path, COUNTER, "<component name=\"Counter\">{{ count }}</component>", name="counter")
 	app = serve(tmp_path, module.Counter)
@@ -941,7 +941,7 @@ def test_hot_reloading_forgets_parsed_files(tmp_path):
 
 def test_the_scaffold_uses_templates(tmp_path):
 
-	from domino import cli
+	from domino import _cli as cli
 
 	cli.create(str(tmp_path / "site"))
 	html = (tmp_path / "site" / "components" / "tasks.html").read_text()
@@ -1107,7 +1107,7 @@ def test_a_layout_with_a_class_from_python_pages_and_404(tmp_path):
 
 def test_a_layout_html_in_pages_says_where_layouts_go_now(tmp_path):
 
-	from domino.pages import PagesError
+	from domino._pages import PagesError
 
 	write(tmp_path / "pages" / "layout.html", "<html><body><slot /></body></html>")
 	write(tmp_path / "pages" / "index.html", "<page><p>home</p></page>")

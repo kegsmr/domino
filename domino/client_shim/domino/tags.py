@@ -6,8 +6,9 @@
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
 RAW_TEXT_TAGS = {"script", "style"}
 
-# Class attributes that are Domino settings, not HTML attributes
-SETTINGS = {"css", "client", "live", "optimistic", "optimistic_states"}
+# Class attributes that are Domino settings, not HTML attributes (as in domino.util)
+SETTINGS = {"attrs", "css", "client", "live", "optimistic", "optimistic_states", "tag", "submit_text"}
+
 
 
 # `object` is also a tag below
@@ -72,18 +73,35 @@ def class_info(cls, tag):
 		name = base.__name__.replace("_", "-")
 		if name not in names:
 			names.append(name)
+	# HTML attributes: the classes' `attrs`; other class attributes are Python (settings, props)
 	merged = {}
 	for base in reversed(found):
-		if is_framework(base):
-			continue
-		for key, value in base.__dict__.items():
-			if key.startswith("_") or key in SETTINGS or callable(value) or hasattr(type(value), "__get__"):
-				continue
-			merged[key] = value
+		if not is_framework(base) and "attrs" in base.__dict__:
+			merged.update(base.__dict__["attrs"] or {})
 	attributes = list(merged.items())
 	info = _class_info[cls] = (names, attributes, "init" in methods, "render" in methods)
 
 	return info
+
+
+def flatten(children):
+	"""Lists, tuples and generators flattened, None, True and False skipped, numbers made text
+	(as on the server)."""
+
+	flat = []
+	for child in children:
+		if isinstance(child, (str, Element)):
+			flat.append(child)
+		elif child is None or child is True or child is False:
+			continue
+		elif isinstance(child, (int, float)):
+			flat.append(str(child))
+		elif isinstance(child, (list, tuple)) or (hasattr(child, "__next__") and not isinstance(child, type)):
+			flat.extend(flatten(child))
+		else:
+			flat.append(child)
+
+	return flat
 
 
 def attribute_name(key):
@@ -150,13 +168,13 @@ class Element:
 
 	def add_children(self, children):
 
-		self.content_root.__children__.extend(children)
+		self.content_root.__children__.extend(flatten(children))
 		return self
 
 
 	def set_children(self, children):
 
-		self.content_root.__children__ = children
+		self.content_root.__children__ = flatten(children)
 		return self
 
 
@@ -231,7 +249,8 @@ class Element:
 		bound = False
 		for key in kwargs:
 			value = kwargs[key]
-			if key[:3] == "on_" and callable(value):
+			# on_click=(self.remove, index) calls self.remove(index) (see _call in domino/__init__.py)
+			if key[:3] == "on_" and (callable(value) or (isinstance(value, tuple) and value and callable(value[0]))):
 				self.bind(key[3:], value)
 				bound = True
 			else:

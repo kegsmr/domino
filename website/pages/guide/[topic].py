@@ -19,7 +19,7 @@ def page(topic):
 	source = f"{markup.REPOSITORY}/blob/main/docs/guide/{topic.slug}.md"
 
 	return t.div(class_="doc") [
-		t.article()([
+		t.article [[
 			t.p(class_="eyebrow") [
 				topic.group
 			],
@@ -35,6 +35,6 @@ def page(topic):
 					"Edit this page on GitHub (docs/guide/" + topic.slug + ".md)"
 				]
 			]
-		]),
+		]],
 		Toc(headings)
 	]

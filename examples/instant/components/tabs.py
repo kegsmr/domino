@@ -24,14 +24,14 @@ class Tabs(t.div):
 	def render(self):
 
 		return [
-			t.div(role="tablist")([
-				# `index=index` keeps each button's own index (a lambda alone would see the last one)
+			t.div(role="tablist") [[
+				# (handler, argument): a click calls self.select(index), with this button's own index
 				t.button(role="tab", aria_selected="true" if index == self.active else "false",
-					on_click=lambda event, index=index: self.select(index)) [
+					on_click=(self.select, index)) [
 					name
 				]
 				for index, (name, _) in enumerate(TABS)
-			]),
+			]],
 			t.p(role="tabpanel") [
 				TABS[self.active][1]
 			]

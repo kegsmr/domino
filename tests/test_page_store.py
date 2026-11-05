@@ -3,7 +3,7 @@ import time
 
 import domino.tags as t
 from domino import Domino, MemoryPageStore
-from domino.components import Document
+from domino import Document
 
 
 class SlowCounter(t.div):

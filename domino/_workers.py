@@ -34,7 +34,7 @@ import threading
 import time
 from urllib.parse import parse_qs, unquote
 
-from .core import WORKER_ID_ENV
+from ._core import WORKER_ID_ENV
 
 
 # Requests longer than this before their body are refused (uvicorn and nginx allow less or about as much)
@@ -673,8 +673,8 @@ def worker_main(location, worker_id, sock, ready):
 
 def load_asgi(location):
 
-	from .asgi import ENV_APP, from_environ
-	from .cli import load_app
+	from ._asgi import ENV_APP, from_environ
+	from ._cli import load_app
 
 	if os.path.exists(location):
 		return load_app(location).asgi
