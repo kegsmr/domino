@@ -1177,3 +1177,118 @@ def test_page_and_definition_mistakes_are_explained(tmp_path, files, message):
 		dtemplates.parse_file(str(tmp_path / next(iter(files))))
 
 	assert message in str(error.value)
+
+
+# Functions outside classes
+
+
+def test_a_component_without_a_class_calls_the_functions_next_to_it(tmp_path):
+
+	write(tmp_path / "components" / "price.py", """
+		from os.path import join  # imported: not the template's
+
+
+		def money(cents):
+			return f"${int(cents) / 100:.2f}"
+
+
+		def weekday():
+			return "Thursday"
+
+
+		def _secret():
+			return "hidden"
+	""")
+	write(tmp_path / "components" / "price.html", '<component name="Price"><b>{{ money(amount) }}</b> <i>{{ weekday }}</i> <u>{{ join }}</u></component>')
+	write(tmp_path / "pages" / "index.html", '<page><Price amount="1999" /></page>')
+	app = make_app(tmp_path)
+
+	page = app.test_page("/")
+	assert page.text("b") == "$19.99"
+	assert page.text("i") == "Thursday"
+	# Like any name a component without a class isn't given
+	assert page.text("u") == ""
+
+
+def test_a_component_with_a_class_calls_the_functions_beside_it_too(tmp_path):
+
+	module = component(tmp_path, """
+		class Order(t.div):
+
+			total = State(250)
+
+			def label(self):
+				return "the method"
+
+			def add(self):
+				self.total += 100
+
+
+		def money(cents):
+			return f"${cents / 100:.2f}"
+
+
+		def label():
+			return "the function"
+	""", '<component name="Order"><p>{{ money(total) }}</p><span>{{ label }}</span><button on-click="add">+</button></component>', name="order")
+	page = serve(tmp_path, module.Order).test_page("/")
+
+	assert page.text("p") == "$2.50"
+	# The component's own names come first
+	assert page.text("span") == "the method"
+
+	page.click("button")
+	assert page.text("p") == "$3.50"
+
+
+def test_a_function_outside_a_class_can_handle_an_event(tmp_path):
+
+	write(tmp_path / "components" / "votes.py", """
+		from domino import Collection
+
+		votes = Collection()
+
+
+		def vote():
+			votes.insert({"at": 1})
+
+
+		def count():
+			return votes.count()
+	""")
+	write(tmp_path / "components" / "votes.html", '<component name="Votes"><p>{{ count }} votes</p><button on-click="vote">Vote</button></component>')
+	write(tmp_path / "pages" / "index.html", '<page><Votes /></page>')
+	app = make_app(tmp_path)
+
+	page = app.test_page("/")
+	assert page.text("p") == "0 votes"
+	page.click("button")
+	page.click("button")
+	assert page.text("p") == "2 votes"
+
+
+def test_dominos_own_functions_are_not_a_templates(tmp_path):
+
+	# A component without a class is made in domino.dtemplates, whose functions stay out of reach
+	write(tmp_path / "components" / "card.html", '<component name="Card"><p>[{{ load }}]</p></component>')
+	write(tmp_path / "pages" / "index.html", '<page><Card /></page>')
+	app = make_app(tmp_path)
+
+	assert app.test_page("/").text("p") == "[]"
+
+
+def test_an_unknown_name_lists_the_functions_too(tmp_path):
+
+	module = component(tmp_path, """
+		class Total(t.div):
+			pass
+
+
+		def money(cents):
+			return str(cents)
+	""", '<component name="Total"><p>{{ mony(1) }}</p></component>', name="total")
+
+	with pytest.raises(TemplateError) as error:
+		serve(tmp_path, module.Total).test_page("/")
+
+	assert "money" in str(error.value)

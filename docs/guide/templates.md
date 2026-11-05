@@ -66,6 +66,23 @@ class TodoList(t.div):
 
 **Values.** `{{ name }}`, `{{ item.text }}` and `{{ item["text"] }}` read the component's `State`, properties, attributes and helper methods (called without arguments: helpers are how logic stays in Python), and loop variables. `.name` also reads a dict's key, and a missing key is nothing; an unknown name, or an object's unknown attribute, is an error naming the template's file, line and column, with the names that exist. `helper(item, "text")` calls a method with values; `not x` is the one operator. Nothing else: no comparisons, arithmetic or filters, so write a helper (`is_open(index)`, `remaining`).
 
+**Functions outside the class.** A helper that keeps no state doesn't need to be in a class: the functions defined at the top level of the component's module (and of the `.py` file next to its template) are read like its methods, after the component's own names. A component with no class can have them too, with only functions in its `.py` file:
+
+```python
+# components/price.py
+def money(cents):
+    return f"${cents / 100:.2f}"
+```
+
+```html
+<!-- components/price.html -->
+<component name="Price">
+    <b>{{ money(amount) }}</b>
+</component>
+```
+
+They can handle events as well (`on-click="vote"`, with `vote()` adding to a `Collection`). Functions the module imports, and those whose names start with `_`, aren't read. A class is only needed for what a component remembers: its `State`.
+
 - Text is escaped; `Markup` values and Domino elements are inserted as they are; `None` and `False` show nothing. In `<script>` values are inserted as JSON.
 - In attributes too (`aria-*` and `data-*` attributes write `true` or `false`): `href="/polls/{{ poll.id }}"`, `class="task {{ if task.done }}done{{ /if }}"` (an `{{ if }}` block works inside an attribute).
 
