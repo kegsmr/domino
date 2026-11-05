@@ -2,6 +2,7 @@
 
 ## 0.4.0 (unreleased)
 
+- Desktop apps: `domino desktop` runs an app in a native window (pywebview), and `domino build --desktop` packages it with PyInstaller. The server answers only its window, through a token made for each launch. `pip install domino-web[desktop]`.
 - Downloads (the development MongoDB, Tailwind CSS, client components) work with Python from python.org on macOS before its "Install Certificates" script has run: when the system can't verify a site's certificate, Domino tries again with certifi's certificates (a new, small dependency). A download that still fails says why and what to do, instead of showing a traceback.
 - Pages, `/_domino/core`, event results and Server-Sent Event streams are gzipped when the browser accepts it: a counter page and the script load 17 KB instead of 61 KB, and a 1,000-row list page is 3 KB instead of 77 KB. `{"domino": {"compression": false}}` turns it off.
 - `examples/pixels`: a canvas everyone paints together, live in every window, with drag painting.

@@ -12,7 +12,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from . import deploy, devmongo, tailwind
+from . import deploy, desktop, devmongo, tailwind
 
 
 APP_TEMPLATE = '''\
@@ -284,9 +284,14 @@ def build_parser():
 	serve.add_argument("--port", type=int, default=8000, help="port to serve on (default: 8000)")
 	serve.add_argument("--host", default="127.0.0.1", help="interface to serve on (default: 127.0.0.1; 0.0.0.0 for every one)")
 
-	build = commands.add_parser("build", help="write a Dockerfile for an app, to deploy it anywhere")
+	build = commands.add_parser("build", help="write a Dockerfile for an app, to deploy it anywhere; or package it as a desktop app")
 	build.add_argument("app", nargs="?", default=".", help="the app's folder (default: the current folder)")
 	build.add_argument("--force", action="store_true", help="write the files again even if they're there")
+	build.add_argument("--desktop", action="store_true", help="package it as a desktop program with PyInstaller, in dist/")
+
+	window = commands.add_parser("desktop", help="run an app in development in a desktop window, instead of a browser tab")
+	window.add_argument("app", nargs="?", default=".", help="the app's folder or Python file (default: the current folder)")
+	window.add_argument("--port", type=int, help="port to serve on (default: a free one)")
 
 	ship = commands.add_parser("deploy", help="deploy an app to Fly.io or Render, or as a Docker image")
 	ship.add_argument("platform", choices=sorted(deploy.PLATFORMS), help="where to deploy: fly, render or docker")
@@ -331,14 +336,19 @@ def main(argv=None):
 			return serve(args)
 		if args.command == "create":
 			return create(args.name, args.tailwind, args.minimal)
+		if args.command == "build" and args.desktop:
+			desktop.build(args.app)
+			return 0
 		if args.command == "build":
 			deploy.build(args.app, args.force)
 			return 0
+		if args.command == "desktop":
+			return desktop.run(args.app, args.port)
 		if args.command == "deploy":
 			return deploy.deploy(args.platform, args.app, name=args.name, mongo_url=args.mongo_url, force=args.force)
 		if args.command == "tailwind" and args.tailwind_command == "build":
 			return tailwind_build(args)
-	except (CliError, devmongo.DevMongoError, deploy.DeployError, tailwind.TailwindError) as error:
+	except (CliError, devmongo.DevMongoError, deploy.DeployError, desktop.DesktopError, tailwind.TailwindError) as error:
 		print(f"domino: {error}", file=sys.stderr)
 		return 1
 
@@ -416,6 +426,9 @@ def load_app(path):
 
 
 def run(args):
+
+	# Started by `domino desktop`: stop with its window
+	desktop.watch_parent()
 
 	if args.no_mongo:
 		os.environ[devmongo.ENV_DISABLE] = "1"
