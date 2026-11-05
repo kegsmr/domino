@@ -36,6 +36,7 @@ from pathlib import Path
 from flask import Response, abort, request, send_from_directory
 
 from . import devmongo, optimistic
+from .util import urlopen
 
 
 HERE = Path(__file__).parent
@@ -389,7 +390,7 @@ def download_package(runtime, folder):
 
 	devmongo.log(f"Downloading {package}@{version} for client components from {url}")
 	try:
-		with urllib.request.urlopen(url, timeout=120) as response, open(tarball, "wb") as out:
+		with urlopen(url, timeout=120) as response, open(tarball, "wb") as out:
 			shutil.copyfileobj(response, out)
 		return tarball
 	except OSError as error:
